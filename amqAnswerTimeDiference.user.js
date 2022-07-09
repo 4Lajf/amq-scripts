@@ -150,12 +150,12 @@
                                 quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
                             }
                         }
-                    //If the leader is yet to be chosen
+                        //If the leader is yet to be chosen
                     } else {
                         if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
                             quiz.players[gamePlayerId].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time} ms`
                             leader = gamePlayerId;
-                    //Everything else
+                            //Everything else
                         } else {
                             quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
                         }
@@ -175,6 +175,7 @@
             data.answers.forEach((answer) => {
                 const quizPlayer = that.players[answer.gamePlayerId]
                 let answerText = answer.answer
+                //Make sure we are getting the right player
                 for (let i = 0; i < amqAnswerTimesUtility.playerTimes.length; i++) {
                     if (amqAnswerTimesUtility.playerTimes[i].gamePlayerId !== quizPlayer.gamePlayerId) {
                         continue;
@@ -224,6 +225,9 @@
         //If no one got the question right, display all the scores
         //Otherwise show only those who answered correctly
         if (displayPlayers.length > 0) {
+
+            displayPlayers = displayPlayers.sort(compare)
+
             for (let i = 0; i < displayPlayers.length; i++) {
                 if (limiter < 10) {
                     let placeNumber
