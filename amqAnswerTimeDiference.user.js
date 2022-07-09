@@ -8,7 +8,7 @@
 // @grant        none
 // @downloadURL  https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/amqPlayerAnswerTimeDisplay.user.js
 // @updateURL    https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/amqPlayerAnswerTimeDisplay.user.js
-// @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
+// @require     	https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @copyright    MIT license
 // ==/UserScript==
 (() => {
@@ -29,14 +29,6 @@
             return 1;
         }
         return 0;
-    }
-
-    function sendLobbyMessage(message) {
-        socket.sendCommand({
-            type: 'lobby',
-            command: 'game chat message',
-            data: { msg: message, teamMessage: false }
-        });
     }
 
     const amqAnswerTimesUtility = new function () {
@@ -188,9 +180,9 @@
                                 break;
                         }
                         if (limiter === 0) {
-                            sendLobbyMessage(`⚡ ${quizPlayer._name} --> ${amqAnswerTimesUtility.playerTimes[0].time}ms`);
+                            gameChat.sendMessage(`⚡ ${quizPlayer._name} --> ${amqAnswerTimesUtility.playerTimes[0].time}ms`);
                         } else {
-                            sendLobbyMessage(`${placeNumber} ${quizPlayer._name} --> +${amqAnswerTimesUtility.playerTimes[limiter].time - amqAnswerTimesUtility.playerTimes[0].time}ms`);
+                            gameChat.sendMessage(`${placeNumber} ${quizPlayer._name} --> +${amqAnswerTimesUtility.playerTimes[limiter].time - amqAnswerTimesUtility.playerTimes[0].time}ms`);
                         }
                     }
                 }
