@@ -8,7 +8,7 @@
 // @grant        none
 // @downloadURL  https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/amqPlayerAnswerTimeDisplay.user.js
 // @updateURL    https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/amqPlayerAnswerTimeDisplay.user.js
-// @require     	https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
+// @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @copyright    MIT license
 // ==/UserScript==
 (() => {
@@ -32,8 +32,11 @@
     }
 
     function sendLobbyMessage(message) {
-        gameChat.$chatInputField.val(message);
-        gameChat.sendMessage();
+        socket.sendCommand({
+            type: 'lobby',
+            command: 'game chat message',
+            data: { msg: message, teamMessage: false }
+        });
     }
 
     const amqAnswerTimesUtility = new function () {
