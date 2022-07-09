@@ -31,6 +31,11 @@
         return 0;
     }
 
+    function sendLobbyMessage(message) {
+        gameChat.$chatInputField.val(message);
+        gameChat.sendMessage();
+    }
+
     const amqAnswerTimesUtility = new function () {
         "use strict"
         this.songStartTime = 0
@@ -180,9 +185,9 @@
                                 break;
                         }
                         if (limiter === 0) {
-                            gameChat.sendMessage(`⚡ ${quizPlayer._name} --> ${amqAnswerTimesUtility.playerTimes[0].time}ms`);
+                            sendLobbyMessage(`⚡ ${quizPlayer._name} --> ${amqAnswerTimesUtility.playerTimes[0].time}ms`);
                         } else {
-                            gameChat.sendMessage(`${placeNumber} ${quizPlayer._name} --> +${amqAnswerTimesUtility.playerTimes[limiter].time - amqAnswerTimesUtility.playerTimes[0].time}ms`);
+                            sendLobbyMessage(`${placeNumber} ${quizPlayer._name} --> +${amqAnswerTimesUtility.playerTimes[limiter].time - amqAnswerTimesUtility.playerTimes[0].time}ms`);
                         }
                     }
                 }
