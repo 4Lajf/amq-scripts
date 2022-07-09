@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Player Answer Time Diference
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Makes you able to see how quickly people answered and the diference beetween the first player and everyone else, sends the result on chat at the end of a round and sends some stats and the end of the game (soon)
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -130,26 +130,32 @@
     new Listener("player answered", (data) => {
         //Display timer
         data.filter(gamePlayerId => !ignoredPlayerIds.includes(gamePlayerId)).forEach(gamePlayerId => {
-            //poprzedni currentTime staje sie najlepszym bestTime
+            //Make sure the '⚡' symbol will always follow the fasteset player and update other players accordingly
+
+            //Make sure we are editing the right player
             for (let i = 0; i < amqAnswerTimesUtility.playerTimes.length; i++) {
                 if (amqAnswerTimesUtility.playerTimes[i].gamePlayerId !== gamePlayerId) {
                     continue;
                 } else {
+                    //If player is already the leader pass the '⚡' to the second fastest player
                     if (amqAnswerTimesUtility.playerTimes[i].gamePlayerId === leader) {
                         newLeader = amqAnswerTimesUtility.playerTimes[0].gamePlayerId;
                         for (let i = 0; i < amqAnswerTimesUtility.playerTimes.length; i++) {
                             if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
                                 quiz.players[newLeader].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time} ms`
                                 leader = newLeader;
+                                //Update other players accordingly
                             } else {
                                 if (playerID === leader) continue;
                                 quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
                             }
                         }
+                    //If the leader is yet to be chosen
                     } else {
                         if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
                             quiz.players[gamePlayerId].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time} ms`
                             leader = gamePlayerId;
+                    //Everything else
                         } else {
                             quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
                         }
