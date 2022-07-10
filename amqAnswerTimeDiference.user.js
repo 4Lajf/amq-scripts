@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Player Answer Time Diference
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Makes you able to see how quickly people answered and the diference beetween the first player and everyone else, sends the result on chat at the end of a round and sends some stats and the end of the game (soon)
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -34,6 +34,13 @@
         return 0;
     }
 
+    let ignoredPlayerIds = [],
+        fastestLeaderboard = null,
+        leader = null,
+        newLeader,
+        playerID,
+        gameRound;
+
     //Sends a message to lobby chat
     function sendLobbyMessage(message) {
         socket.sendCommand({
@@ -53,8 +60,10 @@
             return
         }
         new Listener("play next song", () => {
+            sendLobbyMessage(`===== ROUND ${gameRound} =====`)
             this.songStartTime = Date.now()
             this.playerTimes = []
+            gameRound++
         }).bindListener()
 
         new Listener("player answered", (data) => {
@@ -107,10 +116,13 @@
         }).bindListener()
     }()
 
-    let ignoredPlayerIds = []
-
     new Listener("Game Starting", ({ players }) => {
-        ignoredPlayerIds = []
+        fastestLeaderboard = [];
+        ignoredPlayerIds = [];
+        leader = null;
+        newLeader = null;
+        playerID = null;
+        gameRound = 1;
         const self = players.find(player => player.name === selfName)
         if (self) {
             const teamNumber = self.teamNumber
@@ -123,9 +135,6 @@
         }
     }).bindListener()
 
-    let leader = null,
-        newLeader,
-        playerID;
     //On player answering the quiz question
     new Listener("player answered", (data) => {
         //Display timer
@@ -204,7 +213,6 @@
             that.videoTimerBar.updateState(data.progressBarState)
         }
     )
-
     //On show answer phase
     function answerResults(results) {
         let limiter = 0,
@@ -265,7 +273,17 @@
                     }
                     if (limiter === 0) {
                         sendLobbyMessage(`⚡ ${displayPlayers[0].name} --> ${displayPlayers[0].time}ms`);
+                        fastestLeaderboard.push({
+                            "name": displayPlayers[0].name,
+                            'time': displayPlayers[0].time,
+                            'round': gameRound
+                        })
                     } else {
+                        fastestLeaderboard.push({
+                            "name": displayPlayers[limiter].name,
+                            'time': displayPlayers[limiter].time,
+                            'round': gameRound
+                        })
                         sendLobbyMessage(`${placeNumber} ${displayPlayers[limiter].name} --> +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
                     }
                 }
@@ -278,9 +296,50 @@
         }
     }
 
+    function quizEndResult(results) {
+        fastestLeaderboard = fastestLeaderboard.sort(compare)
+        for (let i = 0; i < fastestLeaderboard.length; i++) {
+            let placeNumber
+            switch (i) {
+                case 0:
+                    placeNumber = '⚡'
+                    break;
+                case 1:
+                    placeNumber = '2️⃣'
+                    break;
+                case 2:
+                    placeNumber = '3️⃣'
+                    break;
+                case 3:
+                    placeNumber = '4️⃣'
+                    break;
+                case 4:
+                    placeNumber = '5️⃣'
+                    break;
+                case 5:
+                    placeNumber = '6️⃣'
+                    break;
+                case 6:
+                    placeNumber = '7️⃣'
+                    break;
+                case 7:
+                    placeNumber = '8️⃣'
+                    break;
+                case 8:
+                    placeNumber = '9️⃣'
+                    break;
+                case 9:
+                    placeNumber = '🔟'
+                    break;
+            }
+            sendLobbyMessage(`${placeNumber} ${fastestLeaderboard[i].name} --> ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
+        }
+    }
+
     //Initialize listeners and 'Installed Userscripts' menu
     function setup() {
         new Listener("answer results", answerResults).bindListener();
+        new Listener("quiz end result", quizEndResult).bindListener();
         AMQ_addScriptData({
             name: "AMQ Player Answer Time Diference",
             author: "4Lajf (forked from Zolhungaj)",
