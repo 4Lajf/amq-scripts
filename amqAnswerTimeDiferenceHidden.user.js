@@ -77,11 +77,12 @@
 
         new Listener("player answered", (data) => {
             const time = Date.now() - this.songStartTime
+            console.log(time)
             data.forEach(gamePlayerId => {
                 const quizPlayer = that.players[gamePlayerId]
                 this.playerTimes.push({
                     "gamePlayerId": gamePlayerId,
-                    "time": time.toPrecision(3),
+                    "time": time,
                     "date": Date.now(),
                     'name': quizPlayer._name
                 })
