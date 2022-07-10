@@ -300,7 +300,7 @@
         new Listener("answer results", answerResults).bindListener();
         new Listener("quiz end result", quizEndResult).bindListener();
         AMQ_addScriptData({
-            name: "AMQ Player Answer Time Diference",
+            name: "AMQ Player Answer Time Diference (hidden)",
             author: "4Lajf (forked from Zolhungaj)",
             description: `<sends system messages only visible for you> Displays time diference in seconds between the fastest player and the rest, then and the end of the round sends results in chat. Send to chat the final leaderboard once the game ends`
         });
