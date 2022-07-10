@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         AMQ Player Answer Time Diference
 // @namespace    http://tampermonkey.net/
-// @version      1.2
-// @description  Makes you able to see how quickly people answered and the diference beetween the first player and everyone else, sends the result on chat at the end of a round and sends some stats and the end of the game (soon)
+// @version      1.3
+// @description  Makes you able to see how quickly people answered and the diference beetween the first player and everyone else, sends the result on chat at the end of a round and sends some stats and the end of the game
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
 // @grant        none
@@ -34,12 +34,30 @@
         return 0;
     }
 
+    function mergeArray(data) {
+        return [...data].reduce((acc, val, i, arr) => {
+            let { gamePlayerId, time, name } = val;
+            time = parseFloat(time);
+            const ind = acc.findIndex(el => el.name === name);
+            if (ind !== -1) {
+                acc[ind].time += time;
+            } else {
+                acc.push({
+                    time,
+                    name
+                });
+            }
+            return acc;
+        }, []);
+    }
+
     let ignoredPlayerIds = [],
         fastestLeaderboard = null,
         leader = null,
         newLeader,
         playerID,
-        gameRound;
+        gameRound,
+        summedUpLeaderBoard;
 
     //Sends a message to lobby chat
     function sendLobbyMessage(message) {
@@ -67,12 +85,12 @@
         }).bindListener()
 
         new Listener("player answered", (data) => {
-            const time = Date.now() - this.songStartTime
+            const time = (Date.now() - this.songStartTime) / 1000
             data.forEach(gamePlayerId => {
                 const quizPlayer = that.players[gamePlayerId]
                 this.playerTimes.push({
                     "gamePlayerId": gamePlayerId,
-                    "time": time,
+                    "time": time.toPrecision(3),
                     "date": Date.now(),
                     'name': quizPlayer._name
                 })
@@ -151,22 +169,22 @@
                         newLeader = amqAnswerTimesUtility.playerTimes[0].gamePlayerId;
                         for (let i = 0; i < amqAnswerTimesUtility.playerTimes.length; i++) {
                             if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
-                                quiz.players[newLeader].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time} ms`
+                                quiz.players[newLeader].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time}s`
                                 leader = newLeader;
                                 //Update other players accordingly
                             } else {
                                 if (playerID === leader) continue;
-                                quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
+                                quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}s`
                             }
                         }
                         //If the leader is yet to be chosen
                     } else {
                         if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
-                            quiz.players[gamePlayerId].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time} ms`
+                            quiz.players[gamePlayerId].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time}s`
                             leader = gamePlayerId;
                             //Everything else
                         } else {
-                            quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
+                            quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}s`
                         }
                     }
                 }
@@ -191,9 +209,9 @@
                     } else {
                         if (amqAnswerTimesUtility.playerTimes[i] !== undefined) {
                             if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
-                                answerText = `⚡ ${answerText} (${amqAnswerTimesUtility.playerTimes[i].time}ms)`
+                                answerText = `⚡ ${answerText} (${amqAnswerTimesUtility.playerTimes[i].time}s)`
                             } else {
-                                answerText += ` (+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms)`
+                                answerText += ` (+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}s)`
                             }
                         }
                     }
@@ -238,101 +256,51 @@
 
             for (let i = 0; i < displayPlayers.length; i++) {
                 if (limiter < 10) {
-                    let placeNumber
-                    switch (limiter) {
-                        case 0:
-                            placeNumber = '⚡'
-                            break;
-                        case 1:
-                            placeNumber = '2️⃣'
-                            break;
-                        case 2:
-                            placeNumber = '3️⃣'
-                            break;
-                        case 3:
-                            placeNumber = '4️⃣'
-                            break;
-                        case 4:
-                            placeNumber = '5️⃣'
-                            break;
-                        case 5:
-                            placeNumber = '6️⃣'
-                            break;
-                        case 6:
-                            placeNumber = '7️⃣'
-                            break;
-                        case 7:
-                            placeNumber = '8️⃣'
-                            break;
-                        case 8:
-                            placeNumber = '9️⃣'
-                            break;
-                        case 9:
-                            placeNumber = '🔟'
-                            break;
-                    }
+                    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+
                     if (limiter === 0) {
-                        sendLobbyMessage(`⚡ ${displayPlayers[0].name} --> ${displayPlayers[0].time}ms`);
                         fastestLeaderboard.push({
                             "name": displayPlayers[0].name,
                             'time': displayPlayers[0].time,
-                            'round': gameRound
+                            'round': gameRound - 1
                         })
+                        summedUpLeaderBoard = mergeArray(fastestLeaderboard)
+                        console.log(summedUpLeaderBoard)
+                        sendLobbyMessage(`⚡ ${displayPlayers[0].name} 🡆 ${displayPlayers[0].time}s`);
                     } else {
                         fastestLeaderboard.push({
                             "name": displayPlayers[limiter].name,
                             'time': displayPlayers[limiter].time,
-                            'round': gameRound
+                            'round': gameRound - 1
                         })
-                        sendLobbyMessage(`${placeNumber} ${displayPlayers[limiter].name} --> +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
+                        summedUpLeaderBoard = mergeArray(fastestLeaderboard)
+                        console.log(summedUpLeaderBoard)
+                        sendLobbyMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} 🡆 +${displayPlayers[limiter].time - displayPlayers[0].time}s`);
                     }
                 }
                 limiter++
             }
         } else if (amqAnswerTimesUtility.playerTimes.length === 0) {
-            sendLobbyMessage(`No answers, no scores.`);
+            sendLobbyMessage(`Not even trying? I see...`);
         } else {
-            sendLobbyMessage(`No one got it right!`);
+            sendLobbyMessage(`You are all terrible at this...`);
         }
     }
 
     function quizEndResult(results) {
         fastestLeaderboard = fastestLeaderboard.sort(compare)
-        for (let i = 0; i < fastestLeaderboard.length; i++) {
-            let placeNumber
-            switch (i) {
-                case 0:
-                    placeNumber = '⚡'
-                    break;
-                case 1:
-                    placeNumber = '2️⃣'
-                    break;
-                case 2:
-                    placeNumber = '3️⃣'
-                    break;
-                case 3:
-                    placeNumber = '4️⃣'
-                    break;
-                case 4:
-                    placeNumber = '5️⃣'
-                    break;
-                case 5:
-                    placeNumber = '6️⃣'
-                    break;
-                case 6:
-                    placeNumber = '7️⃣'
-                    break;
-                case 7:
-                    placeNumber = '8️⃣'
-                    break;
-                case 8:
-                    placeNumber = '9️⃣'
-                    break;
-                case 9:
-                    placeNumber = '🔟'
-                    break;
-            }
-            sendLobbyMessage(`${placeNumber} ${fastestLeaderboard[i].name} --> ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
+        sendLobbyMessage(`===== FINAL RESULTS =====`)
+        //If you want the "per player" behaviour uncomment 4 following lines and comment the other
+        /*         for (let i = 0; i < fastestLeaderboard.length; i++) {
+                    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+                    sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}s (R${fastestLeaderboard[i].round})`);
+                } */
+
+        //Display leaderboard, player's scores are summed up
+        summedUpLeaderBoard = mergeArray(fastestLeaderboard)
+        for (let i = 0; i < summedUpLeaderBoard.length; i++) {
+            let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+            sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}s`);
         }
     }
 
@@ -343,7 +311,7 @@
         AMQ_addScriptData({
             name: "AMQ Player Answer Time Diference",
             author: "4Lajf (forked from Zolhungaj)",
-            description: `Displays time diference in ms between the fastest player and the rest, then and the end of the round sends results in chat.`
+            description: `Displays time diference in seconds between the fastest player and the rest, then and the end of the round sends results in chat. Send to chat the final leaderboard once the game ends`
         });
     }
 
