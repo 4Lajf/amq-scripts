@@ -86,6 +86,7 @@
 
         new Listener("player answered", (data) => {
             const time = Date.now() - this.songStartTime
+            console.log(time)
             data.forEach(gamePlayerId => {
                 const quizPlayer = that.players[gamePlayerId]
                 this.playerTimes.push({
