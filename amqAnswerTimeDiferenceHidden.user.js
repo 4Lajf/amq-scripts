@@ -281,14 +281,14 @@
 
     function quizEndResult(results) {
         fastestLeaderboard = fastestLeaderboard.sort(compare)
-        gameChat.systemMessage(`===== FINAL RESULTS =====`)
-        //If you want the "per player" behaviour uncomment 4 following lines and comment the other
-        /*         for (let i = 0; i < fastestLeaderboard.length; i++) {
-                    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-                    gameChat.systemMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
-                } */
+        gameChat.systemMessage(`===== FASTEST ANSWERS =====`)
+        for (let i = 0; i <= 10; i++) {
+            let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+            gameChat.systemMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
+        }
 
         //Display leaderboard, player's scores are summed up
+        gameChat.systemMessage(`===== SUMMED UP TIMES =====`)
         summedUpLeaderBoard = mergeArray(fastestLeaderboard)
         for (let i = 0; i < summedUpLeaderBoard.length; i++) {
             let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
