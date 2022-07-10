@@ -37,16 +37,8 @@
     let ignoredPlayerIds = [],
         leader = null,
         newLeader,
-        playerID;
-
-    //Sends a message to lobby chat
-    function sendLobbyMessage(message) {
-        socket.sendCommand({
-            type: 'lobby',
-            command: 'game chat message',
-            data: { msg: message, teamMessage: false }
-        });
-    }
+        playerID,
+        gameRound;
 
     //Measure answer speed
     const amqAnswerTimesUtility = new function () {
@@ -60,15 +52,17 @@
         new Listener("play next song", () => {
             this.songStartTime = Date.now()
             this.playerTimes = []
+            gameRound++
         }).bindListener()
 
         new Listener("player answered", (data) => {
             const time = Date.now() - this.songStartTime
+            console.log(time)
             data.forEach(gamePlayerId => {
                 const quizPlayer = that.players[gamePlayerId]
                 this.playerTimes.push({
                     "gamePlayerId": gamePlayerId,
-                    "time": time.toPrecision(3),
+                    "time": time,
                     "date": Date.now(),
                     'name': quizPlayer._name
                 })
@@ -209,6 +203,7 @@
             that.videoTimerBar.updateState(data.progressBarState)
         }
     )
+
     //Initialize listeners and 'Installed Userscripts' menu
     function setup() {
         AMQ_addScriptData({
