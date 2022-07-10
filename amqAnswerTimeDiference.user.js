@@ -85,12 +85,12 @@
         }).bindListener()
 
         new Listener("player answered", (data) => {
-            const time = (Date.now() - this.songStartTime) / 1000
+            const time = Date.now() - this.songStartTime
             data.forEach(gamePlayerId => {
                 const quizPlayer = that.players[gamePlayerId]
                 this.playerTimes.push({
                     "gamePlayerId": gamePlayerId,
-                    "time": time.toPrecision(3),
+                    "time": time,
                     "date": Date.now(),
                     'name': quizPlayer._name
                 })
@@ -169,22 +169,22 @@
                         newLeader = amqAnswerTimesUtility.playerTimes[0].gamePlayerId;
                         for (let i = 0; i < amqAnswerTimesUtility.playerTimes.length; i++) {
                             if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
-                                quiz.players[newLeader].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time}s`
+                                quiz.players[newLeader].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time}ms`
                                 leader = newLeader;
                                 //Update other players accordingly
                             } else {
                                 if (playerID === leader) continue;
-                                quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}s`
+                                quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
                             }
                         }
                         //If the leader is yet to be chosen
                     } else {
                         if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
-                            quiz.players[gamePlayerId].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time}s`
+                            quiz.players[gamePlayerId].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time}ms`
                             leader = gamePlayerId;
                             //Everything else
                         } else {
-                            quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}s`
+                            quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
                         }
                     }
                 }
@@ -209,9 +209,9 @@
                     } else {
                         if (amqAnswerTimesUtility.playerTimes[i] !== undefined) {
                             if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
-                                answerText = `⚡ ${answerText} (${amqAnswerTimesUtility.playerTimes[i].time}s)`
+                                answerText = `⚡ ${answerText} (${amqAnswerTimesUtility.playerTimes[i].time}ms)`
                             } else {
-                                answerText += ` (+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}s)`
+                                answerText += ` (+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms)`
                             }
                         }
                     }
@@ -266,7 +266,7 @@
                         })
                         summedUpLeaderBoard = mergeArray(fastestLeaderboard)
                         console.log(summedUpLeaderBoard)
-                        sendLobbyMessage(`⚡ ${displayPlayers[0].name} 🡆 ${displayPlayers[0].time}s`);
+                        sendLobbyMessage(`⚡ ${displayPlayers[0].name} 🡆 ${displayPlayers[0].time}ms`);
                     } else {
                         fastestLeaderboard.push({
                             "name": displayPlayers[limiter].name,
@@ -275,7 +275,7 @@
                         })
                         summedUpLeaderBoard = mergeArray(fastestLeaderboard)
                         console.log(summedUpLeaderBoard)
-                        sendLobbyMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} 🡆 +${displayPlayers[limiter].time - displayPlayers[0].time}s`);
+                        sendLobbyMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} 🡆 +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
                     }
                 }
                 limiter++
@@ -293,14 +293,14 @@
         //If you want the "per player" behaviour uncomment 4 following lines and comment the other
         /*         for (let i = 0; i < fastestLeaderboard.length; i++) {
                     let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-                    sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}s (R${fastestLeaderboard[i].round})`);
+                    sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
                 } */
 
         //Display leaderboard, player's scores are summed up
         summedUpLeaderBoard = mergeArray(fastestLeaderboard)
         for (let i = 0; i < summedUpLeaderBoard.length; i++) {
             let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-            sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}s`);
+            sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
         }
     }
 
