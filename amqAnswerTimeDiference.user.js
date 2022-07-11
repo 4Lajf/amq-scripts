@@ -36,7 +36,7 @@
 
     function mergeArray(data) {
         return [...data].reduce((acc, val, i, arr) => {
-            let { gamePlayerId, time, name } = val;
+            let { time, name } = val;
             time = parseFloat(time);
             const ind = acc.findIndex(el => el.name === name);
             if (ind !== -1) {
@@ -53,6 +53,7 @@
 
     let ignoredPlayerIds = [],
         fastestLeaderboard = null,
+        fastestLeaderboardToSum,
         leader = null,
         newLeader,
         playerID,
@@ -286,21 +287,28 @@
     }
 
     function quizEndResult(results) {
+        let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
         fastestLeaderboard = fastestLeaderboard.sort(compare)
+        fastestLeaderboardToSum = fastestLeaderboard
         sendLobbyMessage(`===== FASTEST ANSWERS =====`)
-        for (let i = 0; i <= 10; i++) {
-            let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+        let limiter = 0;
+        for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
+            if (limiter > 9) break;
             sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
+            limiter++
         }
 
         //Display leaderboard, player's scores are summed up
+        summedUpLeaderBoard = mergeArray(fastestLeaderboardToSum)
         sendLobbyMessage(`===== SUMMED UP TIMES =====`)
-        summedUpLeaderBoard = mergeArray(fastestLeaderboard)
-        for (let i = 0; i < summedUpLeaderBoard.length; i++) {
-            let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+        limiter = 0;
+        for (let i = 0; i <= summedUpLeaderBoard.length - 1; i++) {
+            if (limiter > 9) break;
+            console.log(summedUpLeaderBoard)
+            console.log(summedUpLeaderBoard[i])
             sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
+            limiter++
         }
-
     }
 
     //Initialize listeners and 'Installed Userscripts' menu
