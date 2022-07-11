@@ -317,33 +317,7 @@
 
         new Listener("Join Game", (data) => {
             if ($("#smTimeDiference").prop("checked")) {
-                console.log(data)
-                const quizState = data.quizState;
-                if (quizState) {
-                    this.songStartTime = Date.now() - quizState.songTimer * 1000
-                }
-                fastestLeaderboard = [];
-                ignoredPlayerIds = [];
-                leader = null;
-                newLeader = null;
-                playerID = null;
-                gameRound = quizState.songNumber + 1;
-                const self = quizState.players.find(player => player.name === selfName)
-                if (self) {
-                    const teamNumber = self.teamNumber
-                    if (teamNumber) {
-                        const teamMates = quizState.players.filter(player => player.teamNumber === teamNumber)
-                        if (teamMates.length > 1) {
-                            ignoredPlayerIds = teamMates.map(player => player.gamePlayerId)
-                        }
-                    }
-                }
-            }
-        }).bindListener()
-
-        new Listener("Join Game", (data) => {
-            if ($("#smTimeDiference").prop("checked")) {
-                console.log(data)
+                console.log('joinGame',data)
                 const quizState = data.quizState;
                 if (quizState) {
                     this.songStartTime = Date.now() - quizState.songTimer * 1000
@@ -369,7 +343,7 @@
 
         new Listener("New Spectator", (data) => {
             if ($("#smTimeDiference").prop("checked")) {
-                console.log(data)
+                console.log('specJoin',data)
                 const quizState = data.quizState;
                 if (quizState) {
                     this.songStartTime = Date.now() - quizState.songTimer * 1000
