@@ -7,8 +7,6 @@
 // @match        https://animemusicquiz.com/*
 // @grant        none
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
-// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBuzzer.js
-// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBuzzer.js
 // @copyright    MIT license
 // ==/UserScript==
 
@@ -29,9 +27,40 @@ let songStartTime = 0,
     muteClick,
     buzzerInitialized = false,
     ignoredPlayerIds = [],
-    disqualified = false;
+    disqualified = false,
+    fastestLeaderboard = [],
+    buzzerInitialization = false,
+    globalFastestLeaderboard = [],
+    buzzerFired = false;
 
 if (document.getElementById('startPage')) return;
+
+const amqAnswerTimesUtility = new function () {
+    "use strict"
+    this.songStartTime = 0
+    this.playerTimes = []
+    if (typeof (Listener) === "undefined") {
+        return
+    }
+    new Listener("play next song", () => {
+        this.songStartTime = Date.now()
+        this.playerTimes = []
+    }).bindListener()
+
+    new Listener("player answered", (data) => {
+        const time = Date.now() - this.songStartTime
+        data.forEach(gamePlayerId => {
+            this.playerTimes[gamePlayerId] = time
+        })
+    }).bindListener()
+
+    new Listener("Join Game", (data) => {
+        const quizState = data.quizState;
+        if (quizState) {
+            this.songStartTime = Date.now() - quizState.songTimer * 1000
+        }
+    }).bindListener()
+}()
 
 function sendLobbyMessage(message) {
     socket.sendCommand({
@@ -41,49 +70,71 @@ function sendLobbyMessage(message) {
     });
 }
 
-function setupMuteBuzzer() {
-    muteClick = document.getElementById("qpVolumeIcon");
+function compare(a, b) {
+    if (a.time < b.time) {
+        return -1;
+    }
+    if (a.time > b.time) {
+        return 1;
+    }
+    return 0;
+}
 
-    muteClick.observer = new MutationObserver((change) => {
-        if (songMuteTime !== "Unmuted") {
-            songMuteTime === 0 ? songMuteTime = Date.now() : songMuteTime = "Unmuted";
+function mergeArray(data) {
+    return [...data].reduce((acc, val, i, arr) => {
+        let { time, name } = val;
+        time = parseFloat(time);
+        const ind = acc.findIndex(el => el.name === name);
+        if (ind !== -1) {
+            acc[ind].time += time;
+        } else {
+            acc.push({
+                time,
+                name
+            });
         }
+        return acc;
+    }, []);
+}
+
+function buzzer(event) {
+    muteClick = document.getElementById("qpVolumeIcon");
+    if (event.key === 'Control') {
+        if (muteClick.className !== "fa fa-volume-off") { muteClick.click() };
+    }
+}
+
+function setupMuteBuzzer() {
+    buzzerInitialization = true;
+    document.addEventListener("keydown", buzzer);
+    muteClick = document.getElementById("qpVolumeIcon");
+    muteClick.observer = new MutationObserver((change) => {
+        if (songMuteTime !== -1 && muteClick.className === "fa fa-volume-off") {
+            songMuteTime = Date.now()
+        } else {
+            songMuteTime = -1;
+        }
+        buzzerFired = true;
     })
 
     if (muteClick.className === "fa fa-volume-off") { muteClick.click() };
-
     muteClick.observer.observe(muteClick, { attributes: true })
     songMuteTime = 0;
     buzzerInitialized = true;
-
-    /*     muteClick.observer = new MutationObserver((change, data) => {
-            if (songMuteTime !== "Unmuted") {
-                songMuteTime === 0 ? songMuteTime = Date.now() : songMuteTime = "Unmuted";
-            }
-            if (quiz.isSpectator) { return }
-            // post time in chat
-            let songNumber = parseInt($("#qpCurrentSongCount").text()),
-                message = "### Song " + songNumber + ": ",
-                messageAnswer = '';
-
-            if (songMuteTime == "Unmuted") {
-                message += "Player unmuted - disqualified"
-                messageAnswer = 'Disqualified'
-                disqualified = true;
-            } // set unmuted message
-            else {
-                songMuteTime ? message += "Buzzer clicked at: " + (songMuteTime - songStartTime) + "ms" : message += "No Buzzer";
-                songMuteTime ? messageAnswer = (songMuteTime - songStartTime) + "ms" : messageAnswer += "No Buzzer";
-            }
-            sendLobbyMessage(message)
-        }) */
 }
+
 
 // reset volume button between games
 function shutdownBtn() {
-    if (muteClick) { muteClick.observer.disconnect() };
+    if (buzzerInitialization === true) {
+        document.removeEventListener("keydown", buzzer);
+    }
+    if (muteClick) {
+        muteClick.observer.disconnect()
+    };
     muteClick = null;
     buzzerInitialized = false;
+    buzzerFired = false;
     songMuteTime = 0;
 }
 
@@ -92,18 +143,6 @@ new Listener("Game Starting", ({ players }) => {
     if (quiz.isSpectator) { return }
     shutdownBtn();
     setupMuteBuzzer();
-    ignoredPlayerIds = []
-    const self = players.find(player => player.name === selfName)
-    if (self) {
-        const teamNumber = self.teamNumber
-        if (teamNumber) {
-            const teamMates = players.filter(player => player.teamNumber === teamNumber)
-            if (teamMates.length > 1) {
-                ignoredPlayerIds = teamMates.map(player => player.gamePlayerId)
-            }
-        }
-    }
-
 }).bindListener()
 
 new Listener("rejoin game", (data) => {
@@ -113,46 +152,19 @@ new Listener("rejoin game", (data) => {
     if (data) { songStartTime = Date.now(); }
 }).bindListener()
 
-
 // unmute and stop looking at mute button
 new Listener("guess phase over", () => {
     if (quiz.isSpectator) { return }
     muteClick.observer.disconnect();
     if (muteClick.className === "fa fa-volume-off") { muteClick.click() };
+    document.removeEventListener("keydown", buzzer);
 }).bindListener()
 
-
-// post to chat
-new Listener("answer results", (results) => {
-    if (quiz.isSpectator) { return }
-    // post time in chat
-    let songNumber = parseInt($("#qpCurrentSongCount").text());
-    let message = "### Song " + songNumber + ": ";
-
-    if (songMuteTime == "Unmuted") { message += "Player unmuted - disqualified" } // set unmuted message
-    else {
-        songMuteTime ? message += "Buzzer clicked at: " + (songMuteTime - songStartTime) + "ms" : message += "No Buzzer";
-
-        for (let player of results.players) {
-            if ((quiz.players[player.gamePlayerId]._name === selfName) && (songMuteTime)) {
-                (player.correct) ? message += " and answered correctly." : message = '';
-            }
-        }
-    }
-
-    // post message to chat
-    if (quiz.gameMode !== "Ranked") {
-        let oldMessage = gameChat.$chatInputField.val();
-        gameChat.$chatInputField.val(message);
-        gameChat.sendMessage();
-        gameChat.$chatInputField.val(oldMessage);
-    }
-
-    // reset for next round
-    songMuteTime = 0;
-}).bindListener()
-
-new Listener("play next song", () => {
+new Listener("play next song", (data) => {
+    buzzerFired = false;
+    fastestLeaderboard = [];
+    displayPlayers = [];
+    document.addEventListener("keydown", buzzer);
     if (quiz.isSpectator) { return }
     if (!buzzerInitialized) { setupMuteBuzzer(); } // just in case
     if (muteClick.className === "fa fa-volume-off") { muteClick.click() }; // check if muted
@@ -162,11 +174,133 @@ new Listener("play next song", () => {
     songStartTime = Date.now();
     songMuteTime = 0;
 
-    if (disqualified === true) {
-        sendLobbyMessage()
+}).bindListener()
+
+quiz._playerAnswerListner = new Listener(
+    "player answers",
+    function (data) {
+        let time = songMuteTime - songStartTime
+        if (!quiz.isSpectator) {
+            if (buzzerFired === false) {
+                sendLobbyMessage(`[time] none`)
+            } else if (time > 3000) {
+                time = 3000;
+                sendLobbyMessage(`[time] ${(time).toString()}`)
+            } else {
+                sendLobbyMessage(`[time] ${(time).toString()}`)
+            }
+            quiz.answerInput.showSubmitedAnswer()
+            quiz.answerInput.resetAnswerState()
+        }
+        quiz.videoTimerBar.updateState(data.progressBarState)
+    }
+)
+
+//post to chat
+new Listener("answer results", (results) => {
+    if (quiz.isSpectator) { return }
+
+    console.log(buzzerFired)
+
+    let limiter = 0,
+        correctIds = [],
+        incorrectIds = [],
+        displayCorrectPlayers = [],
+        displayInCorrectPlayers = [];
+    //Get those who answered correctly
+    const correctPlayers = results.players
+        .filter(player => player.correct)
+    for (let i = 0; i < correctPlayers.length; i++) {
+        correctIds.push(correctPlayers[i].gamePlayerId)
     }
 
+    //add thier times into 'displayCorrectPlayers' array
+    for (let i = 0; i <= correctIds.length - 1; i++) {
+        if (fastestLeaderboard.find(item => item.gamePlayerId === correctIds[i]) === -1) {
+            displayInCorrectPlayers.push(fastestLeaderboard.find(item => item.gamePlayerId === incorrectIds[i]))
+            continue;
+        }
+        displayCorrectPlayers.push(fastestLeaderboard.find(item => item.gamePlayerId === correctIds[i]))
+    }
+
+
+    //Get those who answered incorrectly
+    const incorrectPlayers = results.players
+        .filter(player => !player.correct)
+    for (let i = 0; i < incorrectPlayers.length; i++) {
+        incorrectIds.push(incorrectPlayers[i].gamePlayerId)
+    }
+
+    //add thier times into 'displayInCorrectPlayers' array
+    for (let i = 0; i <= incorrectIds.length - 1; i++) {
+        if (fastestLeaderboard.find(item => item.gamePlayerId === incorrectIds[i]) === -1) {
+            continue;
+        }
+        displayInCorrectPlayers.push(fastestLeaderboard.find(item => item.gamePlayerId === incorrectIds[i]))
+    }
+
+    //If no one got the question right, display all the scores
+    //Otherwise show only those who answered correctly
+    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+    displayCorrectPlayers = displayCorrectPlayers.sort(compare)
+    for (let i = 0; i < displayCorrectPlayers.length; i++) {
+        if (limiter < 10) {
+            if (i === 0) {
+                sendLobbyMessage(`⚡${displayCorrectPlayers[0].name} 🡆 ${displayCorrectPlayers[0].time}ms`);
+                globalFastestLeaderboard.push({
+                    'name': displayCorrectPlayers[0].name,
+                    'time': parseInt(displayCorrectPlayers[0].time),
+                })
+                limiter++
+            } else {
+                sendLobbyMessage(`${placeNumber[i]} ${displayCorrectPlayers[i].name} 🡆 +${displayCorrectPlayers[i].time - displayCorrectPlayers[0].time}ms`);
+                globalFastestLeaderboard.push({
+                    'name': displayCorrectPlayers[i].name,
+                    'time': parseInt(displayCorrectPlayers[i].time),
+                })
+                limiter++
+            }
+        } else {
+            globalFastestLeaderboard.push({
+                'name': displayCorrectPlayers[i].name,
+                'time': parseInt(displayCorrectPlayers[i].time),
+            })
+        }
+    }
+    console.log(globalFastestLeaderboard)
+    displayInCorrectPlayers = displayInCorrectPlayers.sort(compare)
+    for (let i = 0; i < displayInCorrectPlayers.length; i++) {
+        if (limiter < 10) {
+            displayInCorrectPlayers[i].time = 3000;
+            sendLobbyMessage(`❌${displayInCorrectPlayers[i].name} 🡆 Penalty +3000ms`);
+            globalFastestLeaderboard.push({
+                'name': displayInCorrectPlayers[i].name,
+                'time': 3000,
+            })
+            limiter++
+        } else {
+            displayInCorrectPlayers[i].time = 3000;
+            globalFastestLeaderboard.push({
+                'name': displayInCorrectPlayers[i].name,
+                'time': 3000,
+            })
+        }
+        limiter++
+    }
+    console.log(globalFastestLeaderboard)
 }).bindListener()
+
+function quizEndResult(results) {
+    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+
+    //Display leaderboard, player's scores are summed up
+    globalFastestLeaderboard = mergeArray(globalFastestLeaderboard)
+    sendLobbyMessage(`===== SUMMED UP TIMES =====`)
+    for (let i = 0; i <= globalFastestLeaderboard.length - 1; i++) {
+        if (i > 10) break;
+        sendLobbyMessage(`${placeNumber[i]} ${globalFastestLeaderboard[i].name} 🡆 ${globalFastestLeaderboard[i].time}ms`);
+    }
+}
 
 // check exits
 new Listener("return lobby vote result", (result) => {
@@ -174,6 +308,7 @@ new Listener("return lobby vote result", (result) => {
     if (result.passed) {
         shutdownBtn();
     }
+
 }).bindListener()
 new Listener("quiz over", () => {
     shutdownBtn();
@@ -187,6 +322,34 @@ new Listener("Spectate Game", () => {
 new Listener("Host Game", () => {
     shutdownBtn();
 }).bindListener()
+new Listener("Game Chat Message", processChatCommand).bindListener();
+new Listener("game chat update", (payload) => {
+    payload.messages.forEach(message => processChatCommand(message));
+}).bindListener();
+new Listener("quiz end result", quizEndResult).bindListener();
+
+function processChatCommand(payload) {
+    let time,
+        gamePlayerId;
+    if (payload.message.startsWith('[time]')) {
+        for (let i = 0; i < 40; i++) {
+            if (payload.sender === quiz.players[i]._name) {
+                gamePlayerId = quiz.players[i].gamePlayerId;
+                break;
+            }
+        }
+        if (songMuteTime < 0 || payload.content === 'none') {
+            time = -1
+        } else {
+            time = payload.message.substring(6, payload.message.length)
+        }
+        fastestLeaderboard.push({
+            'gamePlayerId': gamePlayerId,
+            'name': payload.sender,
+            'time': time,
+        })
+    }
+}
 
 AMQ_addScriptData({
     name: "AMQ Mute Button Buzzer",
