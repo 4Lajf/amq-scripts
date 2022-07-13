@@ -1,6 +1,5 @@
-
 // ==UserScript==
-// @name         AMQ Mute Button Buzzer Client
+// @name         AMQ Mute Button Buzzer
 // @namespace    http://tampermonkey.net/
 // @version      1.11
 // @description  Posts the time when the player mutes their audio per round, acting as a buzzer
@@ -120,6 +119,7 @@ function mergeArray(data) {
 
 function buzzer(event) {
     muteClick = document.getElementById("qpVolumeIcon");
+    console.log(event.key)
     if (event.key === 'Control') {
         if (muteClick.className !== "fa fa-volume-off") { muteClick.click() };
     }
@@ -200,6 +200,15 @@ new Listener("play next song", (data) => {
 quiz._playerAnswerListner = new Listener(
     "player answers",
     function (data) {
+
+        data.answers.forEach((answer) => {
+            const quizPlayer = quiz.players[answer.gamePlayerId]
+            let answerText = answer.answer
+            quizPlayer.answer = answerText
+            quizPlayer.unknownAnswerNumber = answer.answerNumber
+            quizPlayer.toggleTeamAnswerSharing(false)
+        })
+
         let time = songMuteTime - songStartTime
         if (!quiz.isSpectator) {
             if (buzzerFired === false || time < 0) {
@@ -339,10 +348,8 @@ function quizEndResult(results) {
 
     //Display leaderboard, player's scores are summed up
     globalFastestLeaderboard = mergeArray(globalFastestLeaderboard)
-
     for (let i = 0; i <= globalFastestLeaderboard.length - 1; i++) {
         if (i > 10) break;
-
     }
 }
 
@@ -378,6 +385,7 @@ function processChatCommand(payload) {
         message;
     if (payload.message.startsWith('[time]')) {
         message = payload.message.substring(7, payload.message.length)
+        console.log(message)
         for (let i = 0; i < 40; i++) {
             if (payload.sender === quiz.players[i]._name) {
                 gamePlayerId = quiz.players[i].gamePlayerId;
@@ -387,7 +395,7 @@ function processChatCommand(payload) {
         if (songMuteTime < 0 || message === 'none') {
             time = -1
         } else {
-            time = payload.message.substring(6, payload.message.length)
+            time = message
         }
         fastestLeaderboard.push({
             'gamePlayerId': gamePlayerId,
@@ -463,7 +471,7 @@ quizReadyRigTracker = new Listener("quiz ready", (data) => {
     initialiseScoreboard();
     initialisePlayerData();
 
-
+    document.addEventListener("keydown", buzzer);
 });
 
 // Reset data when joining a lobby
