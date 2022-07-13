@@ -32,8 +32,28 @@ let songStartTime = 0,
     buzzerInitialization = false,
     globalFastestLeaderboard = [],
     buzzerFired = false;
+let scoreboardReady = false;
+let playerDataReady = false;
+let returningToLobby = false;
+let missedFromOwnList = 0;
+let playerData = {};
+
+// listeners
+let quizReadyRigTracker;
+let answerResultsRigTracker;
+let joinLobbyListener;
+let spectateLobbyListener;
+
 
 if (document.getElementById('startPage')) return;
+
+// Wait until the LOADING... screen is hidden and load script
+let loadInterval = setInterval(() => {
+    if (document.getElementById("loadingScreen").classList.contains("hidden")) {
+        setup();
+        clearInterval(loadInterval);
+    }
+}, 500);
 
 const amqAnswerTimesUtility = new function () {
     "use strict"
@@ -181,7 +201,7 @@ quiz._playerAnswerListner = new Listener(
     function (data) {
         let time = songMuteTime - songStartTime
         if (!quiz.isSpectator) {
-            if (buzzerFired === false) {
+            if (buzzerFired === false || time < 0) {
                 sendLobbyMessage(`[time] none`)
             } else if (time > 3000) {
                 time = 3000;
@@ -197,18 +217,27 @@ quiz._playerAnswerListner = new Listener(
 )
 
 //post to chat
-new Listener("answer results", (results) => {
+new Listener("answer results", (result) => {
     if (quiz.isSpectator) { return }
-
-    console.log(buzzerFired)
 
     let limiter = 0,
         correctIds = [],
         incorrectIds = [],
         displayCorrectPlayers = [],
         displayInCorrectPlayers = [];
+
+    if (!playerDataReady) {
+        initialisePlayerData();
+    }
+    if (!scoreboardReady) {
+        initialiseScoreboard();
+        if (playerDataReady) {
+            writeRigToScoreboard();
+        }
+    }
+
     //Get those who answered correctly
-    const correctPlayers = results.players
+    const correctPlayers = result.players
         .filter(player => player.correct)
     for (let i = 0; i < correctPlayers.length; i++) {
         correctIds.push(correctPlayers[i].gamePlayerId)
@@ -225,7 +254,7 @@ new Listener("answer results", (results) => {
 
 
     //Get those who answered incorrectly
-    const incorrectPlayers = results.players
+    const incorrectPlayers = result.players
         .filter(player => !player.correct)
     for (let i = 0; i < incorrectPlayers.length; i++) {
         incorrectIds.push(incorrectPlayers[i].gamePlayerId)
@@ -241,7 +270,8 @@ new Listener("answer results", (results) => {
 
     //If no one got the question right, display all the scores
     //Otherwise show only those who answered correctly
-    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'],
+        timeScore;
     displayCorrectPlayers = displayCorrectPlayers.sort(compare)
     for (let i = 0; i < displayCorrectPlayers.length; i++) {
         if (limiter < 10) {
@@ -251,6 +281,10 @@ new Listener("answer results", (results) => {
                     'name': displayCorrectPlayers[0].name,
                     'time': parseInt(displayCorrectPlayers[0].time),
                 })
+                timeScore = parseInt(playerData[displayCorrectPlayers[0].gamePlayerId].rig) + parseInt(displayCorrectPlayers[0].time)
+                playerData[displayCorrectPlayers[0].gamePlayerId].rig = timeScore;
+/*                 playerData[displayCorrectPlayers[0].gamePlayerId].rig++ */
+                writeRigToScoreboard();
                 limiter++
             } else {
                 sendLobbyMessage(`${placeNumber[i]} ${displayCorrectPlayers[i].name} 🡆 +${displayCorrectPlayers[i].time - displayCorrectPlayers[0].time}ms`);
@@ -258,6 +292,10 @@ new Listener("answer results", (results) => {
                     'name': displayCorrectPlayers[i].name,
                     'time': parseInt(displayCorrectPlayers[i].time),
                 })
+                timeScore = parseInt(playerData[displayCorrectPlayers[i].gamePlayerId].rig) + parseInt(displayCorrectPlayers[i].time);
+                playerData[displayCorrectPlayers[i].gamePlayerId].rig = timeScore
+/*                 playerData[displayCorrectPlayers[i].gamePlayerId].rig++ */
+                writeRigToScoreboard();
                 limiter++
             }
         } else {
@@ -265,9 +303,12 @@ new Listener("answer results", (results) => {
                 'name': displayCorrectPlayers[i].name,
                 'time': parseInt(displayCorrectPlayers[i].time),
             })
+            timeScore = parseInt(playerData[displayCorrectPlayers[i].gamePlayerId].rig) + parseInt(displayCorrectPlayers[i].time);
+            playerData[displayCorrectPlayers[i].gamePlayerId].rig = timeScore
+/*             playerData[displayCorrectPlayers[i].gamePlayerId].rig++ */
+            writeRigToScoreboard();
         }
     }
-    console.log(globalFastestLeaderboard)
     displayInCorrectPlayers = displayInCorrectPlayers.sort(compare)
     for (let i = 0; i < displayInCorrectPlayers.length; i++) {
         if (limiter < 10) {
@@ -277,6 +318,9 @@ new Listener("answer results", (results) => {
                 'name': displayInCorrectPlayers[i].name,
                 'time': 3000,
             })
+            timeScore = parseInt(playerData[displayInCorrectPlayers[i].gamePlayerId].rig) + parseInt(displayInCorrectPlayers[i].time);
+            playerData[displayInCorrectPlayers[i].gamePlayerId].rig = timeScore
+            writeRigToScoreboard();
             limiter++
         } else {
             displayInCorrectPlayers[i].time = 3000;
@@ -284,10 +328,12 @@ new Listener("answer results", (results) => {
                 'name': displayInCorrectPlayers[i].name,
                 'time': 3000,
             })
+            timeScore = parseInt(playerData[displayInCorrectPlayers[i].gamePlayerId].rig) + parseInt(displayInCorrectPlayers[i].time);
+            playerData[displayInCorrectPlayers[i].gamePlayerId].rig = timeScore
+            writeRigToScoreboard();
         }
         limiter++
     }
-    console.log(globalFastestLeaderboard)
 }).bindListener()
 
 function quizEndResult(results) {
@@ -330,15 +376,17 @@ new Listener("quiz end result", quizEndResult).bindListener();
 
 function processChatCommand(payload) {
     let time,
-        gamePlayerId;
+        gamePlayerId,
+        message;
     if (payload.message.startsWith('[time]')) {
+        message = payload.message.substring(7, payload.message.length)
         for (let i = 0; i < 40; i++) {
             if (payload.sender === quiz.players[i]._name) {
                 gamePlayerId = quiz.players[i].gamePlayerId;
                 break;
             }
         }
-        if (songMuteTime < 0 || payload.content === 'none') {
+        if (songMuteTime < 0 || message === 'none') {
             time = -1
         } else {
             time = payload.message.substring(6, payload.message.length)
@@ -356,3 +404,131 @@ AMQ_addScriptData({
     author: "4Lajf (forked from BobTheSheriff)",
     description: `Posts the time when the player mutes their audio per round, acting as a buzzer`
 });
+
+// Writes the current rig to scoreboard
+function writeRigToScoreboard() {
+    if (playerDataReady) {
+        for (let entryId in quiz.scoreboard.playerEntries) {
+            let entry = quiz.scoreboard.playerEntries[entryId];
+            /*                 let scoreCounter = entry.$entry.find(".qpsPlayerScore") */
+            let guessedCounter = entry.$entry.find(".qpsPlayerRig");
+            /*                 scoreCounter.text(playerData[entryId].score) */
+            guessedCounter.text(playerData[entryId].rig);
+        }
+    }
+}
+
+// Clears the rig counters from scoreboard
+function clearScoreboard() {
+    $(".qpsPlayerRig").remove();
+    scoreboardReady = false;
+}
+
+// Clears player data
+function clearPlayerData() {
+    playerData = {};
+    playerDataReady = false;
+    missedFromOwnList = 0;
+}
+
+// Creates the player data for counting rig (and score)
+function initialisePlayerData() {
+    clearPlayerData();
+    for (let entryId in quiz.players) {
+        playerData[entryId] = {
+            rig: 0,
+            score: 0,
+            missedList: 0,
+            name: quiz.players[entryId]._name
+        };
+    }
+    playerDataReady = true;
+}
+
+// Creates the rig counters on the scoreboard and sets them to 0
+function initialiseScoreboard() {
+    clearScoreboard();
+    for (let entryId in quiz.scoreboard.playerEntries) {
+        let tmp = quiz.scoreboard.playerEntries[entryId];
+        let rig = $(`<span class="qpsPlayerRig">0</span>`);
+        tmp.$entry.find(".qpsPlayerName").before(rig);
+    }
+    scoreboardReady = true;
+}
+
+// Initial setup on quiz start
+quizReadyRigTracker = new Listener("quiz ready", (data) => {
+    returningToLobby = false;
+    clearPlayerData();
+    clearScoreboard();
+    answerResultsRigTracker.bindListener();
+    initialiseScoreboard();
+    initialisePlayerData();
+
+
+});
+
+// Reset data when joining a lobby
+joinLobbyListener = new Listener("Join Game", (payload) => {
+    if (payload.error) {
+        return;
+    }
+    answerResultsRigTracker.unbindListener();
+    clearPlayerData();
+    clearScoreboard();
+});
+
+// stuff to do on answer reveal
+answerResultsRigTracker = new Listener("answer results", (result) => {
+
+});
+
+// Reset data when spectating a lobby
+spectateLobbyListener = new Listener("Spectate Game", (payload) => {
+    if (payload.error) {
+        return;
+    }
+    answerResultsRigTracker.bindListener();
+    clearPlayerData();
+    clearScoreboard();
+});
+
+// bind listeners
+quizReadyRigTracker.bindListener();
+answerResultsRigTracker.bindListener();
+joinLobbyListener.bindListener();
+spectateLobbyListener.bindListener();
+
+function setup() {
+    // CSS stuff
+    AMQ_addStyle(`
+            .qpsPlayerRig {
+                padding-right: 5px;
+                opacity: 0.3;
+            }
+            .customCheckboxContainer {
+                display: flex;
+            }
+            .customCheckboxContainer > div {
+                display: inline-block;
+                margin: 5px 0px;
+            }
+            .customCheckboxContainer > .customCheckboxContainerLabel {
+                margin-left: 5px;
+                margin-top: 5px;
+                font-weight: normal;
+            }
+            .offset1 {
+                margin-left: 20px;
+            }
+            .offset2 {
+                margin-left: 40px;
+            }
+            .offset3 {
+                margin-left: 60px;
+            }
+            .offset4 {
+                margin-left: 80px;
+            }
+        `);
+}
