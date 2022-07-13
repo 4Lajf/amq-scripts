@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         AMQ Mute Button Buzzer
+// @name         AMQ Mute Button Buzzer Client
 // @namespace    http://tampermonkey.net/
 // @version      1.11
 // @description  Posts the time when the player mutes their audio per round, acting as a buzzer
