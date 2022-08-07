@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         AMQ Mute Button Buzzer Client
+// @name         AMQ Mute Button Buzzer
 // @namespace    http://tampermonkey.net/
 // @version      1.11
 // @description  Posts the time when the player mutes their audio per round, acting as a buzzer
@@ -119,7 +119,6 @@ function mergeArray(data) {
 
 function buzzer(event) {
     muteClick = document.getElementById("qpVolumeIcon");
-    console.log(event.key)
     if (event.key === 'Control') {
         if (muteClick.className !== "fa fa-volume-off") { muteClick.click() };
     }
@@ -209,8 +208,8 @@ quiz._playerAnswerListner = new Listener(
             quizPlayer.toggleTeamAnswerSharing(false)
         })
 
-        let time = songMuteTime - songStartTime
         if (!quiz.isSpectator) {
+            let time = songMuteTime - songStartTime
             if (buzzerFired === false || time < 0) {
                 sendLobbyMessage(`[time] none`)
             } else if (time > 3000) {
@@ -225,6 +224,32 @@ quiz._playerAnswerListner = new Listener(
         quiz.videoTimerBar.updateState(data.progressBarState)
     }
 )
+
+function processChatCommand(payload) {
+    let time,
+        gamePlayerId,
+        message;
+    if (payload.message.startsWith('[time]')) {
+        message = payload.message.substring(7, payload.message.length)
+        //console.log(message)
+        for (let i = 0; i < 40; i++) {
+            if (payload.sender === quiz.players[i]._name) {
+                gamePlayerId = quiz.players[i].gamePlayerId;
+                break;
+            }
+        }
+        if (songMuteTime < 0 || message === 'none') {
+            time = -1
+        } else {
+            time = message
+        }
+        fastestLeaderboard.push({
+            'gamePlayerId': gamePlayerId,
+            'name': payload.sender,
+            'time': time,
+        })
+    }
+}
 
 //post to chat
 new Listener("answer results", (result) => {
@@ -245,6 +270,8 @@ new Listener("answer results", (result) => {
             writeRigToScoreboard();
         }
     }
+    console.log(result.players[0].correct)
+    console.log(songMuteTime - songStartTime, buzzerFired)
 
     //Get those who answered correctly
     const correctPlayers = result.players
@@ -261,7 +288,12 @@ new Listener("answer results", (result) => {
         }
         displayCorrectPlayers.push(fastestLeaderboard.find(item => item.gamePlayerId === correctIds[i]))
     }
-
+    for (let i = 0; i < displayCorrectPlayers.length; i++) {
+        //If you guessed right and have >3000ms, go back to 2000ms
+        if (displayCorrectPlayers[i].time > 2000) {
+            displayCorrectPlayers[i].time = 2000
+        }
+    }
 
     //Get those who answered incorrectly
     const incorrectPlayers = result.players
@@ -378,32 +410,6 @@ new Listener("game chat update", (payload) => {
     payload.messages.forEach(message => processChatCommand(message));
 }).bindListener();
 new Listener("quiz end result", quizEndResult).bindListener();
-
-function processChatCommand(payload) {
-    let time,
-        gamePlayerId,
-        message;
-    if (payload.message.startsWith('[time]')) {
-        message = payload.message.substring(7, payload.message.length)
-        console.log(message)
-        for (let i = 0; i < 40; i++) {
-            if (payload.sender === quiz.players[i]._name) {
-                gamePlayerId = quiz.players[i].gamePlayerId;
-                break;
-            }
-        }
-        if (songMuteTime < 0 || message === 'none') {
-            time = -1
-        } else {
-            time = message
-        }
-        fastestLeaderboard.push({
-            'gamePlayerId': gamePlayerId,
-            'name': payload.sender,
-            'time': time,
-        })
-    }
-}
 
 AMQ_addScriptData({
     name: "AMQ Mute Button Buzzer",
