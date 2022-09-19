@@ -6,8 +6,8 @@
 // @author       Zolhungaj & 4Lajf
 // @match        https://animemusicquiz.com/*
 // @grant        none
-// @downloadURL  
-// @updateURL    
+// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/songArtistsDropdown.js
+// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/songArtistsDropdown.js
 // @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/simpleLogger.js
 // @copyright    MIT license
 // ==/UserScript==
