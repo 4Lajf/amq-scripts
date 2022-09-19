@@ -14,13 +14,6 @@
 // Additionally featuring scores pritned to chat (it's really janky but it works)
 
 let placeNumber = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-function sendLobbyMessage(message) {
-    socket.sendCommand({
-        type: 'lobby',
-        command: 'game chat message',
-        data: { msg: message, teamMessage: false }
-    });
-}
 
 function mergeArray(data) {
     return [...data].reduce((acc, val, i, arr) => {
@@ -160,7 +153,7 @@ class SongArtistMode {
         this.#playerScores = mergeArray(this.#playerScores)
         console.log(this.#playerScores)
         for (let i = 0; i < this.#playerScores.length; i++) {
-            sendLobbyMessage(`${placeNumber[i]} ${this.#playerScores[i].name} 🡆 ${this.#playerScores[i].score}`);
+            gameChat.systemMessage(`${placeNumber[i]} ${this.#playerScores[i].name} 🡆 ${this.#playerScores[i].score}`);
         }
 
         const avatarSlot = this.#playerContainers.get(playerName)
@@ -184,7 +177,7 @@ class SongArtistMode {
         this.#playerScores = mergeArray(this.#playerScores)
         console.log(this.#playerScores)
         for (let i = 0; i < this.#playerScores.length; i++) {
-            sendLobbyMessage(`${placeNumber[i]} ${this.#playerScores[i].name} 🡆 ${this.#playerScores[i].score}`);
+            gameChat.systemMessage(`${placeNumber[i]} ${this.#playerScores[i].name} 🡆 ${this.#playerScores[i].score}`);
         }
 
         const avatarSlot = this.#playerContainers.get(playerName)
@@ -11386,7 +11379,7 @@ class SongArtistMode {
 
         const artistsListElement = songArtistsInput.querySelector('#artists-list')
         const artistsInputElement = songArtistsInput.querySelector('#qpAnswerInput')
-
+        
         function loadArtistData(data, element) {
             if (data) {
                 element.innerHTML = ''
