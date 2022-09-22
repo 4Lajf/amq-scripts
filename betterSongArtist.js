@@ -17,23 +17,6 @@
 //quiz.scoreboard.playerEntries[entryId].$score[0].textContent = 69
 
 let placeNumber = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-
-function mergeArray(data) {
-    return [...data].reduce((acc, val, i, arr) => {
-        let { score, name } = val;
-        score = parseFloat(score);
-        const ind = acc.findIndex(el => el.name === name);
-        if (ind !== -1) {
-            acc[ind].score += score;
-        } else {
-            acc.push({
-                score,
-                name
-            });
-        }
-        return acc;
-    }, []);
-}
 let songStartTime = 0,
     songMuteTime = 0,
     muteClick,
@@ -61,7 +44,8 @@ let quizEndTracker
 let nextSongTrakcer
 let playerAnsweredTracker
 let playerAnswersTracker
-let receivedData
+let titles, artists, titlesInit = false, artistsInit = false
+
 if (document.getElementById('startPage')) return;
 
 // Wait until the LOADING... screen is hidden and load script
@@ -77,11 +61,21 @@ function doCORSRequest(options) {
     let x = new XMLHttpRequest();
     x.open(options.method, cors_api_url + options.url);
     x.onload = x.onerror = function () {
-        let result = x.responseText
-        result = JSON.parse(result)
-        result = result.body
-        receivedData = result
-        console.log('works')
+        if (options.type === 'titles') {
+            titles = x.responseText
+            titles = JSON.parse(titles)
+            titles = titles.body
+            titlesInit = true
+            console.log('titlesInit')
+        }
+
+        if (options.type === 'artists') {
+            artists = x.responseText
+            artists = JSON.parse(artists)
+            artists = artists.body
+            artistInit = true
+            console.log('artistsInit')
+        }
     };
     if (/^POST/i.test(options.method)) {
         x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
@@ -89,9 +83,29 @@ function doCORSRequest(options) {
     x.send(options.data);
 }
 
+function mergeArray(data) {
+    return [...data].reduce((acc, val, i, arr) => {
+        let { score, name } = val;
+        score = parseFloat(score);
+        const ind = acc.findIndex(el => el.name === name);
+        if (ind !== -1) {
+            acc[ind].score += score;
+        } else {
+            acc.push({
+                score,
+                name
+            });
+        }
+        return acc;
+    }, []);
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // Writes the current rig to scoreboard
 function writeRigToScoreboard() {
-    console.log(playerData)
     if (playerDataReady) {
         for (let entryId in quiz.scoreboard.playerEntries) {
             let entry = quiz.scoreboard.playerEntries[entryId];
@@ -141,9 +155,22 @@ function initialiseScoreboard() {
 }
 
 // Initial setup on quiz start
-quizReadyRigTracker = new Listener("quiz ready", (data) => {
+quizReadyRigTracker = new Listener("quiz ready", async (data) => {
+    titles = ''
+    artists = ''
+    await doCORSRequest({
+        method: 'get',
+        url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+        type: 'titles'
+    });
+
+    await doCORSRequest({
+        method: 'get',
+        url: `https://www.4lajf.com/api/autocomplete?type=artists`,
+        type: 'artists'
+    });
+
     playerAmount = Object.entries(quiz.players).length
-    console.log(playerAmount)
     returningToLobby = false;
     clearPlayerData();
     clearScoreboard();
@@ -153,7 +180,27 @@ quizReadyRigTracker = new Listener("quiz ready", (data) => {
 })
 
 // Reset data when joining a lobby
-joinLobbyListener = new Listener("Join Game", (payload) => {
+joinLobbyListener = new Listener("Join Game", async (payload) => {
+    titlesInit = false
+    artistInit = false
+    console.log(titlesInit, artistInit)
+    if (titlesInit === false && artistsInit === false) {
+        console.log('###reInit###')
+        titles = ''
+        artists = ''
+        await doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+            type: 'titles'
+        });
+
+        await doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=artists`,
+            type: 'artists'
+        });
+    }
+
     if (payload.error) {
         return;
     }
@@ -165,7 +212,7 @@ joinLobbyListener = new Listener("Join Game", (payload) => {
 })
 
 // stuff to do on answer reveal
-answerResultsRigTracker = new Listener("answer results", (result) => {
+answerResultsRigTracker = new Listener("answer results", async (result) => {
     for (let player of result.players) {
         if (player.correct === true) {
             playerData[player.gamePlayerId].score++;
@@ -181,17 +228,6 @@ quizEndTracker = new Listener("quiz end result", (result) => {
 nextSongTrakcer = new Listener("play next song", (result) => {
     writeRigToScoreboard()
 })
-
-/* playerAnsweredTracker = new Listener("player answered", (result) => {
-    console.log(result)
-    quiz.scoreboard.playerEntries[0].$score[0].textContent = 69
-})
-
-playerAnswersTracker = new Listener("player answers", (result) => {
-    console.log(result)
-    quiz.scoreboard.playerEntries[0].$score[0].textContent = 69
-}) */
-
 
 // Reset data when spectating a lobby
 spectateLobbyListener = new Listener("Spectate Game", (payload) => {
@@ -470,10 +506,16 @@ class SongArtistMode {
         const songsInputElement = songTitlesInput.querySelector('#qpAnswerInput')
 
         function loadSongData(data, element) {
-            data = data.split('\n')
+
+            let dataLength = data.length
+            if (dataLength >= 50) {
+                dataLength = 50;
+                data.splice(50, data.length);
+            }
+
             if (data) {
                 element.innerHTML = ''
-                for (let i = 0; i < data.length; i++) {
+                for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
                     data[i] = `<b style="color:#4497ea;">${data[i].substr(0, songsInputElement.value.length)}</b>${data[i].substr(songsInputElement.value.length, data[i].length)}`
                     /* el.class = 'song-autocomplete-element' */
@@ -503,28 +545,15 @@ class SongArtistMode {
             return data.filter((x => x.toLowerCase().includes(searchText.toLowerCase())))
         }
 
-        songsInputElement.addEventListener('input', async function () {
-            if (!artistsInputElement.value) {
+        songsInputElement.addEventListener('input', function () {
+            if (!songsInputElement.value) {
                 closeDropdown(songsListElement)
             }
 
+
             if (songsInputElement.value) {
-                //TODO: maybe i'm retarded but I can't get it to FUCKING WAIT...
-                //TODO: remove sleep function
-                receivedData = ''
-                await doCORSRequest({
-                    method: 'get',
-                    url: `https://www.4lajf.com/api/autocomplete?query=${songsInputElement.value}&type=title`,
-                });
-
-                function sleep(ms) {
-                    return new Promise(resolve => setTimeout(resolve, ms));
-                }
-                await sleep(250);
-
-                console.log(receivedData)
-
-                loadSongData(receivedData, songsListElement)
+                const filteredData = filterData(titles, songsInputElement.value)
+                loadSongData(filteredData, songsListElement)
                 songDropdownItems = songsListElement.querySelectorAll('li')
             }
         })
@@ -578,6 +607,13 @@ class SongArtistMode {
         const artistsInputElement = songArtistsInput.querySelector('#qpAnswerInput')
 
         function loadArtistData(data, element) {
+
+            let dataLength = data.length
+            if (dataLength >= 50) {
+                dataLength = 50;
+                data.splice(50, data.length);
+            }
+
             if (data) {
                 element.innerHTML = ''
                 for (let i = 0; i < data.length; i++) {
@@ -606,17 +642,8 @@ class SongArtistMode {
             }
 
             if (artistsInputElement.value) {
-                let receivedData
-                doCORSRequest({
-                    method: 'get',
-                    url: `https://www.4lajf.com/api/autocomplete?query=${artistsInputElement.value}&type=title`,
-                }, function printResult(result) {
-                    console.log("works")
-                    console.log('receivedData:', result)
-                    return result
-                });
-                console.log("after:", receivedData)
-                loadArtistData(receivedData, artistsListElement)
+                const filteredData = filterData(artists, artistsInputElement.value)
+                loadArtistData(filteredData, artistsListElement)
                 artisDropdownItems = artistsListElement.querySelectorAll('li')
             }
         })
