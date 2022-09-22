@@ -509,6 +509,9 @@ class SongArtistMode {
             }
 
             if (songsInputElement.value) {
+                //TODO: maybe i'm retarded but I can't get it to FUCKING WAIT...
+                //TODO: remove sleep function
+                receivedData = ''
                 await doCORSRequest({
                     method: 'get',
                     url: `https://www.4lajf.com/api/autocomplete?query=${songsInputElement.value}&type=title`,
@@ -517,7 +520,7 @@ class SongArtistMode {
                 function sleep(ms) {
                     return new Promise(resolve => setTimeout(resolve, ms));
                 }
-                await sleep(100);
+                await sleep(250);
 
                 console.log(receivedData)
 
