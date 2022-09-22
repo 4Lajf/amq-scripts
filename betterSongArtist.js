@@ -61,7 +61,7 @@ let quizEndTracker
 let nextSongTrakcer
 let playerAnsweredTracker
 let playerAnswersTracker
-
+let receivedData
 if (document.getElementById('startPage')) return;
 
 // Wait until the LOADING... screen is hidden and load script
@@ -71,6 +71,23 @@ let loadInterval = setInterval(() => {
         clearInterval(loadInterval);
     }
 }, 500);
+
+let cors_api_url = 'https://amq-proxy.herokuapp.com/';
+function doCORSRequest(options) {
+    let x = new XMLHttpRequest();
+    x.open(options.method, cors_api_url + options.url);
+    x.onload = x.onerror = function () {
+        let result = x.responseText
+        result = JSON.parse(result)
+        result = result.body
+        receivedData = result
+        console.log('works')
+    };
+    if (/^POST/i.test(options.method)) {
+        x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    }
+    x.send(options.data);
+}
 
 // Writes the current rig to scoreboard
 function writeRigToScoreboard() {
@@ -453,6 +470,7 @@ class SongArtistMode {
         const songsInputElement = songTitlesInput.querySelector('#qpAnswerInput')
 
         function loadSongData(data, element) {
+            data = data.split('\n')
             if (data) {
                 element.innerHTML = ''
                 for (let i = 0; i < data.length; i++) {
@@ -485,19 +503,24 @@ class SongArtistMode {
             return data.filter((x => x.toLowerCase().includes(searchText.toLowerCase())))
         }
 
-        songsInputElement.addEventListener('input', function () {
+        songsInputElement.addEventListener('input', async function () {
             if (!artistsInputElement.value) {
                 closeDropdown(songsListElement)
             }
 
             if (songsInputElement.value) {
-                let receivedData
-                fetch(`https://www.4lajf.com/api/autocomplete?query=${songsInputElement.value}&type=title`)
-                .then(response => response.json())
-                .then(response => {
-                    receivedData = response.body.split('\n')
-                    console.log(receivedData)
+                await doCORSRequest({
+                    method: 'get',
+                    url: `https://www.4lajf.com/api/autocomplete?query=${songsInputElement.value}&type=title`,
                 });
+
+                function sleep(ms) {
+                    return new Promise(resolve => setTimeout(resolve, ms));
+                }
+                await sleep(100);
+
+                console.log(receivedData)
+
                 loadSongData(receivedData, songsListElement)
                 songDropdownItems = songsListElement.querySelectorAll('li')
             }
@@ -581,12 +604,15 @@ class SongArtistMode {
 
             if (artistsInputElement.value) {
                 let receivedData
-                fetch(`https://www.4lajf.com/api/autocomplete?query=${artistsInputElement.value}&type=artist`)
-                .then(response => response.json())
-                .then(response => {
-                    receivedData = response.body.split('\n')
-                    console.log(receivedData)
+                doCORSRequest({
+                    method: 'get',
+                    url: `https://www.4lajf.com/api/autocomplete?query=${artistsInputElement.value}&type=title`,
+                }, function printResult(result) {
+                    console.log("works")
+                    console.log('receivedData:', result)
+                    return result
                 });
+                console.log("after:", receivedData)
                 loadArtistData(receivedData, artistsListElement)
                 artisDropdownItems = artistsListElement.querySelectorAll('li')
             }
