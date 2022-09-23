@@ -1012,7 +1012,6 @@ async function setup() {
 
     let currentVersion = 1.53
     await sleep(2000)
-    console.log(latestVersion)
     if (latestVersion > currentVersion) {
         alert(`New version of "amqBetterSongArtist.js" is avaliable!\nYour version: ${currentVersion} | Latest version: ${latestVersion}\nDownload it from \nhttps://cutt.ly/amqSA [https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js]`)
     }
