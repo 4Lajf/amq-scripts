@@ -1,18 +1,18 @@
-// ==UserScript==	
-// @name         AMQ Better Song Artist Mode	
-// @namespace    http://tampermonkey.net/	
-// @version      1.5.2	
-// @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.	
-// @author       4Lajf (forked from Zolhungaj)	
-// @match        https://animemusicquiz.com/*	
-// @grant        none	
-// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/songArtistsDropdown.js	
-// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/songArtistsDropdown.js	
-// @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/simpleLogger.js	
-// @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js	
-// @copyright    MIT license	
+// ==UserScript==
+// @name         AMQ Better Song Artist Mode
+// @namespace    http://tampermonkey.net/
+// @version      1.5.2
+// @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
+// @author       4Lajf (forked from Zolhungaj)
+// @match        https://animemusicquiz.com/*
+// @grant        none
+// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/songArtistsDropdown.js
+// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/songArtistsDropdown.js
+// @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/simpleLogger.js
+// @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
+// @copyright    MIT license
 // ==/UserScript==
-// It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.	
+// It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
 // I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
 
 let scoreboardReady = false,
@@ -26,7 +26,7 @@ let scoreboardReady = false,
     artistsInit = false;
 
 
-// listeners	
+// listeners
 let quizReadyRigTracker,
     answerResultsRigTracker,
     joinLobbyListener,
@@ -482,7 +482,7 @@ class SongArtistMode {
                 element.innerHTML = ''
                 for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
-                    let songElIndex = data[i].toLowerCase().indexOf(songsInputElement.value.toLowerCase())	
+                    let songElIndex = data[i].toLowerCase().indexOf(songsInputElement.value.toLowerCase())
                     data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, songsInputElement.value.length)}</b>${data[i].substr(songsInputElement.value.length, data[i].length)}`
                     el.innerHTML = data[i]
                     el.style = 'position: relative; padding: 0.2em 0.5em; cursor: pointer;'
@@ -507,7 +507,7 @@ class SongArtistMode {
         }
 
         function filterData(data, searchText) {
-            data = data.filter((x => x.toLowerCase().includes(searchText.toLowerCase())))	
+            data = data.filter((x => x.toLowerCase().includes(searchText.toLowerCase())))
             return data.sort((a, b) => a.length - b.length);
         }
 
@@ -543,7 +543,7 @@ class SongArtistMode {
                 }
                 songDropdownItems[dropdownFocus].focus()
             }
-            if (e.key == 'Enter') {
+            if (e.key == 'Enter' && document.activeElement.innerText !== '') {
                 songsInputElement.value = document.activeElement.innerText
                 closeDropdown(songsListElement)
             }
@@ -584,7 +584,7 @@ class SongArtistMode {
                 element.innerHTML = ''
                 for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
-                    let songElIndex = data[i].toLowerCase().indexOf(artistsInputElement.value.toLowerCase())	
+                    let songElIndex = data[i].toLowerCase().indexOf(artistsInputElement.value.toLowerCase())
                     data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, artistsInputElement.value.length)}</b>${data[i].substr(artistsInputElement.value.length, data[i].length)}`
                     el.innerHTML = data[i]
                     el.style = 'position: relative; padding: 0.2em 0.5em; cursor: pointer;'
@@ -990,10 +990,10 @@ class SongArtistMode {
 
 window.songArtist = new SongArtistMode()
 
-AMQ_addScriptData({	
-    name: " AMQ Better Song Artist Mode",	
-    author: "4Lajf (forked from Zolhungaj)",	
-    description: `Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.`	
+AMQ_addScriptData({
+    name: " AMQ Better Song Artist Mode",
+    author: "4Lajf (forked from Zolhungaj)",
+    description: `Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.`
 });
 
 function setup() {
