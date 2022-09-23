@@ -15,8 +15,6 @@
 // It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.	
 // I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
 
-//quiz.scoreboard.playerEntries[entryId].$score[0].textContent = 69
-
 let scoreboardReady = false,
     playerDataReady = false,
     returningToLobby = false,
