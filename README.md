@@ -11,7 +11,7 @@
 - See how fast you were on a per round basis (chat leaderboards)
 - See how much time you spent answering questions (main leaderboard)
 ---
-### betterSongArtist.user.js
+### amqBetterSongArtist.user.js
 - Guess the anime song by title or aritst
 - Contains auto-updatable dropdown that you can navigate with arrows.
 - And a leaderboard when you can track scores
