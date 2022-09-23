@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         AMQ Song Artist Mode With Dropdown
+// @name         AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      1.5
-// @description  Makes you able to play song/artist with other people who have this script installed
-// @author       Zolhungaj & 4Lajf
+// @version      1.5.2
+// @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
+// @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/songArtistsDropdown.js
@@ -12,39 +12,29 @@
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @copyright    MIT license
 // ==/UserScript==
-// Additionally featuring scores pritned to chat (it's really janky but it works)
+// It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
+// I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
 
-//quiz.scoreboard.playerEntries[entryId].$score[0].textContent = 69
-
-let placeNumber = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-let songStartTime = 0,
-    songMuteTime = 0,
-    muteClick,
-    buzzerInitialized = false,
-    ignoredPlayerIds = [],
-    disqualified = false,
-    fastestLeaderboard = [],
-    buzzerInitialization = false,
-    globalFastestLeaderboard = [],
-    buzzerFired = false;
-let scoreboardReady = false;
-let playerDataReady = false;
-let returningToLobby = false;
-let missedFromOwnList = 0;
-let playerData = {};
-let playerAmount = 0
+let scoreboardReady = false,
+    playerDataReady = false,
+    returningToLobby = false,
+    playerData = {},
+    playerAmount = 0,
+    titles,
+    artists,
+    titlesInit = false,
+    artistsInit = false
 
 // listeners
-let quizReadyRigTracker;
-let answerResultsRigTracker;
-let joinLobbyListener;
-let reJoinLobbyListener
-let spectateLobbyListener;
-let quizEndTracker
-let nextSongTrakcer
-let playerAnsweredTracker
-let playerAnswersTracker
-let titles, artists, titlesInit = false, artistsInit = false
+let quizReadyRigTracker,
+    answerResultsRigTracker,
+    joinLobbyListener,
+    reJoinLobbyListenr,
+    spectateLobbyListener,
+    quizEndTracker,
+    nextSongTrakcer,
+    playerAnsweredTracker,
+    playerAnswersTracker;
 
 if (document.getElementById('startPage')) return;
 
@@ -66,7 +56,6 @@ function doCORSRequest(options) {
             titles = JSON.parse(titles)
             titles = titles.body
             titlesInit = true
-            console.log('titlesInit')
         }
 
         if (options.type === 'artists') {
@@ -74,34 +63,13 @@ function doCORSRequest(options) {
             artists = JSON.parse(artists)
             artists = artists.body
             artistInit = true
-            console.log('artistsInit')
+
         }
     };
     if (/^POST/i.test(options.method)) {
         x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     }
     x.send(options.data);
-}
-
-function mergeArray(data) {
-    return [...data].reduce((acc, val, i, arr) => {
-        let { score, name } = val;
-        score = parseFloat(score);
-        const ind = acc.findIndex(el => el.name === name);
-        if (ind !== -1) {
-            acc[ind].score += score;
-        } else {
-            acc.push({
-                score,
-                name
-            });
-        }
-        return acc;
-    }, []);
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // Writes the current rig to scoreboard
@@ -158,6 +126,7 @@ function initialiseScoreboard() {
 quizReadyRigTracker = new Listener("quiz ready", async (data) => {
     titles = ''
     artists = ''
+    //Fetches title and artist list from an API
     await doCORSRequest({
         method: 'get',
         url: `https://www.4lajf.com/api/autocomplete?type=titles`,
@@ -183,9 +152,7 @@ quizReadyRigTracker = new Listener("quiz ready", async (data) => {
 joinLobbyListener = new Listener("Join Game", async (payload) => {
     titlesInit = false
     artistInit = false
-    console.log(titlesInit, artistInit)
     if (titlesInit === false && artistsInit === false) {
-        console.log('###reInit###')
         titles = ''
         artists = ''
         await doCORSRequest({
@@ -245,9 +212,6 @@ joinLobbyListener.bindListener();
 spectateLobbyListener.bindListener();
 quizEndTracker.bindListener();
 nextSongTrakcer.bindListener();
-/* playerAnsweredTracker.bindListener();
-playerAnswersTracker.bindListener(); */
-
 
 class SongArtistMode {
     #signature = 'sa-'
@@ -506,19 +470,17 @@ class SongArtistMode {
         const songsInputElement = songTitlesInput.querySelector('#qpAnswerInput')
 
         function loadSongData(data, element) {
-
             let dataLength = data.length
             if (dataLength >= 50) {
                 dataLength = 50;
                 data.splice(50, data.length);
             }
-
             if (data) {
                 element.innerHTML = ''
                 for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
-                    data[i] = `<b style="color:#4497ea;">${data[i].substr(0, songsInputElement.value.length)}</b>${data[i].substr(songsInputElement.value.length, data[i].length)}`
-                    /* el.class = 'song-autocomplete-element' */
+                    let songElIndex = data[i].toLowerCase().indexOf(songsInputElement.value.toLowerCase())
+                    data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, songsInputElement.value.length)}</b>${data[i].substr(songsInputElement.value.length, data[i].length)}`
                     el.innerHTML = data[i]
                     el.style = 'position: relative; padding: 0.2em 0.5em; cursor: pointer;'
                     el.type = "button"
@@ -542,7 +504,8 @@ class SongArtistMode {
         }
 
         function filterData(data, searchText) {
-            return data.filter((x => x.toLowerCase().includes(searchText.toLowerCase())))
+            data = data.filter((x => x.toLowerCase().includes(searchText.toLowerCase())))
+            return data.sort((a, b) => a.length - b.length);
         }
 
         songsInputElement.addEventListener('input', function () {
@@ -618,7 +581,8 @@ class SongArtistMode {
                 element.innerHTML = ''
                 for (let i = 0; i < data.length; i++) {
                     let el = document.createElement('li');
-                    data[i] = `<b style="color:#4497ea;">${data[i].substr(0, artistsInputElement.value.length)}</b>${data[i].substr(artistsInputElement.value.length, data[i].length)}`
+                    let songElIndex = data[i].toLowerCase().indexOf(artistsInputElement.value.toLowerCase())
+                    data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, artistsInputElement.value.length)}</b>${data[i].substr(artistsInputElement.value.length, data[i].length)}`
                     el.innerHTML = data[i]
                     el.style = 'position: relative; padding: 0.2em 0.5em; cursor: pointer;'
                     el.type = "button"
@@ -962,6 +926,7 @@ class SongArtistMode {
         if (this.#currentSong !== "") {
             const msg = template(this.#songHeader, this.#currentSong)
             this.#sendMessage(msg)
+            console.log('msg:', msg)
         }
         if (this.#currentArtist !== "") {
             const msg = template(this.#artistHeader, this.#currentArtist)
@@ -1024,9 +989,9 @@ class SongArtistMode {
 window.songArtist = new SongArtistMode()
 
 AMQ_addScriptData({
-    name: " AMQ Song Artist Mode With Dropdown",
-    author: "Zolhungaj & 4Lajf",
-    description: `Makes you able to play song/artist with other people who have this script installed`
+    name: " AMQ Better Song Artist Mode",
+    author: "4Lajf (forked from Zolhungaj)",
+    description: `Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.`
 });
 
 function setup() {
