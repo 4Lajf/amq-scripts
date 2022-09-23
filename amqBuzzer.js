@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         AMQ Mute Button Buzzer
 // @namespace    http://tampermonkey.net/
-// @version      1.11
+// @version      1.2
 // @description  Posts the time when the player mutes their audio per round, acting as a buzzer
-// @author       BobTheSheriff
+// @author       4Lajf (forked from BobTheSheriff)
 // @match        https://animemusicquiz.com/*
 // @grant        none
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
@@ -81,14 +81,6 @@ const amqAnswerTimesUtility = new function () {
         }
     }).bindListener()
 }()
-
-function sendLobbyMessage(message) {
-    socket.sendCommand({
-        type: 'lobby',
-        command: 'game chat message',
-        data: { msg: message, teamMessage: false }
-    });
-}
 
 function compare(a, b) {
     if (a.time < b.time) {
@@ -211,12 +203,12 @@ quiz._playerAnswerListner = new Listener(
         if (!quiz.isSpectator) {
             let time = songMuteTime - songStartTime
             if (buzzerFired === false || time < 0) {
-                sendLobbyMessage(`[time] none`)
+                gameChat.systemMessage(`[time] none`)
             } else if (time > 3000) {
                 time = 3000;
-                sendLobbyMessage(`[time] ${(time).toString()}`)
+                gameChat.systemMessage(`[time] ${(time).toString()}`)
             } else {
-                sendLobbyMessage(`[time] ${(time).toString()}`)
+                gameChat.systemMessage(`[time] ${(time).toString()}`)
             }
             quiz.answerInput.showSubmitedAnswer()
             quiz.answerInput.resetAnswerState()
@@ -318,7 +310,7 @@ new Listener("answer results", (result) => {
     for (let i = 0; i < displayCorrectPlayers.length; i++) {
         if (limiter < 10) {
             if (i === 0) {
-                sendLobbyMessage(`⚡${displayCorrectPlayers[0].name} 🡆 ${displayCorrectPlayers[0].time}ms`);
+                gameChat.systemMessage(`⚡${displayCorrectPlayers[0].name} 🡆 ${displayCorrectPlayers[0].time}ms`);
                 globalFastestLeaderboard.push({
                     'name': displayCorrectPlayers[0].name,
                     'time': parseInt(displayCorrectPlayers[0].time),
@@ -329,7 +321,7 @@ new Listener("answer results", (result) => {
                 writeRigToScoreboard();
                 limiter++
             } else {
-                sendLobbyMessage(`${placeNumber[i]} ${displayCorrectPlayers[i].name} 🡆 +${displayCorrectPlayers[i].time - displayCorrectPlayers[0].time}ms`);
+                gameChat.systemMessage(`${placeNumber[i]} ${displayCorrectPlayers[i].name} 🡆 +${displayCorrectPlayers[i].time - displayCorrectPlayers[0].time}ms`);
                 globalFastestLeaderboard.push({
                     'name': displayCorrectPlayers[i].name,
                     'time': parseInt(displayCorrectPlayers[i].time),
@@ -355,7 +347,7 @@ new Listener("answer results", (result) => {
     for (let i = 0; i < displayInCorrectPlayers.length; i++) {
         if (limiter < 10) {
             displayInCorrectPlayers[i].time = 3000;
-            sendLobbyMessage(`❌${displayInCorrectPlayers[i].name} 🡆 Penalty +3000ms`);
+            gameChat.systemMessage(`❌${displayInCorrectPlayers[i].name} 🡆 Penalty +3000ms`);
             globalFastestLeaderboard.push({
                 'name': displayInCorrectPlayers[i].name,
                 'time': 3000,
@@ -383,10 +375,10 @@ function quizEndResult(results) {
 
     //Display leaderboard, player's scores are summed up
     globalFastestLeaderboard = mergeArray(globalFastestLeaderboard)
-    sendLobbyMessage(`===== SUMMED UP TIMES =====`)
+    gameChat.systemMessage(`===== SUMMED UP TIMES =====`)
     for (let i = 0; i <= globalFastestLeaderboard.length - 1; i++) {
         if (i > 10) break;
-        sendLobbyMessage(`${placeNumber[i]} ${globalFastestLeaderboard[i].name} 🡆 ${globalFastestLeaderboard[i].time}ms`);
+        gameChat.systemMessage(`${placeNumber[i]} ${globalFastestLeaderboard[i].name} 🡆 ${globalFastestLeaderboard[i].time}ms`);
     }
 }
 
