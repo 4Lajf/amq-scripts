@@ -1,570 +1,543 @@
 // ==UserScript==
-// @name         AMQ Player Answer Time Diference
+// @name         AMQ Mute Button Buzzer
 // @namespace    http://tampermonkey.net/
-// @version      1.4
-// @description  Makes you able to see how quickly people answered and the diference beetween the first player and everyone else, sends the result on chat at the end of a round and sends some stats and the end of the game
-// @author       4Lajf (forked from Zolhungaj)
+// @version      1.2
+// @description  Posts the time when the player mutes their audio per round, acting as a buzzer
+// @author       4Lajf (forked from BobTheSheriff)
 // @match        https://animemusicquiz.com/*
 // @grant        none
-// @downloadURL  https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/amqPlayerAnswerTimeDisplay.user.js
-// @updateURL    https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/amqPlayerAnswerTimeDisplay.user.js
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @copyright    MIT license
 // ==/UserScript==
-(() => {
-    // don't load on login page
-    if (document.getElementById('startPage')) return;
 
-    // Wait until the LOADING... screen is hidden and load script
-    let loadInterval = setInterval(() => {
-        if (document.getElementById("loadingScreen").classList.contains("hidden")) {
-            setup();
-            clearInterval(loadInterval);
-        }
-    }, 500);
+/* Usage:
+When you recognize a song, mute the audio by clicking the volume icon next to the slider.
+Then, enter your answer in the answer bar. Do not unmute your audio (if you do, it will be counted as a missed buzzer).
+Your audio will be automatically unmuted going into the results phase, and when the next song is loaded.
 
-    let settingsData = [
-        {
-            containerId: "smTimeDiferenceOptions",
-            title: "Time Diference Options",
-            data: [
-                {
-                    label: "Enable Plugin",
-                    id: "smTimeDiference",
-                    popover: "Toggles TimeDiference",
-                    enables: ["smTimeDiferenceChat", "smTimeDiferenceChatHidden", "smTimeDiferenceChatSilent", "smTimeDiferenceTimes", "smTimeDiferenceRoundLeaderboard", "smTimeDiferenceGameLeaderboard"],
-                    offset: 0,
-                    default: true
-                },
-                {
-                    label: "Write times to chat",
-                    id: "smTimeDiferenceChat",
-                    popover: "Sends song's and quiz's leaderboard at the end of each one",
-                    unchecks: ["smTimeDiferenceChatHidden", "smTimeDiferenceChatSilent"],
-                    offset: 1,
-                    default: false
-                },
-                {
-                    label: "Write times to chat (only you)",
-                    id: "smTimeDiferenceChatHidden",
-                    popover: "Sends song's and quiz's leaderboard at the end of each one, but only you can see that messages",
-                    unchecks: ["smTimeDiferenceChat", "smTimeDiferenceChatSilent"],
-                    offset: 1,
-                    default: true,
-                },
-                {
-                    label: "Don't Write times to chat",
-                    id: "smTimeDiferenceChatSilent",
-                    popover: "Disables Sending song's and quiz's leaderboard to chat",
-                    unchecks: ["smTimeDiferenceChat", "smTimeDiferenceChatHidden"],
-                    offset: 1,
-                    default: false,
-                },
-                {
-                    label: "Round's leaderboard",
-                    id: "smTimeDiferenceRoundLeaderboard",
-                    popover: "Toggles sending round's leaderboard to chat",
-                    offset: 2,
-                    default: true
-                },
-                {
-                    label: "Game's leaderboard",
-                    id: "smTimeDiferenceGameLeaderboard",
-                    popover: "Toggles sending game's leaderboard to chat",
-                    offset: 2,
-                    default: true
-                },
-                {
-                    label: "Time Diferences",
-                    id: "smTimeDiferenceTimes",
-                    popover: "Toggle time diferences at the place of player's answer",
-                    offset: 1,
-                    default: true
-                },
-            ]
-        },
-    ];
+The time taken to hit the buzzer, as well as whether or not your answer was correct, will be posted in the chat.
 
-    // Create the "TimeDiference" tab in settings
-    $("#settingModal .tabContainer")
-        .append($("<div></div>")
-            .addClass("tab leftRightButtonTop clickAble")
-            .attr("onClick", "options.selectTab('settingsCustomContainer', this)")
-            .append($("<h5></h5>")
-                .text("TimeDiference")
-            )
-        );
-
-    // Create the body base
-    $("#settingModal .modal-body")
-        .append($("<div></div>")
-            .attr("id", "settingsCustomContainer")
-            .addClass("settingContentContainer hide")
-            .append($("<div></div>")
-                .addClass("row")
-            )
-        );
+Shoutout to Zolhungaj and TheJoseph98 as I mostly looked at their scripts to figure out how to write this
+*/
 
 
-    // Create the checkboxes
-    for (let setting of settingsData) {
-        $("#settingsCustomContainer > .row")
-            .append($("<div></div>")
-                .addClass("col-xs-6")
-                .attr("id", setting.containerId)
-                .append($("<div></div>")
-                    .attr("style", "text-align: center")
-                    .append($("<label></label>")
-                        .text(setting.title)
-                    )
-                )
-            );
-        for (let data of setting.data) {
-            $("#" + setting.containerId)
-                .append($("<div></div>")
-                    .addClass("customCheckboxContainer")
-                    .addClass(data.offset !== 0 ? "offset" + data.offset : "")
-                    .addClass(data.offset !== 0 ? "disabled" : "")
-                    .append($("<div></div>")
-                        .addClass("customCheckbox")
-                        .append($("<input id='" + data.id + "' type='checkbox'>")
-                            .prop("checked", data.default !== undefined ? data.default : false)
-                        )
-                        .append($("<label for='" + data.id + "'><i class='fa fa-check' aria-hidden='true'></i></label>"))
-                    )
-                    .append($("<label></label>")
-                        .addClass("customCheckboxContainerLabel")
-                        .text(data.label)
-                    )
-                );
-            if (data.popover !== undefined) {
-                $("#" + data.id).parent().parent().find("label:contains(" + data.label + ")")
-                    .attr("data-toggle", "popover")
-                    .attr("data-content", data.popover)
-                    .attr("data-trigger", "hover")
-                    .attr("data-html", "true")
-                    .attr("data-placement", "top")
-                    .attr("data-container", "#settingModal")
-            }
-        }
+"use strict"
+let songStartTime = 0,
+    songMuteTime = 0,
+    muteClick,
+    buzzerInitialized = false,
+    ignoredPlayerIds = [],
+    disqualified = false,
+    fastestLeaderboard = [],
+    buzzerInitialization = false,
+    globalFastestLeaderboard = [],
+    buzzerFired = false;
+let scoreboardReady = false;
+let playerDataReady = false;
+let returningToLobby = false;
+let missedFromOwnList = 0;
+let playerData = {};
+
+// listeners
+let quizReadyRigTracker;
+let answerResultsRigTracker;
+let joinLobbyListener;
+let spectateLobbyListener;
+
+
+if (document.getElementById('startPage')) return;
+
+// Wait until the LOADING... screen is hidden and load script
+let loadInterval = setInterval(() => {
+    if (document.getElementById("loadingScreen").classList.contains("hidden")) {
+        setup();
+        clearInterval(loadInterval);
     }
+}, 500);
 
-    // Update the enabled and checked checkboxes
-    for (let setting of settingsData) {
-        for (let data of setting.data) {
-            updateEnabled(data.id);
-            $("#" + data.id).click(function () {
-                updateEnabled(data.id);
-                if (data.unchecks !== undefined) {
-                    data.unchecks.forEach((settingId) => {
-                        if ($(this).prop("checked")) {
-                            $("#" + settingId).prop("checked", false);
-                        }
-                        else {
-                            $(this).prop("checked", true);
-                        }
-                    })
-                }
-            });
-        }
+const amqAnswerTimesUtility = new function () {
+    "use strict"
+    this.songStartTime = 0
+    this.playerTimes = []
+    if (typeof (Listener) === "undefined") {
+        return
     }
-
-    // Updates the enabled checkboxes, checks each node recursively
-    function updateEnabled(settingId) {
-        let current;
-        settingsData.some((setting) => {
-            current = setting.data.find((data) => {
-                return data.id === settingId;
-            });
-            return current !== undefined;
-        });
-        if (current === undefined) {
-            return;
-        }
-        if (current.enables === undefined) {
-            return;
-        }
-        else {
-            for (let enableId of current.enables) {
-                if ($("#" + current.id).prop("checked") && !$("#" + current.id).parent().parent().hasClass("disabled")) {
-                    $("#" + enableId).parent().parent().removeClass("disabled");
-                }
-                else {
-                    $("#" + enableId).parent().parent().addClass("disabled");
-                }
-                updateEnabled(enableId);
-            }
-        }
-    }
-
-    //sort object by time (fastest first)
-    function compare(a, b) {
-        if (a.time < b.time) {
-            return -1;
-        }
-        if (a.time > b.time) {
-            return 1;
-        }
-        return 0;
-    }
-
-    function mergeArray(data) {
-        return [...data].reduce((acc, val, i, arr) => {
-            let { time, name } = val;
-            time = parseFloat(time);
-            const ind = acc.findIndex(el => el.name === name);
-            if (ind !== -1) {
-                acc[ind].time += time;
-            } else {
-                acc.push({
-                    time,
-                    name
-                });
-            }
-            return acc;
-        }, []);
-    }
-
-    let ignoredPlayerIds = [],
-        fastestLeaderboard = null,
-        fastestLeaderboardToSum,
-        leader = null,
-        newLeader,
-        playerID,
-        gameRound,
-        summedUpLeaderBoard;
-
-    //Sends a message to lobby chat
-    function sendLobbyMessage(message) {
-        socket.sendCommand({
-            type: 'lobby',
-            command: 'game chat message',
-            data: { msg: message, teamMessage: false }
-        });
-    }
-
-    //Measure answer speed
-    const amqAnswerTimesUtility = new function () {
-        "use strict"
-        this.songStartTime = 0
+    new Listener("play next song", () => {
+        this.songStartTime = Date.now()
         this.playerTimes = []
-        const that = quiz
-        if (typeof (Listener) === "undefined") {
-            return
-        }
-        new Listener("play next song", () => {
-            if ($("#smTimeDiference").prop("checked")) {
-                if ($("#smTimeDiferenceChatSilent").prop("checked")) {
-                    //Do nothing
-                } else {
-                    let gameRound = parseInt($("#qpCurrentSongCount").text()) + 1;
-                    if ($("#smTimeDiferenceRoundLeaderboard").prop("checked")) {
-                        if ($("#smTimeDiferenceChatHidden").prop("checked")) {
-                            gameChat.systemMessage(`===== ROUND ${gameRound} =====`)
-                        } else {
-                            sendLobbyMessage(`===== ROUND ${gameRound} =====`)
-                        }
-                    }
-                }
-                this.songStartTime = Date.now()
-                this.playerTimes = []
-                gameRound++
-            }
-        }).bindListener()
-
-        new Listener("player answered", (data) => {
-            if ($("#smTimeDiference").prop("checked")) {
-                const time = Date.now() - this.songStartTime
-                data.forEach(gamePlayerId => {
-                    const quizPlayer = that.players[gamePlayerId]
-                    this.playerTimes.push({
-                        "gamePlayerId": gamePlayerId,
-                        "time": time,
-                        "date": Date.now(),
-                        'name': quizPlayer._name
-                    })
-
-                    //Deletes duplicate entry and leaves only the newest one
-                    if (isDuplicate(this.playerTimes) === true) {
-                        for (var i = 0; i <= this.playerTimes.length - 1; i++) {
-                            let tmp = this.playerTimes[i].gamePlayerId;
-                            if (tmp === gamePlayerId) {
-                                delete this.playerTimes[i].date
-                                delete this.playerTimes[i].gamePlayerId
-                                delete this.playerTimes[i].time
-                                delete this.playerTimes[i].name
-                                this.playerTimes = this.playerTimes.filter(
-                                    obj => !(obj && Object.keys(obj).length === 0 && obj.constructor === Object)
-                                );
-                                break;
-                            }
-                        }
-                    }
-
-                    //Helper function to code above
-                    function isDuplicate(values) {
-                        var valueArr = values.map(function (item) { return item.gamePlayerId });
-                        var isDuplicate = valueArr.some(function (item, idx) {
-                            return valueArr.indexOf(item) != idx
-                        });
-                        return isDuplicate
-                    }
-
-                    //Sort object by time (faster is first)
-                    this.playerTimes = this.playerTimes.sort(compare)
-                })
-            }
-        }).bindListener()
-    }()
-
-    new Listener("Game Starting", ({ players }) => {
-        if ($("#smTimeDiference").prop("checked")) {
-            fastestLeaderboard = [];
-            ignoredPlayerIds = [];
-            leader = null;
-            newLeader = null;
-            playerID = null;
-            gameRound = 1;
-            const self = players.find(player => player.name === selfName)
-            if (self) {
-                const teamNumber = self.teamNumber
-                if (teamNumber) {
-                    const teamMates = players.filter(player => player.teamNumber === teamNumber)
-                    if (teamMates.length > 1) {
-                        ignoredPlayerIds = teamMates.map(player => player.gamePlayerId)
-                    }
-                }
-            }
-        }
     }).bindListener()
 
-    //On player answering the quiz question
     new Listener("player answered", (data) => {
-        if ($("#smTimeDiference").prop("checked") === true && $("#smTimeDiferenceTimes").prop("checked") === true) {
-            //Display timer
-            data.filter(gamePlayerId => !ignoredPlayerIds.includes(gamePlayerId)).forEach(gamePlayerId => {
-                //Make sure the '⚡' symbol will always follow the fasteset player and update other players accordingly
-
-                //Make sure we are editing the right player
-                for (let i = 0; i < amqAnswerTimesUtility.playerTimes.length; i++) {
-                    if (amqAnswerTimesUtility.playerTimes[i].gamePlayerId !== gamePlayerId) {
-                        continue;
-                    } else {
-                        //If player is already the leader pass the '⚡' to the second fastest player
-                        if (amqAnswerTimesUtility.playerTimes[i].gamePlayerId === leader) {
-                            newLeader = amqAnswerTimesUtility.playerTimes[0].gamePlayerId;
-                            for (let i = 0; i < amqAnswerTimesUtility.playerTimes.length; i++) {
-                                if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
-                                    quiz.players[newLeader].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time}ms`
-                                    leader = newLeader;
-                                    //Update other players accordingly
-                                } else {
-                                    if (playerID === leader) continue;
-                                    quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
-                                }
-                            }
-                            //If the leader is yet to be chosen
-                        } else {
-                            if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
-                                quiz.players[gamePlayerId].answer = `⚡ ${amqAnswerTimesUtility.playerTimes[i].time}ms`
-                                leader = gamePlayerId;
-                                //Everything else
-                            } else {
-                                quiz.players[gamePlayerId].answer = `+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms`
-                            }
-                        }
-                    }
-                }
-            })
-        }
+        const time = Date.now() - this.songStartTime
+        data.forEach(gamePlayerId => {
+            this.playerTimes[gamePlayerId] = time
+        })
     }).bindListener()
 
-    //On pre-show-answer phase
-    quiz._playerAnswerListner = new Listener(
-        "player answers",
-        function (data) {
-            const that = quiz
-            if ($("#smTimeDiference").prop("checked") === true && $("#smTimeDiferenceTimes").prop("checked") === true) {
-                let limiter = 0;
-                //Display answer and timer simultaneously
-                data.answers.forEach((answer) => {
-                    const quizPlayer = that.players[answer.gamePlayerId]
-                    let answerText = answer.answer
-                    //Make sure we are getting the right player
-                    for (let i = 0; i < amqAnswerTimesUtility.playerTimes.length; i++) {
-                        if (amqAnswerTimesUtility.playerTimes[i].gamePlayerId !== quizPlayer.gamePlayerId) {
-                            continue;
-                        } else {
-                            if (amqAnswerTimesUtility.playerTimes[i] !== undefined) {
-                                if (amqAnswerTimesUtility.playerTimes[i].time === amqAnswerTimesUtility.playerTimes[0].time) {
-                                    answerText = `⚡ ${answerText} (${amqAnswerTimesUtility.playerTimes[i].time}ms)`
-                                } else {
-                                    answerText += ` (+${amqAnswerTimesUtility.playerTimes[i].time - amqAnswerTimesUtility.playerTimes[0].time}ms)`
-                                }
-                            }
-                        }
-                    }
+    new Listener("Join Game", (data) => {
+        const quizState = data.quizState;
+        if (quizState) {
+            this.songStartTime = Date.now() - quizState.songTimer * 1000
+        }
+    }).bindListener()
+}()
 
-                    quizPlayer.answer = answerText
-                    quizPlayer.unknownAnswerNumber = answer.answerNumber
-                    quizPlayer.toggleTeamAnswerSharing(false)
-                    limiter++
+function compare(a, b) {
+    if (a.time < b.time) {
+        return -1;
+    }
+    if (a.time > b.time) {
+        return 1;
+    }
+    return 0;
+}
+
+function mergeArray(data) {
+    return [...data].reduce((acc, val, i, arr) => {
+        let { time, name } = val;
+        time = parseFloat(time);
+        const ind = acc.findIndex(el => el.name === name);
+        if (ind !== -1) {
+            acc[ind].time += time;
+        } else {
+            acc.push({
+                time,
+                name
+            });
+        }
+        return acc;
+    }, []);
+}
+
+function buzzer(event) {
+    muteClick = document.getElementById("qpVolumeIcon");
+    if (event.key === 'Control') {
+        if (muteClick.className !== "fa fa-volume-off") { muteClick.click() };
+    }
+}
+
+function setupMuteBuzzer() {
+    buzzerInitialization = true;
+    document.addEventListener("keydown", buzzer);
+    muteClick = document.getElementById("qpVolumeIcon");
+    muteClick.observer = new MutationObserver((change) => {
+        if (songMuteTime !== -1 && muteClick.className === "fa fa-volume-off") {
+            songMuteTime = Date.now()
+        } else {
+            songMuteTime = -1;
+        }
+        buzzerFired = true;
+    })
+
+    if (muteClick.className === "fa fa-volume-off") { muteClick.click() };
+    muteClick.observer.observe(muteClick, { attributes: true })
+    songMuteTime = 0;
+    buzzerInitialized = true;
+}
+
+
+// reset volume button between games
+function shutdownBtn() {
+    if (buzzerInitialization === true) {
+        document.removeEventListener("keydown", buzzer);
+    }
+    if (muteClick) {
+        muteClick.observer.disconnect()
+    };
+    muteClick = null;
+    buzzerInitialized = false;
+    buzzerFired = false;
+    songMuteTime = 0;
+}
+
+// find mute button
+new Listener("Game Starting", ({ players }) => {
+    if (quiz.isSpectator) { return }
+    shutdownBtn();
+    setupMuteBuzzer();
+}).bindListener()
+
+new Listener("rejoin game", (data) => {
+    if (quiz.isSpectator) { return }
+    shutdownBtn();
+    setupMuteBuzzer();
+    if (data) { songStartTime = Date.now(); }
+}).bindListener()
+
+// unmute and stop looking at mute button
+new Listener("guess phase over", () => {
+    if (quiz.isSpectator) { return }
+    muteClick.observer.disconnect();
+    if (muteClick.className === "fa fa-volume-off") { muteClick.click() };
+    document.removeEventListener("keydown", buzzer);
+}).bindListener()
+
+new Listener("play next song", (data) => {
+    buzzerFired = false;
+    fastestLeaderboard = [];
+    displayPlayers = [];
+    document.addEventListener("keydown", buzzer);
+    if (quiz.isSpectator) { return }
+    if (!buzzerInitialized) { setupMuteBuzzer(); } // just in case
+    if (muteClick.className === "fa fa-volume-off") { muteClick.click() }; // check if muted
+
+    muteClick.observer.observe(muteClick, { attributes: true });
+
+    songStartTime = Date.now();
+    songMuteTime = 0;
+
+}).bindListener()
+
+quiz._playerAnswerListner = new Listener(
+    "player answers",
+    function (data) {
+
+        data.answers.forEach((answer) => {
+            const quizPlayer = quiz.players[answer.gamePlayerId]
+            let answerText = answer.answer
+            quizPlayer.answer = answerText
+            quizPlayer.unknownAnswerNumber = answer.answerNumber
+            quizPlayer.toggleTeamAnswerSharing(false)
+        })
+
+        if (!quiz.isSpectator) {
+            let time = songMuteTime - songStartTime
+            if (buzzerFired === false || time < 0) {
+                gameChat.systemMessage(`[time] none`)
+            } else if (time > 3000) {
+                time = 3000;
+                gameChat.systemMessage(`[time] ${(time).toString()}`)
+            } else {
+                gameChat.systemMessage(`[time] ${(time).toString()}`)
+            }
+            quiz.answerInput.showSubmitedAnswer()
+            quiz.answerInput.resetAnswerState()
+        }
+        quiz.videoTimerBar.updateState(data.progressBarState)
+    }
+)
+
+function processChatCommand(payload) {
+    let time,
+        gamePlayerId,
+        message;
+    if (payload.message.startsWith('[time]')) {
+        message = payload.message.substring(7, payload.message.length)
+        //console.log(message)
+        for (let i = 0; i < 40; i++) {
+            if (payload.sender === quiz.players[i]._name) {
+                gamePlayerId = quiz.players[i].gamePlayerId;
+                break;
+            }
+        }
+        if (songMuteTime < 0 || message === 'none') {
+            time = -1
+        } else {
+            time = message
+        }
+        fastestLeaderboard.push({
+            'gamePlayerId': gamePlayerId,
+            'name': payload.sender,
+            'time': time,
+        })
+    }
+}
+
+//post to chat
+new Listener("answer results", (result) => {
+    if (quiz.isSpectator) { return }
+
+    let limiter = 0,
+        correctIds = [],
+        incorrectIds = [],
+        displayCorrectPlayers = [],
+        displayInCorrectPlayers = [];
+
+    if (!playerDataReady) {
+        initialisePlayerData();
+    }
+    if (!scoreboardReady) {
+        initialiseScoreboard();
+        if (playerDataReady) {
+            writeRigToScoreboard();
+        }
+    }
+    console.log(result.players[0].correct)
+    console.log(songMuteTime - songStartTime, buzzerFired)
+
+    //Get those who answered correctly
+    const correctPlayers = result.players
+        .filter(player => player.correct)
+    for (let i = 0; i < correctPlayers.length; i++) {
+        correctIds.push(correctPlayers[i].gamePlayerId)
+    }
+
+    //add thier times into 'displayCorrectPlayers' array
+    for (let i = 0; i <= correctIds.length - 1; i++) {
+        if (fastestLeaderboard.find(item => item.gamePlayerId === correctIds[i]) === -1) {
+            displayInCorrectPlayers.push(fastestLeaderboard.find(item => item.gamePlayerId === incorrectIds[i]))
+            continue;
+        }
+        displayCorrectPlayers.push(fastestLeaderboard.find(item => item.gamePlayerId === correctIds[i]))
+    }
+    for (let i = 0; i < displayCorrectPlayers.length; i++) {
+        //If you guessed right and have >3000ms, go back to 2000ms
+        if (displayCorrectPlayers[i].time > 2000) {
+            displayCorrectPlayers[i].time = 2000
+        }
+    }
+
+    //Get those who answered incorrectly
+    const incorrectPlayers = result.players
+        .filter(player => !player.correct)
+    for (let i = 0; i < incorrectPlayers.length; i++) {
+        incorrectIds.push(incorrectPlayers[i].gamePlayerId)
+    }
+
+    //add thier times into 'displayInCorrectPlayers' array
+    for (let i = 0; i <= incorrectIds.length - 1; i++) {
+        if (fastestLeaderboard.find(item => item.gamePlayerId === incorrectIds[i]) === -1) {
+            continue;
+        }
+        displayInCorrectPlayers.push(fastestLeaderboard.find(item => item.gamePlayerId === incorrectIds[i]))
+    }
+
+    //If no one got the question right, display all the scores
+    //Otherwise show only those who answered correctly
+    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'],
+        timeScore;
+    displayCorrectPlayers = displayCorrectPlayers.sort(compare)
+    for (let i = 0; i < displayCorrectPlayers.length; i++) {
+        if (limiter < 10) {
+            if (i === 0) {
+                gameChat.systemMessage(`⚡${displayCorrectPlayers[0].name} 🡆 ${displayCorrectPlayers[0].time}ms`);
+                globalFastestLeaderboard.push({
+                    'name': displayCorrectPlayers[0].name,
+                    'time': parseInt(displayCorrectPlayers[0].time),
                 })
-
-                if (!that.isSpectator) {
-                    that.answerInput.showSubmitedAnswer()
-                    that.answerInput.resetAnswerState()
-                }
-
-                that.videoTimerBar.updateState(data.progressBarState)
+                timeScore = parseInt(playerData[displayCorrectPlayers[0].gamePlayerId].rig) + parseInt(displayCorrectPlayers[0].time)
+                playerData[displayCorrectPlayers[0].gamePlayerId].rig = timeScore;
+                /*                 playerData[displayCorrectPlayers[0].gamePlayerId].rig++ */
+                writeRigToScoreboard();
+                limiter++
             } else {
-                data.answers.forEach((answer) => {
-                    const quizPlayer = that.players[answer.gamePlayerId]
-                    let answerText = answer.answer
-                    quizPlayer.answer = answerText
-                    quizPlayer.unknownAnswerNumber = answer.answerNumber
-                    quizPlayer.toggleTeamAnswerSharing(false)
+                gameChat.systemMessage(`${placeNumber[i]} ${displayCorrectPlayers[i].name} 🡆 +${displayCorrectPlayers[i].time - displayCorrectPlayers[0].time}ms`);
+                globalFastestLeaderboard.push({
+                    'name': displayCorrectPlayers[i].name,
+                    'time': parseInt(displayCorrectPlayers[i].time),
                 })
+                timeScore = parseInt(playerData[displayCorrectPlayers[i].gamePlayerId].rig) + parseInt(displayCorrectPlayers[i].time);
+                playerData[displayCorrectPlayers[i].gamePlayerId].rig = timeScore
+                /*                 playerData[displayCorrectPlayers[i].gamePlayerId].rig++ */
+                writeRigToScoreboard();
+                limiter++
             }
-        }
-    )
-    //On show answer phase
-    function answerResults(results) {
-        if ($("#smTimeDiference").prop("checked")) {
-            if ($("#smTimeDiferenceChatSilent").prop("checked")) {
-                return;
-            } else {
-                if ($("#smTimeDiferenceRoundLeaderboard").prop("checked")) {
-                    let limiter = 0,
-                        correctIds = [],
-                        displayPlayers = [];
-                    //Get only those who answered correctly
-                    const correctPlayers = results.players
-                        .filter(player => player.correct)
-                    for (let i = 0; i < correctPlayers.length; i++) {
-                        correctIds.push(correctPlayers[i].gamePlayerId)
-                    }
-
-                    //add them into 'displayPlayers' array
-                    for (let i = 0; i <= correctIds.length - 1; i++) {
-                        displayPlayers.push(amqAnswerTimesUtility.playerTimes.find(item => item.gamePlayerId === correctIds[i]))
-                    }
-
-                    //If no one got the question right, display all the scores
-                    //Otherwise show only those who answered correctly
-                    if (displayPlayers.length > 0) {
-
-                        displayPlayers = displayPlayers.sort(compare)
-
-                        for (let i = 0; i < displayPlayers.length; i++) {
-                            if (limiter < 10) {
-                                let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-
-                                if (limiter === 0) {
-                                    fastestLeaderboard.push({
-                                        "name": displayPlayers[0].name,
-                                        'time': displayPlayers[0].time,
-                                        'round': gameRound - 1
-                                    })
-                                    summedUpLeaderBoard = mergeArray(fastestLeaderboard)
-                                    if ($("#smTimeDiferenceChatHidden").prop("checked")) {
-                                        gameChat.systemMessage(`⚡ ${displayPlayers[0].name} 🡆 ${displayPlayers[0].time}ms`);
-                                    } else {
-                                        sendLobbyMessage(`⚡ ${displayPlayers[0].name} 🡆 ${displayPlayers[0].time}ms`);
-                                    }
-                                } else {
-                                    fastestLeaderboard.push({
-                                        "name": displayPlayers[limiter].name,
-                                        'time': displayPlayers[limiter].time,
-                                        'round': gameRound - 1
-                                    })
-                                    summedUpLeaderBoard = mergeArray(fastestLeaderboard)
-
-                                    if ($("#smTimeDiferenceChatHidden").prop("checked")) {
-                                        gameChat.systemMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} 🡆 +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
-                                    } else {
-                                        sendLobbyMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} 🡆 +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
-                                    }
-                                }
-                            }
-                            limiter++
-                        }
-                    } else if (amqAnswerTimesUtility.playerTimes.length === 0) {
-                        if ($("#smTimeDiferenceChatHidden").prop("checked")) {
-                            gameChat.systemMessage(`Not even trying? I see...`);
-                        } else {
-                            sendLobbyMessage(`Not even trying? I see...`);
-                        }
-                    } else {
-                        if ($("#smTimeDiferenceChatHidden").prop("checked")) {
-                            gameChat.systemMessage(`You are all terrible at this...`);
-                        } else {
-                            sendLobbyMessage(`You are all terrible at this...`);
-                        }
-                    }
-                }
-            }
+        } else {
+            globalFastestLeaderboard.push({
+                'name': displayCorrectPlayers[i].name,
+                'time': parseInt(displayCorrectPlayers[i].time),
+            })
+            timeScore = parseInt(playerData[displayCorrectPlayers[i].gamePlayerId].rig) + parseInt(displayCorrectPlayers[i].time);
+            playerData[displayCorrectPlayers[i].gamePlayerId].rig = timeScore
+            /*             playerData[displayCorrectPlayers[i].gamePlayerId].rig++ */
+            writeRigToScoreboard();
         }
     }
+    displayInCorrectPlayers = displayInCorrectPlayers.sort(compare)
+    for (let i = 0; i < displayInCorrectPlayers.length; i++) {
+        if (limiter < 10) {
+            displayInCorrectPlayers[i].time = 3000;
+            gameChat.systemMessage(`❌${displayInCorrectPlayers[i].name} 🡆 Penalty +3000ms`);
+            globalFastestLeaderboard.push({
+                'name': displayInCorrectPlayers[i].name,
+                'time': 3000,
+            })
+            timeScore = parseInt(playerData[displayInCorrectPlayers[i].gamePlayerId].rig) + parseInt(displayInCorrectPlayers[i].time);
+            playerData[displayInCorrectPlayers[i].gamePlayerId].rig = timeScore
+            writeRigToScoreboard();
+            limiter++
+        } else {
+            displayInCorrectPlayers[i].time = 3000;
+            globalFastestLeaderboard.push({
+                'name': displayInCorrectPlayers[i].name,
+                'time': 3000,
+            })
+            timeScore = parseInt(playerData[displayInCorrectPlayers[i].gamePlayerId].rig) + parseInt(displayInCorrectPlayers[i].time);
+            playerData[displayInCorrectPlayers[i].gamePlayerId].rig = timeScore
+            writeRigToScoreboard();
+        }
+        limiter++
+    }
+}).bindListener()
 
-    function quizEndResult(results) {
-        if ($("#smTimeDiference").prop("checked")) {
-            if ($("#smTimeDiferenceChatSilent").prop("checked")) {
-                //Do nothing
-            } else {
-                if ($("#smTimeDiferenceRoundLeaderboard").prop("checked")) {
-                    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-                    fastestLeaderboard = fastestLeaderboard.sort(compare)
-                    fastestLeaderboardToSum = fastestLeaderboard
-                    let limiter = 0;
-                    if ($("#smTimeDiferenceChatHidden").prop("checked")) {
-                        gameChat.systemMessage(`===== FASTEST ANSWERS =====`)
-                        for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                            if (limiter > 9) break;
-                            gamechat.systemMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
-                            limiter++
-                        }
-                    } else {
-                        sendLobbyMessage(`===== FASTEST ANSWERS =====`)
-                        for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                            if (limiter > 9) break;
-                            sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
-                            limiter++
-                        }
-                    }
+function quizEndResult(results) {
+    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
 
-                    //Display leaderboard, player's scores are summed up
-                    summedUpLeaderBoard = mergeArray(fastestLeaderboardToSum)
+    //Display leaderboard, player's scores are summed up
+    globalFastestLeaderboard = mergeArray(globalFastestLeaderboard)
+    gameChat.systemMessage(`===== SUMMED UP TIMES =====`)
+    for (let i = 0; i <= globalFastestLeaderboard.length - 1; i++) {
+        if (i > 10) break;
+        gameChat.systemMessage(`${placeNumber[i]} ${globalFastestLeaderboard[i].name} 🡆 ${globalFastestLeaderboard[i].time}ms`);
+    }
+}
 
-                    if ($("#smTimeDiferenceChatHidden").prop("checked")) {
-                        gameChat.systemMessage(`===== SUMMED UP TIMES =====`)
-                        for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                            if (limiter > 9) break;
-                            gamechat.systemMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
-                            limiter++
-                        }
-                    } else {
-                        sendLobbyMessage(`===== SUMMED UP TIMES =====`)
-                        for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                            if (limiter > 9) break;
-                            sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
-                            limiter++
-                        }
-                    }
-                }
-            }
+// check exits
+new Listener("return lobby vote result", (result) => {
+    if (quiz.isSpectator) { return }
+    if (result.passed) {
+        shutdownBtn();
+    }
+
+}).bindListener()
+new Listener("quiz over", () => {
+    shutdownBtn();
+}).bindListener()
+new Listener("leave game", () => {
+    shutdownBtn();
+}).bindListener()
+new Listener("Spectate Game", () => {
+    shutdownBtn();
+}).bindListener()
+new Listener("Host Game", () => {
+    shutdownBtn();
+}).bindListener()
+new Listener("Game Chat Message", processChatCommand).bindListener();
+new Listener("game chat update", (payload) => {
+    payload.messages.forEach(message => processChatCommand(message));
+}).bindListener();
+new Listener("quiz end result", quizEndResult).bindListener();
+
+AMQ_addScriptData({
+    name: "AMQ Mute Button Buzzer",
+    author: "4Lajf (forked from BobTheSheriff)",
+    description: `Posts the time when the player mutes their audio per round, acting as a buzzer`
+});
+
+// Writes the current rig to scoreboard
+function writeRigToScoreboard() {
+    if (playerDataReady) {
+        for (let entryId in quiz.scoreboard.playerEntries) {
+            let entry = quiz.scoreboard.playerEntries[entryId];
+            /*                 let scoreCounter = entry.$entry.find(".qpsPlayerScore") */
+            let guessedCounter = entry.$entry.find(".qpsPlayerRig");
+            /*                 scoreCounter.text(playerData[entryId].score) */
+            guessedCounter.text(playerData[entryId].rig);
         }
     }
+}
 
-    //Initialize listeners and 'Installed Userscripts' menu
-    function setup() {
-        new Listener("answer results", answerResults).bindListener();
-        new Listener("quiz end result", quizEndResult).bindListener();
-        AMQ_addScriptData({
-            name: "AMQ Player Answer Time Diference",
-            author: "4Lajf (forked from Zolhungaj)",
-            description: `Displays time diference in seconds between the fastest player and the rest, then and the end of the round sends results in chat. Send to chat the final leaderboard once the game ends`
-        });
+// Clears the rig counters from scoreboard
+function clearScoreboard() {
+    $(".qpsPlayerRig").remove();
+    scoreboardReady = false;
+}
+
+// Clears player data
+function clearPlayerData() {
+    playerData = {};
+    playerDataReady = false;
+    missedFromOwnList = 0;
+}
+
+// Creates the player data for counting rig (and score)
+function initialisePlayerData() {
+    clearPlayerData();
+    for (let entryId in quiz.players) {
+        playerData[entryId] = {
+            rig: 0,
+            score: 0,
+            missedList: 0,
+            name: quiz.players[entryId]._name
+        };
     }
+    playerDataReady = true;
+}
 
-})();
+// Creates the rig counters on the scoreboard and sets them to 0
+function initialiseScoreboard() {
+    clearScoreboard();
+    for (let entryId in quiz.scoreboard.playerEntries) {
+        let tmp = quiz.scoreboard.playerEntries[entryId];
+        let rig = $(`<span class="qpsPlayerRig">0</span>`);
+        tmp.$entry.find(".qpsPlayerName").before(rig);
+    }
+    scoreboardReady = true;
+}
+
+// Initial setup on quiz start
+quizReadyRigTracker = new Listener("quiz ready", (data) => {
+    returningToLobby = false;
+    clearPlayerData();
+    clearScoreboard();
+    answerResultsRigTracker.bindListener();
+    initialiseScoreboard();
+    initialisePlayerData();
+
+    document.addEventListener("keydown", buzzer);
+});
+
+// Reset data when joining a lobby
+joinLobbyListener = new Listener("Join Game", (payload) => {
+    if (payload.error) {
+        return;
+    }
+    answerResultsRigTracker.unbindListener();
+    clearPlayerData();
+    clearScoreboard();
+});
+
+// stuff to do on answer reveal
+answerResultsRigTracker = new Listener("answer results", (result) => {
+
+});
+
+// Reset data when spectating a lobby
+spectateLobbyListener = new Listener("Spectate Game", (payload) => {
+    if (payload.error) {
+        return;
+    }
+    answerResultsRigTracker.bindListener();
+    clearPlayerData();
+    clearScoreboard();
+});
+
+// bind listeners
+quizReadyRigTracker.bindListener();
+answerResultsRigTracker.bindListener();
+joinLobbyListener.bindListener();
+spectateLobbyListener.bindListener();
+
+function setup() {
+    // CSS stuff
+    AMQ_addStyle(`
+            .qpsPlayerRig {
+                padding-right: 5px;
+                opacity: 0.3;
+            }
+            .customCheckboxContainer {
+                display: flex;
+            }
+            .customCheckboxContainer > div {
+                display: inline-block;
+                margin: 5px 0px;
+            }
+            .customCheckboxContainer > .customCheckboxContainerLabel {
+                margin-left: 5px;
+                margin-top: 5px;
+                font-weight: normal;
+            }
+            .offset1 {
+                margin-left: 20px;
+            }
+            .offset2 {
+                margin-left: 40px;
+            }
+            .offset3 {
+                margin-left: 60px;
+            }
+            .offset4 {
+                margin-left: 80px;
+            }
+        `);
+}
