@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      1.53
+// @version      1.5.2
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -22,7 +22,6 @@ let scoreboardReady = false,
     playerAmount = 0,
     titles,
     artists,
-    latestVersion,
     titlesInit = false,
     artistsInit = false;
 
@@ -38,7 +37,7 @@ let quizReadyRigTracker,
 if (document.getElementById('startPage')) return;
 
 // Wait until the LOADING... screen is hidden and load script
-let loadInterval = setInterval(async () => {
+let loadInterval = setInterval(() => {
     if (document.getElementById("loadingScreen").classList.contains("hidden")) {
         setup();
         clearInterval(loadInterval);
@@ -55,6 +54,7 @@ function doCORSRequest(options) {
             titles = JSON.parse(titles)
             titles = titles.body
             titlesInit = true
+            console.log('titlesInit')
         }
 
         if (options.type === 'artists') {
@@ -62,12 +62,7 @@ function doCORSRequest(options) {
             artists = JSON.parse(artists)
             artists = artists.body
             artistInit = true
-        }
-
-        if (options.type === 'version') {
-            latestVersion = x.responseText
-            latestVersion = JSON.parse(latestVersion)
-            latestVersion = latestVersion.body
+            console.log('artistsInit')
         }
     };
     if (/^POST/i.test(options.method)) {
@@ -156,7 +151,9 @@ quizReadyRigTracker = new Listener("quiz ready", (data) => {
 joinLobbyListener = new Listener("Join Game", (payload) => {
     titlesInit = false
     artistInit = false
+    console.log(titlesInit, artistInit)
     if (titlesInit === false && artistsInit === false) {
+        console.log('###reInit###')
         titles = ''
         artists = ''
         doCORSRequest({
@@ -999,23 +996,7 @@ AMQ_addScriptData({
     description: `Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.`
 });
 
-async function setup() {
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    doCORSRequest({
-        method: 'get',
-        url: `https://www.4lajf.com/api/autocomplete?type=version`,
-        type: 'version'
-    });
-
-    let currentVersion = 1.53
-    await sleep(2000)
-    if (latestVersion > currentVersion) {
-        alert(`New version of "amqBetterSongArtist.js" is avaliable!\nYour version: ${currentVersion} | Latest version: ${latestVersion}\nDownload it from \nhttps://cutt.ly/amqSA [https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js]`)
-    }
-
+function setup() {
     // CSS stuff
     AMQ_addStyle(`
             .qpsPlayerRig {
