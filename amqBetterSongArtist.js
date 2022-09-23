@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      1.52
+// @version      1.53
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -22,7 +22,7 @@ let scoreboardReady = false,
     playerAmount = 0,
     titles,
     artists,
-    version,
+    latestVersion,
     titlesInit = false,
     artistsInit = false;
 
@@ -65,9 +65,9 @@ function doCORSRequest(options) {
         }
 
         if (options.type === 'version') {
-            version = x.responseText
-            version = JSON.parse(version)
-            version = version.body
+            latestVersion = x.responseText
+            latestVersion = JSON.parse(latestVersion)
+            latestVersion = latestVersion.body
         }
     };
     if (/^POST/i.test(options.method)) {
@@ -1010,11 +1010,11 @@ async function setup() {
         type: 'version'
     });
 
+    let currentVersion = 1.53
     await sleep(2000)
-    console.log(version)
-    //note to self: Increment version on update
-    if (version > 1.53) {
-        alert(`New version of "amqBetterSongArtist.js" is avaliable! Download it from \nhttps://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js`)
+    console.log(latestVersion)
+    if (latestVersion > currentVersion) {
+        alert(`New version of "amqBetterSongArtist.js" is avaliable!\nYour version: ${currentVersion} | Latest version: ${latestVersion}\nDownload it from \nhttps://cutt.ly/amqSA [https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js]`)
     }
 
     // CSS stuff
