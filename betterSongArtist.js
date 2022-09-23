@@ -73,27 +73,6 @@ function doCORSRequest(options) {
     x.send(options.data);
 }
 
-function mergeArray(data) {
-    return [...data].reduce((acc, val, i, arr) => {
-        let { score, name } = val;
-        score = parseFloat(score);
-        const ind = acc.findIndex(el => el.name === name);
-        if (ind !== -1) {
-            acc[ind].score += score;
-        } else {
-            acc.push({
-                score,
-                name
-            });
-        }
-        return acc;
-    }, []);
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 // Writes the current rig to scoreboard
 function writeRigToScoreboard() {
     if (playerDataReady) {
