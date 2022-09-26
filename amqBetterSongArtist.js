@@ -54,7 +54,6 @@ function doCORSRequest(options) {
             titles = JSON.parse(titles)
             titles = titles.body
             titlesInit = true
-            console.log('titlesInit')
         }
 
         if (options.type === 'artists') {
@@ -62,7 +61,6 @@ function doCORSRequest(options) {
             artists = JSON.parse(artists)
             artists = artists.body
             artistInit = true
-            console.log('artistsInit')
         }
     };
     if (/^POST/i.test(options.method)) {
@@ -151,9 +149,7 @@ quizReadyRigTracker = new Listener("quiz ready", (data) => {
 joinLobbyListener = new Listener("Join Game", (payload) => {
     titlesInit = false
     artistInit = false
-    console.log(titlesInit, artistInit)
     if (titlesInit === false && artistsInit === false) {
-        console.log('###reInit###')
         titles = ''
         artists = ''
         doCORSRequest({
@@ -634,7 +630,7 @@ class SongArtistMode {
                 }
                 artisDropdownItems[dropdownFocus].focus()
             }
-            if (e.key == 'Enter') {
+            if (e.key == 'Enter' && document.activeElement.innerText !== '') {
                 artistsInputElement.value = document.activeElement.innerText
                 closeDropdown(artistsListElement)
             }
