@@ -15,9 +15,11 @@
 // It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
 // I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
 
-/* Scoring Mode:
+/* 
+Scoring Mode:
 0 - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
-1 - artist may contain only one of participating artists (for easier difficulty) */
+1 - artist may contain only one of participating artists (for easier difficulty) 
+*/
 let scoringMode = 1
 
 let scoreboardReady = false,
