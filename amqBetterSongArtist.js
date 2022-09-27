@@ -18,7 +18,7 @@
 /* Scoring Mode:
 0 - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
 1 - artist may contain only one of participating artists (for easier difficulty) */
-let scoringMode = 0
+let scoringMode = 1
 
 let scoreboardReady = false,
     playerDataReady = false,
