@@ -7,11 +7,13 @@
 // @match        https://animemusicquiz.com/*
 // @grant        none
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
+// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBuzzer.js
+// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBuzzer.js
 // @copyright    MIT license
 // ==/UserScript==
 
 /* Usage:
-When you recognize a song, mute the audio by clicking the volume icon next to the slider.
+When you recognize a song, mute the audio by clicking the control button
 Then, enter your answer in the answer bar. Do not unmute your audio (if you do, it will be counted as a missed buzzer).
 Your audio will be automatically unmuted going into the results phase, and when the next song is loaded.
 
