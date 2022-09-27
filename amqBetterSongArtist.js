@@ -1,19 +1,24 @@
 // ==UserScript==
 // @name         AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      1.5.2
+// @version      1.6.0
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
 // @grant        none
-// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/songArtistsDropdown.js
-// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/songArtistsDropdown.js
+// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js
+// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js
 // @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/simpleLogger.js
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @copyright    MIT license
 // ==/UserScript==
 // It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
 // I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
+
+/* Scoring Mode:
+0 - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
+1 - artist may contain only one of participating artists (for easier difficulty) */
+let scoringMode = 0
 
 let scoreboardReady = false,
     playerDataReady = false,
@@ -23,8 +28,9 @@ let scoreboardReady = false,
     titles,
     artists,
     titlesInit = false,
-    artistsInit = false;
-
+    artistsInit = false,
+    submitedTitle = null,
+    submitedArtist = null
 
 // listeners
 let quizReadyRigTracker,
@@ -49,6 +55,7 @@ function doCORSRequest(options) {
     let x = new XMLHttpRequest();
     x.open(options.method, cors_api_url + options.url);
     x.onload = x.onerror = function () {
+
         if (options.type === 'titles') {
             titles = x.responseText
             titles = JSON.parse(titles)
@@ -63,9 +70,6 @@ function doCORSRequest(options) {
             artistInit = true
         }
     };
-    if (/^POST/i.test(options.method)) {
-        x.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    }
     x.send(options.data);
 }
 
@@ -124,17 +128,34 @@ quizReadyRigTracker = new Listener("quiz ready", (data) => {
     //Fetches title and artist list from an API
     titles = ''
     artists = ''
-    doCORSRequest({
-        method: 'get',
-        url: `https://www.4lajf.com/api/autocomplete?type=titles`,
-        type: 'titles'
-    });
 
-    doCORSRequest({
-        method: 'get',
-        url: `https://www.4lajf.com/api/autocomplete?type=artists`,
-        type: 'artists'
-    });
+    if (scoringMode === 1) {
+        doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+            type: 'titles'
+        });
+
+        doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=loneArtists`,
+            type: 'artists'
+        });
+    } else {
+        doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+            type: 'titles'
+        });
+
+        doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=artists`,
+            type: 'artists'
+        });
+    }
+
+
 
     playerAmount = Object.entries(quiz.players).length
     returningToLobby = false;
@@ -152,17 +173,31 @@ joinLobbyListener = new Listener("Join Game", (payload) => {
     if (titlesInit === false && artistsInit === false) {
         titles = ''
         artists = ''
-        doCORSRequest({
-            method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
-            type: 'titles'
-        });
+        if (scoringMode === 1) {
+            doCORSRequest({
+                method: 'get',
+                url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+                type: 'titles'
+            });
 
-        doCORSRequest({
-            method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=artists`,
-            type: 'artists'
-        });
+            doCORSRequest({
+                method: 'get',
+                url: `https://www.4lajf.com/api/autocomplete?type=loneArtists`,
+                type: 'artists'
+            });
+        } else {
+            doCORSRequest({
+                method: 'get',
+                url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+                type: 'titles'
+            });
+
+            doCORSRequest({
+                method: 'get',
+                url: `https://www.4lajf.com/api/autocomplete?type=artists`,
+                type: 'artists'
+            });
+        }
     }
 
     if (payload.error) {
@@ -190,6 +225,16 @@ quizEndTracker = new Listener("quiz end result", (result) => {
 })
 
 nextSongTrakcer = new Listener("play next song", (result) => {
+    if (!playerDataReady) {
+        initialisePlayerData();
+    }
+    if (!scoreboardReady) {
+        initialiseScoreboard();
+        if (playerDataReady) {
+            writeRigToScoreboard();
+        }
+    }
+
     writeRigToScoreboard()
 })
 
@@ -322,25 +367,6 @@ class SongArtistMode {
     }
 
     #showSong = (playerName, song, correct) => {
-        if (!playerDataReady) {
-            initialisePlayerData();
-        }
-        if (!scoreboardReady) {
-            initialiseScoreboard();
-            if (playerDataReady) {
-                writeRigToScoreboard();
-            }
-        }
-
-        for (let i = 0; i < playerAmount; i++) {
-            if (quiz.players[i]._name === playerName) {
-                if (correct) {
-                    playerData[i].rig++;
-                    writeRigToScoreboard()
-                }
-            }
-        }
-
         const avatarSlot = this.#playerContainers.get(playerName)
         if (avatarSlot === undefined) {
             return
@@ -353,25 +379,6 @@ class SongArtistMode {
     }
 
     #showArtist = (playerName, artist, correct) => {
-        if (!playerDataReady) {
-            initialisePlayerData();
-        }
-        if (!scoreboardReady) {
-            initialiseScoreboard();
-            if (playerDataReady) {
-                writeRigToScoreboard();
-            }
-        }
-
-        for (let i = 0; i < playerAmount; i++) {
-            if (quiz.players[i]._name === playerName) {
-                if (correct) {
-                    playerData[i].rig++;
-                    writeRigToScoreboard()
-                }
-            }
-        }
-
         const avatarSlot = this.#playerContainers.get(playerName)
         if (avatarSlot === undefined) {
             return
@@ -408,6 +415,8 @@ class SongArtistMode {
     }
 
     #reset = () => {
+        submitedTitle = null
+        submitedArtist = null
         this.#playerHashesSong.clear()
         this.#playerHashesArtist.clear()
         this.#playerHashesSongLocked.clear()
@@ -479,7 +488,7 @@ class SongArtistMode {
                 for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
                     let songElIndex = data[i].toLowerCase().indexOf(songsInputElement.value.toLowerCase())
-                    data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, songsInputElement.value.length)}</b>${data[i].substr(songsInputElement.value.length, data[i].length)}`
+                    /*                     data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, songsInputElement.value.length)}</b>${data[i].substr(songsInputElement.value.length, data[i].length)}` */
                     el.innerHTML = data[i]
                     el.style = 'position: relative; padding: 0.2em 0.5em; cursor: pointer;'
                     el.type = "button"
@@ -581,7 +590,7 @@ class SongArtistMode {
                 for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
                     let songElIndex = data[i].toLowerCase().indexOf(artistsInputElement.value.toLowerCase())
-                    data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, artistsInputElement.value.length)}</b>${data[i].substr(artistsInputElement.value.length, data[i].length)}`
+                    /*                     data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, artistsInputElement.value.length)}</b>${data[i].substr(artistsInputElement.value.length, data[i].length)}` */
                     el.innerHTML = data[i]
                     el.style = 'position: relative; padding: 0.2em 0.5em; cursor: pointer;'
                     el.type = "button"
@@ -791,14 +800,124 @@ class SongArtistMode {
      */
     #answerResultsHelper = (value, hashesMap, scoreMap, answerMap, revealFunction) => {
         hashesMap.forEach((answer, sender) => {
-            if (this.#isCorrect(value, sender, answer)) {
-                const previousScore = scoreMap.get(sender) ?? 0
-                scoreMap.set(sender, previousScore + 1)
-                const displayAnswer = answerMap.get(sender) ?? value
-                revealFunction(sender, displayAnswer, true)
+            if (!submitedArtist) {
+                submitedArtist = 'none'
+            }
+            if (!submitedTitle) {
+                submitedTitle = 'none'
+            }
+
+            if (scoringMode === 1) {
+                let exceptionsList = [`christy&clinton`,
+                    `myth & roid`,
+                    `toss & turn`,
+                    `the s & h & e`,
+                    `maya & z`,
+                    `psy & s`,
+                    `p&p`,
+                    `g & p & s`,
+                    `ja & ja`,
+                    `c&k`,
+                    `king & queen`,
+                    `lisa & ace`,
+                    `dejo & bon`,
+                    `a & times`,
+                    `a & zu & na`,
+                    `zack & hack`,
+                    `swing & cats`,
+                    `a & chi-a & chi`,
+                    `f & map`,
+                    `soil&"pimp"sessions`,
+                    `b & b girls`,
+                    `quango & sparky`,
+                    `takao & the view`,
+                    `mon & ster`,
+                    `sun&lunar`,
+                    `anamu & maki`,
+                    `loren&mash`,
+                    `daniel & cherry`,
+                    `2&`,
+                    `junich & jjr`,
+                    `chage&aska`,
+                    `tart & anmitsu`,
+                    `chie & mar-kun`,
+                    `sachi & juri`,
+                    `aya&chika from d&d`,
+                    `hikakin & seikin`,
+                    `r & o & n feat. junko from electlink`,
+                    `r & o & n`,
+                    `r & o & n featuring takuto maeda from count lost`,
+                    `bread & butter`,
+                    `rough & ready`,
+                    `fear, and loathing in las vegas`,
+                    `hello, happy world!`,
+                    `mix speaker's,inc.`,
+                    `okino, shuntaro`,
+                    `kagrra,`,
+                    `wake up, girls!`,
+                    `earth, wind & fire`,
+                    `wake up, may'n!`,
+                    `cha,ho-sok, miki`,
+                    `yvy ft.ra'z, hayes`,
+                    `new man co.,ltd.`,
+                    `kotoko×altima`,
+                    `nami with shige×2＆s/n`,
+                    `daisy×daisy`,
+                    `chun×4`,
+                    `kaf × kafu`,
+                    `psychic lover×suara`,
+                    `salyu × salyu`,
+                    `lip×lip`,
+                    `gothic×luck`,
+                    `sister×sisters`,
+                    `u×mishi`,
+                    `clover×clover`,
+                    `nana×nana`,
+                    `kanon×kanon`,
+                    `sket×sketch`,
+                    `ok go×perfume`,
+                    `high×joker`,
+                    `beit, high×joker, w`,
+                ]
+                let possibleAnswers = ''
+                if (exceptionsList.includes(submitedArtist.toLowerCase())) {
+                    possibleAnswers = [value]
+                } else {
+                    possibleAnswers = value.split(new RegExp(/feat\.|,|featuring|feat|meets|touches|&|×|ft./, "gi"));
+                }
+
+                for (let i = 0; i < possibleAnswers.length; i++) {
+                    possibleAnswers[i] = possibleAnswers[i].trim().toLowerCase()
+                }
+
+                if (possibleAnswers.includes(submitedTitle.toLowerCase()) || possibleAnswers.includes(submitedArtist.toLowerCase())) {
+                    for (let i = 0; i < playerAmount; i++) {
+                        if (quiz.players[i]._name === sender) {
+                            playerData[i].rig++;
+                        }
+                    }
+                    writeRigToScoreboard()
+                    const displayAnswer = answerMap.get(sender) ?? value
+                    revealFunction(sender, displayAnswer, true)
+                } else {
+                    const displayAnswer = answerMap.get(sender) ?? "WRONG"
+                    revealFunction(sender, displayAnswer, false)
+                }
+
             } else {
-                const displayAnswer = answerMap.get(sender) ?? "WRONG"
-                revealFunction(sender, displayAnswer, false)
+                if (value === submitedTitle || value === submitedArtist) {
+                    for (let i = 0; i < playerAmount; i++) {
+                        if (quiz.players[i]._name === sender) {
+                            playerData[i].rig++;
+                        }
+                    }
+                    writeRigToScoreboard()
+                    const displayAnswer = answerMap.get(sender) ?? value
+                    revealFunction(sender, displayAnswer, true)
+                } else {
+                    const displayAnswer = answerMap.get(sender) ?? "WRONG"
+                    revealFunction(sender, displayAnswer, false)
+                }
             }
         }
         )
@@ -854,6 +973,13 @@ class SongArtistMode {
      * @param {String} value
      */
     #submit = (header, value) => {
+        if (header === 'hs') {
+            submitedTitle = value
+        }
+        if (header === 'ha') {
+            submitedArtist = value
+        }
+
         const timestamp = Date.now().toString(16).toUpperCase()
         const hash = this.#hash(value, window.selfName, timestamp)
         const message = this.#signature + header + hash + timestamp
