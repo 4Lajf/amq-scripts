@@ -10,7 +10,6 @@
 // @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js
 // @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/simpleLogger.js
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
-// @require      https://cdn.jsdelivr.net/npm/minisearch@5.0.0/dist/umd/index.min.js
 // @copyright    MIT license
 // ==/UserScript==
 // It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
@@ -197,10 +196,10 @@ quizReadyRigTracker = new Listener("quiz ready", async (data) => {
             type: 'artists'
         });
     }
+
     gameChat.systemMessage('Current Scoring Mode: 1')
     gameChat.systemMessage('Press [Alt+G] to change it.')
     document.addEventListener('keydown', changeMode)
-
 
     playerAmount = Object.entries(quiz.players).length
     returningToLobby = false;
@@ -209,6 +208,8 @@ quizReadyRigTracker = new Listener("quiz ready", async (data) => {
     answerResultsRigTracker.bindListener();
     initialiseScoreboard();
     initialisePlayerData();
+
+    await sleep(2000)
 })
 
 // Reset data when joining a lobby
@@ -506,6 +507,27 @@ class SongArtistMode {
         const songsListElement = songTitlesInput.querySelector('#songs-list')
         const songsInputElement = songTitlesInput.querySelector('#qpAnswerInput')
 
+        function closeDropdown(element) {
+            element.innerHTML = ''
+            dropdownFocus = -1
+        }
+
+        songsInputElement.addEventListener('input', function () {
+            if (!songsInputElement.value) {
+                closeDropdown(songsListElement)
+            }
+
+            if (songsInputElement.value) {
+                const filteredData = filterData(titles, songsInputElement.value)
+                loadTitleData(filteredData, songsListElement)
+                songDropdownItems = songsListElement.querySelectorAll('li')
+            }
+        })
+
+        function filterData(data, query) {
+            return data.filter((x => x.replace(/[^a-zA-Z0-9 ]/g, ' ').toLowerCase().includes(query.toLowerCase())))
+        }
+
         function loadTitleData(data, element) {
 
             let dataLength = data.length
@@ -538,27 +560,6 @@ class SongArtistMode {
                 }
             }
         }
-
-        function closeDropdown(element) {
-            element.innerHTML = ''
-            dropdownFocus = -1
-        }
-        function filterData(data, searchText) {
-            data = data.filter((x => x.toLowerCase().includes(searchText.toLowerCase())))
-            return data.sort((a, b) => a.length - b.length);
-        }
-
-        songsInputElement.addEventListener('input', function () {
-            if (!songsInputElement.value) {
-                closeDropdown(songsListElement)
-            }
-
-            if (songsInputElement.value) {
-                const filteredData = filterData(titles, songsInputElement.value)
-                loadTitleData(filteredData, songsListElement)
-                songDropdownItems = songsListElement.querySelectorAll('li')
-            }
-        })
 
         // A hacky way to tell the dropdown to close once it's out of focus
         document.addEventListener("click", function () {
