@@ -16,10 +16,10 @@
 // It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
 // I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
 //TODO: Fix Highlighting, make better filter search
-/* 
+/*
 Scoring Mode:
 0 - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
-1 - artist may contain only one of participating artists (for easier difficulty) 
+1 - artist may contain only one of participating artists (for easier difficulty)
 */
 let scoringMode = 1
 
@@ -33,9 +33,7 @@ let modeBinary = true,
     titles,
     artists,
     titlesInit = false,
-    artistsInit = false,
-    titleSearch,
-    artistSearch;
+    artistsInit = false;
 
 // listeners
 let quizReadyRigTracker,
@@ -167,13 +165,6 @@ async function changeMode(e) {
                 type: 'artists'
             });
         }
-        await sleep(2500)
-        titleSearch.removeAll()
-        titleSearch.addAll(titles)
-
-        artistSearch.removeAll()
-        artistSearch.addAll(artists)
-
         gameChat.systemMessage(modeBinary ? "Scoring Mode: 1" : "Scoring Mode: 0");
     }
 }
@@ -206,29 +197,6 @@ quizReadyRigTracker = new Listener("quiz ready", async (data) => {
             type: 'artists'
         });
     }
-    await sleep(2500)
-    titleSearch = new MiniSearch({
-        fields: ['entry'], // fields to index for full-text search
-        storeFields: ['entry'], // fields to return with search results
-        searchOptions: {
-            prefix: true,
-            fuzzy: 0.1
-        }
-    })
-    titleSearch.addAll(titles)
-
-    artistSearch = new MiniSearch({
-        fields: ['entry'], // fields to index for full-text search
-        storeFields: ['entry'], // fields to return with search results
-        searchOptions: {
-            prefix: true,
-            fuzzy: 0.1
-        }
-    })
-
-    // Index all documents
-    artistSearch.addAll(artists)
-
     gameChat.systemMessage('Current Scoring Mode: 1')
     gameChat.systemMessage('Press [Alt+G] to change it.')
     document.addEventListener('keydown', changeMode)
@@ -275,28 +243,6 @@ joinLobbyListener = new Listener("Join Game", async (payload) => {
                 type: 'artists'
             });
         }
-        await sleep(2500)
-        titleSearch = new MiniSearch({
-            fields: ['entry'], // fields to index for full-text search
-            storeFields: ['entry'], // fields to return with search results
-            searchOptions: {
-                prefix: true,
-                fuzzy: 0.1
-            }
-        })
-        titleSearch.addAll(titles)
-
-        artistSearch = new MiniSearch({
-            fields: ['entry'], // fields to index for full-text search
-            storeFields: ['entry'], // fields to return with search results
-            searchOptions: {
-                prefix: true,
-                fuzzy: 0.1
-            }
-        })
-
-        // Index all documents
-        artistSearch.addAll(artists)
     }
 
     if (payload.error) {
@@ -360,7 +306,6 @@ class SongArtistMode {
     #playerContainers = new Map()
     #currentSong = ""
     #currentArtist = ""
-    #playerScores = []
     debug = false
 
     #logger = new SimpleLogger("Song-Artist Mode")
@@ -598,17 +543,9 @@ class SongArtistMode {
             element.innerHTML = ''
             dropdownFocus = -1
         }
-
-        function filterData(data, query) {
-            let search = data.search(query)
-            let results = []
-            for (let i = 0; i < search.length; i++) {
-                if (i > 50) {
-                    break;
-                }
-                results.push(search[i].entry)
-            }
-            return results
+        function filterData(data, searchText) {
+            data = data.filter((x => x.toLowerCase().includes(searchText.toLowerCase())))
+            return data.sort((a, b) => a.length - b.length);
         }
 
         songsInputElement.addEventListener('input', function () {
@@ -617,7 +554,7 @@ class SongArtistMode {
             }
 
             if (songsInputElement.value) {
-                const filteredData = filterData(titleSearch, songsInputElement.value)
+                const filteredData = filterData(titles, songsInputElement.value)
                 loadTitleData(filteredData, songsListElement)
                 songDropdownItems = songsListElement.querySelectorAll('li')
             }
@@ -719,7 +656,7 @@ class SongArtistMode {
             }
 
             if (artistsInputElement.value) {
-                const filteredData = filterData(artistSearch, artistsInputElement.value)
+                const filteredData = filterData(artists, artistsInputElement.value)
                 loadArtistData(filteredData, artistsListElement)
                 artisDropdownItems = artistsListElement.querySelectorAll('li')
             }
