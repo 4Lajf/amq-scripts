@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      1.6.0
+// @version      1.6.1
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -10,11 +10,12 @@
 // @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js
 // @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/simpleLogger.js
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
+// @require      https://cdn.jsdelivr.net/npm/minisearch@5.0.0/dist/umd/index.min.js
 // @copyright    MIT license
 // ==/UserScript==
 // It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
 // I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
-
+//TODO: Fix Highlighting, make better filter search
 /* 
 Scoring Mode:
 0 - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
@@ -22,7 +23,9 @@ Scoring Mode:
 */
 let scoringMode = 1
 
-let scoreboardReady = false,
+//true = scoringMode 1; false = scoringMode 0
+let modeBinary = true,
+    scoreboardReady = false,
     playerDataReady = false,
     returningToLobby = false,
     playerData = {},
@@ -31,16 +34,15 @@ let scoreboardReady = false,
     artists,
     titlesInit = false,
     artistsInit = false,
-    submitedTitle = null,
-    submitedArtist = null
+    titleSearch,
+    artistSearch;
 
 // listeners
 let quizReadyRigTracker,
     answerResultsRigTracker,
     joinLobbyListener,
     spectateLobbyListener,
-    quizEndTracker,
-    nextSongTrakcer;
+    quizEndTracker;
 
 if (document.getElementById('startPage')) return;
 
@@ -52,8 +54,13 @@ let loadInterval = setInterval(() => {
     }
 }, 500);
 
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+//This is a proxy so I can do a cross-origin API request to my site
 let cors_api_url = 'https://amq-proxy.herokuapp.com/';
-function doCORSRequest(options) {
+async function doCORSRequest(options) {
     let x = new XMLHttpRequest();
     x.open(options.method, cors_api_url + options.url);
     x.onload = x.onerror = function () {
@@ -125,56 +132,16 @@ function initialiseScoreboard() {
     scoreboardReady = true;
 }
 
-// Initial setup on quiz start
-quizReadyRigTracker = new Listener("quiz ready", (data) => {
-    //Fetches title and artist list from an API
-    titles = ''
-    artists = ''
+//Alt+G to change Scoring Mode
+async function changeMode(e) {
+    if (e.altKey && e.key == 'g') {
+        modeBinary = !modeBinary;
+        if (modeBinary) {
+            scoringMode = 1
+        } else {
+            scoringMode = 0
+        }
 
-    if (scoringMode === 1) {
-        doCORSRequest({
-            method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
-            type: 'titles'
-        });
-
-        doCORSRequest({
-            method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=loneArtists`,
-            type: 'artists'
-        });
-    } else {
-        doCORSRequest({
-            method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
-            type: 'titles'
-        });
-
-        doCORSRequest({
-            method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=artists`,
-            type: 'artists'
-        });
-    }
-
-
-
-    playerAmount = Object.entries(quiz.players).length
-    returningToLobby = false;
-    clearPlayerData();
-    clearScoreboard();
-    answerResultsRigTracker.bindListener();
-    initialiseScoreboard();
-    initialisePlayerData();
-})
-
-// Reset data when joining a lobby
-joinLobbyListener = new Listener("Join Game", (payload) => {
-    titlesInit = false
-    artistInit = false
-    if (titlesInit === false && artistsInit === false) {
-        titles = ''
-        artists = ''
         if (scoringMode === 1) {
             doCORSRequest({
                 method: 'get',
@@ -184,7 +151,7 @@ joinLobbyListener = new Listener("Join Game", (payload) => {
 
             doCORSRequest({
                 method: 'get',
-                url: `https://www.4lajf.com/api/autocomplete?type=loneArtists`,
+                url: `https://www.4lajf.com/api/autocomplete?type=uniqueArtists`,
                 type: 'artists'
             });
         } else {
@@ -200,6 +167,136 @@ joinLobbyListener = new Listener("Join Game", (payload) => {
                 type: 'artists'
             });
         }
+        await sleep(2500)
+        titleSearch.removeAll()
+        titleSearch.addAll(titles)
+
+        artistSearch.removeAll()
+        artistSearch.addAll(artists)
+
+        gameChat.systemMessage(modeBinary ? "Scoring Mode: 1" : "Scoring Mode: 0");
+    }
+}
+
+// Initial setup on quiz start
+quizReadyRigTracker = new Listener("quiz ready", async (data) => {
+    //Fetches title and artist list from an API
+    if (scoringMode === 1) {
+        await doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+            type: 'titles'
+        });
+
+        await doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=uniqueArtists`,
+            type: 'artists'
+        });
+    } else {
+        await doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+            type: 'titles'
+        });
+
+        await doCORSRequest({
+            method: 'get',
+            url: `https://www.4lajf.com/api/autocomplete?type=artists`,
+            type: 'artists'
+        });
+    }
+    await sleep(2500)
+    titleSearch = new MiniSearch({
+        fields: ['entry'], // fields to index for full-text search
+        storeFields: ['entry'], // fields to return with search results
+        searchOptions: {
+            prefix: true,
+            fuzzy: 0.1
+        }
+    })
+    titleSearch.addAll(titles)
+
+    artistSearch = new MiniSearch({
+        fields: ['entry'], // fields to index for full-text search
+        storeFields: ['entry'], // fields to return with search results
+        searchOptions: {
+            prefix: true,
+            fuzzy: 0.1
+        }
+    })
+
+    // Index all documents
+    artistSearch.addAll(artists)
+
+    gameChat.systemMessage('Current Scoring Mode: 1')
+    gameChat.systemMessage('Press [Alt+G] to change it.')
+    document.addEventListener('keydown', changeMode)
+
+
+    playerAmount = Object.entries(quiz.players).length
+    returningToLobby = false;
+    clearPlayerData();
+    clearScoreboard();
+    answerResultsRigTracker.bindListener();
+    initialiseScoreboard();
+    initialisePlayerData();
+})
+
+// Reset data when joining a lobby
+joinLobbyListener = new Listener("Join Game", async (payload) => {
+    titlesInit = false
+    artistInit = false
+    if (titlesInit === false && artistsInit === false) {
+        titles = ''
+        artists = ''
+        if (scoringMode === 1) {
+            doCORSRequest({
+                method: 'get',
+                url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+                type: 'titles'
+            });
+
+            doCORSRequest({
+                method: 'get',
+                url: `https://www.4lajf.com/api/autocomplete?type=uniqueArtists`,
+                type: 'artists'
+            });
+        } else {
+            doCORSRequest({
+                method: 'get',
+                url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+                type: 'titles'
+            });
+
+            doCORSRequest({
+                method: 'get',
+                url: `https://www.4lajf.com/api/autocomplete?type=artists`,
+                type: 'artists'
+            });
+        }
+        await sleep(2500)
+        titleSearch = new MiniSearch({
+            fields: ['entry'], // fields to index for full-text search
+            storeFields: ['entry'], // fields to return with search results
+            searchOptions: {
+                prefix: true,
+                fuzzy: 0.1
+            }
+        })
+        titleSearch.addAll(titles)
+
+        artistSearch = new MiniSearch({
+            fields: ['entry'], // fields to index for full-text search
+            storeFields: ['entry'], // fields to return with search results
+            searchOptions: {
+                prefix: true,
+                fuzzy: 0.1
+            }
+        })
+
+        // Index all documents
+        artistSearch.addAll(artists)
     }
 
     if (payload.error) {
@@ -213,30 +310,13 @@ joinLobbyListener = new Listener("Join Game", (payload) => {
 })
 
 // stuff to do on answer reveal
-answerResultsRigTracker = new Listener("answer results", (result) => {
+answerResultsRigTracker = new Listener("answer results", async (result) => {
     for (let player of result.players) {
         if (player.correct === true) {
             playerData[player.gamePlayerId].score++;
-            writeRigToScoreboard()
         }
     }
-})
-
-quizEndTracker = new Listener("quiz end result", (result) => {
-    writeRigToScoreboard()
-})
-
-nextSongTrakcer = new Listener("play next song", (result) => {
-    if (!playerDataReady) {
-        initialisePlayerData();
-    }
-    if (!scoreboardReady) {
-        initialiseScoreboard();
-        if (playerDataReady) {
-            writeRigToScoreboard();
-        }
-    }
-
+    await sleep(100)
     writeRigToScoreboard()
 })
 
@@ -250,12 +330,17 @@ spectateLobbyListener = new Listener("Spectate Game", (payload) => {
     clearScoreboard();
 })
 
+//Remove Alt+G listener on the end of the game
+quizEndTracker = new Listener("quiz end result", (result) => {
+    document.removeEventListener('keydown', changeMode)
+    writeRigToScoreboard()
+})
+
 quizReadyRigTracker.bindListener();
 answerResultsRigTracker.bindListener();
 joinLobbyListener.bindListener();
 spectateLobbyListener.bindListener();
 quizEndTracker.bindListener();
-nextSongTrakcer.bindListener();
 
 class SongArtistMode {
     #signature = 'sa-'
@@ -417,8 +502,6 @@ class SongArtistMode {
     }
 
     #reset = () => {
-        submitedTitle = null
-        submitedArtist = null
         this.#playerHashesSong.clear()
         this.#playerHashesArtist.clear()
         this.#playerHashesSongLocked.clear()
@@ -454,18 +537,19 @@ class SongArtistMode {
         const answerInput = document.getElementById("qpAnswerInputContainer")
         const container = document.createElement("div")
         container.id = "songartist"
-
         const songContainer = document.createElement("div")
         songContainer.id = "song"
         const songTitlesInput = answerInput.cloneNode(true)
         const songTitlesAnswerField = songTitlesInput.childNodes[3]
 
+        // Creating "title" input field
         songTitlesAnswerField.placeholder = "Song Title"
         songTitlesAnswerField.maxLength = "" + 150 - this.#signature.length - 2
         songTitlesInput.removeChild(songTitlesInput.childNodes[1])//remove skip button
         songContainer.appendChild(songTitlesInput)
         container.appendChild(songContainer)
 
+        // Create autocomplete dropdown (ul) for titles field
         let dropdownFocus = -1
         const titlesList = document.createElement("ul");
         titlesList.id = "songs-list"
@@ -477,7 +561,7 @@ class SongArtistMode {
         const songsListElement = songTitlesInput.querySelector('#songs-list')
         const songsInputElement = songTitlesInput.querySelector('#qpAnswerInput')
 
-        function loadSongData(data, element) {
+        function loadTitleData(data, element) {
 
             let dataLength = data.length
             if (dataLength >= 50) {
@@ -485,6 +569,7 @@ class SongArtistMode {
                 data.splice(50, data.length);
             }
 
+            // Create autocomplete dropdown elements for titles (li)
             if (data) {
                 element.innerHTML = ''
                 for (let i = 0; i < dataLength; i++) {
@@ -498,6 +583,7 @@ class SongArtistMode {
                     el.setAttribute('onmouseout', `this.style.backgroundColor='#424242'`)
                     el.setAttribute('onfocusin', `this.style.backgroundColor='#3d6d8f'`)
                     el.setAttribute('onfocusout', `this.style.backgroundColor='#424242'`)
+                    //Required for ".focus()" to work
                     el.setAttribute('tabindex', '-1')
                     el.addEventListener('click', function () {
                         songsInputElement.value = el.innerText
@@ -513,9 +599,16 @@ class SongArtistMode {
             dropdownFocus = -1
         }
 
-        function filterData(data, searchText) {
-            data = data.filter((x => x.toLowerCase().includes(searchText.toLowerCase())))
-            return data.sort((a, b) => a.length - b.length);
+        function filterData(data, query) {
+            let search = data.search(query)
+            let results = []
+            for (let i = 0; i < search.length; i++) {
+                if (i > 50) {
+                    break;
+                }
+                results.push(search[i].entry)
+            }
+            return results
         }
 
         songsInputElement.addEventListener('input', function () {
@@ -523,14 +616,14 @@ class SongArtistMode {
                 closeDropdown(songsListElement)
             }
 
-
             if (songsInputElement.value) {
-                const filteredData = filterData(titles, songsInputElement.value)
-                loadSongData(filteredData, songsListElement)
+                const filteredData = filterData(titleSearch, songsInputElement.value)
+                loadTitleData(filteredData, songsListElement)
                 songDropdownItems = songsListElement.querySelectorAll('li')
             }
         })
 
+        // A hacky way to tell the dropdown to close once it's out of focus
         document.addEventListener("click", function () {
             closeDropdown(songsListElement)
         })
@@ -554,11 +647,18 @@ class SongArtistMode {
                 songsInputElement.value = document.activeElement.innerText
                 closeDropdown(songsListElement)
             }
-            if (e.key == 'Escape' || e.key == 'Tab') {
+            if (e.key == 'Escape') {
+                closeDropdown(songsListElement)
+            }
+            if (e.key == 'Tab') {
+                if (document.activeElement.innerText !== '') {
+                    songsInputElement.value = document.activeElement.innerText
+                }
                 closeDropdown(songsListElement)
             }
         })
 
+        // Creating "artist" input field
         const artistContainer = document.createElement("div")
         artistContainer.id = "artist"
         const songArtistsInput = answerInput.cloneNode(true)
@@ -569,6 +669,7 @@ class SongArtistMode {
         artistContainer.appendChild(songArtistsInput)
         container.appendChild(artistContainer)
 
+        // Creating autocomplete dropdown for artists (ul)
         const artistsList = document.createElement("ul");
         artistsList.id = "artists-list"
         artistsList.style = 'max-height: 190px; overflow: hidden; position: absolute; z-index: 9999 !important; width:100%;background: #424242; border: none; box-shadow: 0 0 10px 2px rgb(0 0 0); border-radius: 0.3em; margin: 0.2em 0 0; text-shadow: none; box-sizing: border-box; list-style: none; padding: 0;'
@@ -589,6 +690,7 @@ class SongArtistMode {
 
             if (data) {
                 element.innerHTML = ''
+                // Creating autocomplete dropdown elements for artists (li)
                 for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
                     let songElIndex = data[i].toLowerCase().indexOf(artistsInputElement.value.toLowerCase())
@@ -600,6 +702,7 @@ class SongArtistMode {
                     el.setAttribute('onmouseout', `this.style.backgroundColor='#424242'`)
                     el.setAttribute('onfocusin', `this.style.backgroundColor='#3d6d8f'`)
                     el.setAttribute('onfocusout', `this.style.backgroundColor='#424242'`)
+                    //Required for ".focus()" to work
                     el.setAttribute('tabindex', '-1')
                     el.addEventListener('click', function () {
                         artistsInputElement.value = el.innerText
@@ -616,12 +719,13 @@ class SongArtistMode {
             }
 
             if (artistsInputElement.value) {
-                const filteredData = filterData(artists, artistsInputElement.value)
+                const filteredData = filterData(artistSearch, artistsInputElement.value)
                 loadArtistData(filteredData, artistsListElement)
                 artisDropdownItems = artistsListElement.querySelectorAll('li')
             }
         })
 
+        // A hacky way to tell the dropdown to close once it's out of focus
         document.addEventListener("click", function () {
             closeDropdown(artistsListElement)
         })
@@ -645,7 +749,13 @@ class SongArtistMode {
                 artistsInputElement.value = document.activeElement.innerText
                 closeDropdown(artistsListElement)
             }
-            if (e.key == 'Escape' || e.key == 'Tab') {
+            if (e.key == 'Escape') {
+                closeDropdown(artistsListElement)
+            }
+            if (e.key == 'Tab') {
+                if (document.activeElement.innerText !== '') {
+                    artistsInputElement.value = document.activeElement.innerText
+                }
                 closeDropdown(artistsListElement)
             }
         })
@@ -802,11 +912,9 @@ class SongArtistMode {
      */
     #answerResultsHelper = (value, hashesMap, scoreMap, answerMap, revealFunction) => {
         hashesMap.forEach((answer, sender) => {
-            if (!submitedArtist) {
-                submitedArtist = 'none'
-            }
-            if (!submitedTitle) {
-                submitedTitle = 'none'
+
+            if (!answerMap.get(sender)) {
+                answerMap.set(sender, '')
             }
 
             if (scoringMode === 1) {
@@ -882,17 +990,16 @@ class SongArtistMode {
                     `beit, high×joker, w`,
                 ]
                 let possibleAnswers = ''
-                if (exceptionsList.includes(submitedArtist.toLowerCase())) {
+                if (exceptionsList.includes(answerMap.get(sender).toLowerCase())) {
                     possibleAnswers = [value]
                 } else {
                     possibleAnswers = value.split(new RegExp(/feat\.|,|featuring|feat|meets|touches|&|×|ft./, "gi"));
                 }
-
                 for (let i = 0; i < possibleAnswers.length; i++) {
                     possibleAnswers[i] = possibleAnswers[i].trim().toLowerCase()
                 }
 
-                if (possibleAnswers.includes(submitedTitle.toLowerCase()) || possibleAnswers.includes(submitedArtist.toLowerCase())) {
+                if (possibleAnswers.includes(answerMap.get(sender).toLowerCase()) || possibleAnswers.includes(answerMap.get(sender).toLowerCase())) {
                     for (let i = 0; i < playerAmount; i++) {
                         if (quiz.players[i]._name === sender) {
                             playerData[i].rig++;
@@ -907,7 +1014,7 @@ class SongArtistMode {
                 }
 
             } else {
-                if (value === submitedTitle || value === submitedArtist) {
+                if (this.#isCorrect(value, sender, answer)) {
                     for (let i = 0; i < playerAmount; i++) {
                         if (quiz.players[i]._name === sender) {
                             playerData[i].rig++;
@@ -975,13 +1082,6 @@ class SongArtistMode {
      * @param {String} value
      */
     #submit = (header, value) => {
-        if (header === 'hs') {
-            submitedTitle = value
-        }
-        if (header === 'ha') {
-            submitedArtist = value
-        }
-
         const timestamp = Date.now().toString(16).toUpperCase()
         const hash = this.#hash(value, window.selfName, timestamp)
         const message = this.#signature + header + hash + timestamp
