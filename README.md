@@ -15,6 +15,7 @@
 - Guess the anime song by title or aritst
 - Has AMQ-like dropdown (auto-updating, hilighting matches, ignoring special characters, supports partial searching, navigateable with arrows etc.)
 - And a leaderboard when you can track scores in place of the existing one
+- AND TWO score modes! One is the original and the other one allows you to enter only one of the performing artists allowing for an easier playthrough.
 - Some popular titles may not be there because they weren't in the expand library too. You can let me know by creating an issue in this github repo. Make sure to respond to your issue if you find more missing titles instead of creating a new one everytime.
 ---
 ### amqHotkeyFunctions.js
