@@ -546,7 +546,6 @@ class SongArtistMode {
                 element.innerHTML = ''
                 for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
-                    console.log(data[i])
                     let songElIndex = data[i].toLowerCase().replace(/[^a-zA-Z0-9 ]/g, ' ').indexOf(titleValue.toLowerCase())
                     data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, titleValue.length)}</b>${data[i].substr(titleValue.length + songElIndex, data[i].length)}`
                     el.innerHTML = data[i]
@@ -630,8 +629,8 @@ class SongArtistMode {
             }
 
             if (artistsInputElement.value) {
-                artistValue = songsInputElement.value
-                artistValue = titleValue.replace(/[^a-zA-Z0-9 ]/g, ' ')
+                artistValue = artistsInputElement.value
+                artistValue = artistValue.replace(/[^a-zA-Z0-9 ]/g, ' ')
                 const filteredData = filterData(artists, artistValue)
                 loadArtistData(filteredData, artistsListElement)
                 artisDropdownItems = artistsListElement.querySelectorAll('li')
