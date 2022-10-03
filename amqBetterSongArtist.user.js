@@ -6,8 +6,8 @@
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
 // @grant        none
-// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js
-// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.js
+// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.user.js
+// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.user.js
 // @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/simpleLogger.js
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @copyright    MIT license
