@@ -947,8 +947,6 @@ class SongArtistMode {
                 for (let i = 0; i < possibleAnswers.length; i++) {
                     possibleAnswers[i] = possibleAnswers[i].trim().toLowerCase()
                 }
-                console.log(answerMap.get(sender).toLowerCase())
-                console.log(possibleAnswers)
                 if (possibleAnswers.includes(answerMap.get(sender).toLowerCase())) {
                     for (let i = 0; i < playerAmount; i++) {
                         if (quiz.players[i]._name === sender) {
