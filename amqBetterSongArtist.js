@@ -14,7 +14,7 @@
 // ==/UserScript==
 // It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
 // I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
-//TODO: Fix Highlighting, make better filter search
+//TODO: Fix Highlighting
 /*
 Scoring Mode:
 0 - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
@@ -32,7 +32,9 @@ let modeBinary = true,
     titles,
     artists,
     titlesInit = false,
-    artistsInit = false;
+    artistsInit = false,
+    titleValue,
+    artistValue;
 
 // listeners
 let quizReadyRigTracker,
@@ -518,13 +520,16 @@ class SongArtistMode {
             }
 
             if (songsInputElement.value) {
-                const filteredData = filterData(titles, songsInputElement.value)
+                titleValue = songsInputElement.value
+                titleValue = titleValue.replace(/[^a-zA-Z0-9 ]/g, ' ')
+                const filteredData = filterData(titles, titleValue)
                 loadTitleData(filteredData, songsListElement)
                 songDropdownItems = songsListElement.querySelectorAll('li')
             }
         })
 
         function filterData(data, query) {
+            //Ignore everything that isn't a letter or a number
             return data.filter((x => x.replace(/[^a-zA-Z0-9 ]/g, ' ').toLowerCase().includes(query.toLowerCase())))
         }
 
@@ -541,8 +546,9 @@ class SongArtistMode {
                 element.innerHTML = ''
                 for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
-                    let songElIndex = data[i].toLowerCase().indexOf(songsInputElement.value.toLowerCase())
-                    /*                     data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, songsInputElement.value.length)}</b>${data[i].substr(songsInputElement.value.length, data[i].length)}` */
+                    console.log(data[i])
+                    let songElIndex = data[i].toLowerCase().replace(/[^a-zA-Z0-9 ]/g, ' ').indexOf(titleValue.toLowerCase())
+                    data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, titleValue.length)}</b>${data[i].substr(titleValue.length + songElIndex, data[i].length)}`
                     el.innerHTML = data[i]
                     el.style = 'position: relative; padding: 0.2em 0.5em; cursor: pointer;'
                     el.type = "button"
@@ -618,8 +624,21 @@ class SongArtistMode {
         const artistsListElement = songArtistsInput.querySelector('#artists-list')
         const artistsInputElement = songArtistsInput.querySelector('#qpAnswerInput')
 
-        function loadArtistData(data, element) {
+        artistsInputElement.addEventListener('input', function () {
+            if (!artistsInputElement.value) {
+                closeDropdown(artistsListElement)
+            }
 
+            if (artistsInputElement.value) {
+                artistValue = songsInputElement.value
+                artistValue = titleValue.replace(/[^a-zA-Z0-9 ]/g, ' ')
+                const filteredData = filterData(artists, artistValue)
+                loadArtistData(filteredData, artistsListElement)
+                artisDropdownItems = artistsListElement.querySelectorAll('li')
+            }
+        })
+
+        function loadArtistData(data, element) {
             let dataLength = data.length
             if (dataLength >= 50) {
                 dataLength = 50;
@@ -631,8 +650,8 @@ class SongArtistMode {
                 // Creating autocomplete dropdown elements for artists (li)
                 for (let i = 0; i < dataLength; i++) {
                     let el = document.createElement('li');
-                    let songElIndex = data[i].toLowerCase().indexOf(artistsInputElement.value.toLowerCase())
-                    /*                     data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, artistsInputElement.value.length)}</b>${data[i].substr(artistsInputElement.value.length, data[i].length)}` */
+                    let songElIndex = data[i].toLowerCase().replace(/[^a-zA-Z0-9 ]/g, ' ').indexOf(artistValue.toLowerCase())
+                    data[i] = `${data[i].substr(0, songElIndex)}<b style="color:#4497ea;">${data[i].substr(songElIndex, artistValue.length)}</b>${data[i].substr(artistValue.length + songElIndex, data[i].length)}`
                     el.innerHTML = data[i]
                     el.style = 'position: relative; padding: 0.2em 0.5em; cursor: pointer;'
                     el.type = "button"
@@ -650,18 +669,6 @@ class SongArtistMode {
                 }
             }
         }
-
-        artistsInputElement.addEventListener('input', function () {
-            if (!artistsInputElement.value) {
-                closeDropdown(artistsListElement)
-            }
-
-            if (artistsInputElement.value) {
-                const filteredData = filterData(artists, artistsInputElement.value)
-                loadArtistData(filteredData, artistsListElement)
-                artisDropdownItems = artistsListElement.querySelectorAll('li')
-            }
-        })
 
         // A hacky way to tell the dropdown to close once it's out of focus
         document.addEventListener("click", function () {
