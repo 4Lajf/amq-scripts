@@ -936,14 +936,20 @@ class SongArtistMode {
                 let possibleAnswers = ''
                 if (exceptionsList.includes(answerMap.get(sender).toLowerCase())) {
                     possibleAnswers = [value]
-                } else {
-                    possibleAnswers = value.split(new RegExp(/feat\.|,|featuring|feat|meets|touches|&|×|ft./, "gi"));
+                } else if (/featrung|feat.[a-zA-Z0-9 ](.)*/gi.test(answerMap.get(sender).toLocaleLowerCase())) {
+                    let matchValue = value
+                    matchValue = matchValue.match(/featrung|feat.[a-zA-Z0-9 ](.)*/gi)[0]
+                    possibleAnswers = matchValue.split(new RegExp(/feat\.|featuring|feat|ft.|,/, "gi"));
+                }
+                else {
+                    possibleAnswers = value.split(new RegExp(/feat\.|featuring|feat|meets|touches|&|×|ft./, "gi"));
                 }
                 for (let i = 0; i < possibleAnswers.length; i++) {
                     possibleAnswers[i] = possibleAnswers[i].trim().toLowerCase()
                 }
-
-                if (possibleAnswers.includes(answerMap.get(sender).toLowerCase()) || possibleAnswers.includes(answerMap.get(sender).toLowerCase())) {
+                console.log(answerMap.get(sender).toLowerCase())
+                console.log(possibleAnswers)
+                if (possibleAnswers.includes(answerMap.get(sender).toLowerCase())) {
                     for (let i = 0; i < playerAmount; i++) {
                         if (quiz.players[i]._name === sender) {
                             playerData[i].rig++;
