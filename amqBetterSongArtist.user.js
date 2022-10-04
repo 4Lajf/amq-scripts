@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      1.6.1
+// @version      1.6.2
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -14,7 +14,10 @@
 // ==/UserScript==
 // It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
 // I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
-//TODO: Fix Highlighting
+
+/* Limits how many songs can be rendered when you type a keyword. Larger number means more lag and requires more computing power. */
+let dropdownListLimit = 50
+
 /*
 Scoring Mode:
 0 - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
@@ -536,9 +539,9 @@ class SongArtistMode {
         function loadTitleData(data, element) {
 
             let dataLength = data.length
-            if (dataLength >= 50) {
-                dataLength = 50;
-                data.splice(50, data.length);
+            if (dataLength >= dropdownListLimit) {
+                dataLength = dropdownListLimit;
+                data.splice(dropdownListLimit, data.length);
             }
 
             // Create autocomplete dropdown elements for titles (li)
@@ -639,9 +642,9 @@ class SongArtistMode {
 
         function loadArtistData(data, element) {
             let dataLength = data.length
-            if (dataLength >= 50) {
-                dataLength = 50;
-                data.splice(50, data.length);
+            if (dataLength >= dropdownListLimit) {
+                dataLength = dropdownListLimit;
+                data.splice(dropdownListLimit, data.length);
             }
 
             if (data) {
