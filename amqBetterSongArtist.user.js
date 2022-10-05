@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      1.6.3
+// @version      1.6.4
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -153,19 +153,19 @@ async function changeMode(e) {
 
             doCORSRequest({
                 method: 'get',
-                url: `https://quiz-site-bice.vercel.app/autocomplete?type=uniqueArtists`,
+                url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=uniqueArtists`,
                 type: 'artists'
             });
         } else {
             doCORSRequest({
                 method: 'get',
-                url: `https://quiz-site-bice.vercel.app/autocomplete?type=titles`,
+                url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=titles`,
                 type: 'titles'
             });
 
             doCORSRequest({
                 method: 'get',
-                url: `https://quiz-site-bice.vercel.app/autocomplete?type=artists`,
+                url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=artists`,
                 type: 'artists'
             });
         }
@@ -179,25 +179,25 @@ quizReadyRigTracker = new Listener("quiz ready", async (data) => {
     if (scoringMode === 1) {
         await doCORSRequest({
             method: 'get',
-            url: `https://quiz-site-bice.vercel.app/autocomplete?type=titles`,
+            url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=titles`,
             type: 'titles'
         });
 
         await doCORSRequest({
             method: 'get',
-            url: `https://quiz-site-bice.vercel.app/autocomplete?type=uniqueArtists`,
+            url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=uniqueArtists`,
             type: 'artists'
         });
     } else {
         await doCORSRequest({
             method: 'get',
-            url: `https://quiz-site-bice.vercel.app/autocomplete?type=titles`,
+            url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=titles`,
             type: 'titles'
         });
 
         await doCORSRequest({
             method: 'get',
-            url: `https://quiz-site-bice.vercel.app/autocomplete?type=artists`,
+            url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=artists`,
             type: 'artists'
         });
     }
