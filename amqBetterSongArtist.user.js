@@ -147,25 +147,25 @@ async function changeMode(e) {
         if (scoringMode === 1) {
             doCORSRequest({
                 method: 'get',
-                url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+                url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=titles`,
                 type: 'titles'
             });
 
             doCORSRequest({
                 method: 'get',
-                url: `https://www.4lajf.com/api/autocomplete?type=uniqueArtists`,
+                url: `https://quiz-site-bice.vercel.app/autocomplete?type=uniqueArtists`,
                 type: 'artists'
             });
         } else {
             doCORSRequest({
                 method: 'get',
-                url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+                url: `https://quiz-site-bice.vercel.app/autocomplete?type=titles`,
                 type: 'titles'
             });
 
             doCORSRequest({
                 method: 'get',
-                url: `https://www.4lajf.com/api/autocomplete?type=artists`,
+                url: `https://quiz-site-bice.vercel.app/autocomplete?type=artists`,
                 type: 'artists'
             });
         }
@@ -179,25 +179,25 @@ quizReadyRigTracker = new Listener("quiz ready", async (data) => {
     if (scoringMode === 1) {
         await doCORSRequest({
             method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+            url: `https://quiz-site-bice.vercel.app/autocomplete?type=titles`,
             type: 'titles'
         });
 
         await doCORSRequest({
             method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=uniqueArtists`,
+            url: `https://quiz-site-bice.vercel.app/autocomplete?type=uniqueArtists`,
             type: 'artists'
         });
     } else {
         await doCORSRequest({
             method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+            url: `https://quiz-site-bice.vercel.app/autocomplete?type=titles`,
             type: 'titles'
         });
 
         await doCORSRequest({
             method: 'get',
-            url: `https://www.4lajf.com/api/autocomplete?type=artists`,
+            url: `https://quiz-site-bice.vercel.app/autocomplete?type=artists`,
             type: 'artists'
         });
     }
@@ -227,25 +227,25 @@ joinLobbyListener = new Listener("Join Game", async (payload) => {
         if (scoringMode === 1) {
             doCORSRequest({
                 method: 'get',
-                url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+                url: `https://quiz-site-bice.vercel.app/autocomplete?type=titles`,
                 type: 'titles'
             });
 
             doCORSRequest({
                 method: 'get',
-                url: `https://www.4lajf.com/api/autocomplete?type=uniqueArtists`,
+                url: `https://quiz-site-bice.vercel.app/autocomplete?type=uniqueArtists`,
                 type: 'artists'
             });
         } else {
             doCORSRequest({
                 method: 'get',
-                url: `https://www.4lajf.com/api/autocomplete?type=titles`,
+                url: `https://quiz-site-bice.vercel.app/autocomplete?type=titles`,
                 type: 'titles'
             });
 
             doCORSRequest({
                 method: 'get',
-                url: `https://www.4lajf.com/api/autocomplete?type=artists`,
+                url: `https://quiz-site-bice.vercel.app/autocomplete?type=artists`,
                 type: 'artists'
             });
         }
