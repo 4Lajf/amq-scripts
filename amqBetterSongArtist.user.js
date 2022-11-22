@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      1.6.4
+// @version      1.6.5
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -945,11 +945,12 @@ class SongArtistMode {
                     possibleAnswers = matchValue.split(new RegExp(/feat\.|featuring|feat|ft.|,/, "gi"));
                 }
                 else {
-                    possibleAnswers = value.split(new RegExp(/feat\.|featuring|feat|meets|touches|&|×|ft./, "gi"));
+                    possibleAnswers = value.split(new RegExp(/feat\.|featuring|feat|meets|touches|&|×|ft.|,/, "gi"));
                 }
                 for (let i = 0; i < possibleAnswers.length; i++) {
                     possibleAnswers[i] = possibleAnswers[i].trim().toLowerCase()
                 }
+                console.log(possibleAnswers)
                 if (possibleAnswers.includes(answerMap.get(sender).toLowerCase())) {
                     for (let i = 0; i < playerAmount; i++) {
                         if (quiz.players[i]._name === sender) {
