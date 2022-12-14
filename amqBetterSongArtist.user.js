@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      1.6.5
+// @version      1.6.6
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -20,13 +20,14 @@ let dropdownListLimit = 50
 
 /*
 Scoring Mode:
-0 - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
-1 - artist may contain only one of participating artists (for easier difficulty)
+false - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
+true - artist may contain only one of participating artists (for easier difficulty)
 */
-let scoringMode = 1
+let scoringMode = true
 
 //true = scoringMode 1; false = scoringMode 0
 let modeBinary = true,
+    enableBinary = true,
     scoreboardReady = false,
     playerDataReady = false,
     returningToLobby = false,
@@ -63,6 +64,10 @@ function sleep(ms) {
 //This is a proxy so I can do a cross-origin API request to my site
 let cors_api_url = 'https://amq-proxy.herokuapp.com/';
 async function doCORSRequest(options) {
+    if (enableBinary === false) {
+        return;
+    }
+
     let x = new XMLHttpRequest();
     x.open(options.method, cors_api_url + options.url);
     x.onload = x.onerror = function () {
@@ -86,6 +91,9 @@ async function doCORSRequest(options) {
 
 // Writes the current rig to scoreboard
 function writeRigToScoreboard() {
+    if (enableBinary === false) {
+        return;
+    }
     if (playerDataReady) {
         for (let entryId in quiz.scoreboard.playerEntries) {
             let entry = quiz.scoreboard.playerEntries[entryId];
@@ -98,12 +106,18 @@ function writeRigToScoreboard() {
 
 // Clears the rig counters from scoreboard
 function clearScoreboard() {
+    if (enableBinary === false) {
+        return;
+    }
     $(".qpsPlayerRig").remove();
     scoreboardReady = false;
 }
 
 // Clears player data
 function clearPlayerData() {
+    if (enableBinary === false) {
+        return;
+    }
     playerData = {};
     playerDataReady = false;
     missedFromOwnList = 0;
@@ -111,6 +125,9 @@ function clearPlayerData() {
 
 // Creates the player data for counting rig (and score)
 function initialisePlayerData() {
+    if (enableBinary === false) {
+        return;
+    }
     clearPlayerData();
     for (let entryId in quiz.players) {
         playerData[entryId] = {
@@ -125,6 +142,9 @@ function initialisePlayerData() {
 
 // Creates the rig counters on the scoreboard and sets them to 0
 function initialiseScoreboard() {
+    if (enableBinary === false) {
+        return;
+    }
     clearScoreboard();
     for (let entryId in quiz.scoreboard.playerEntries) {
         let tmp = quiz.scoreboard.playerEntries[entryId];
@@ -137,14 +157,12 @@ function initialiseScoreboard() {
 //Alt+G to change Scoring Mode
 async function changeMode(e) {
     if (e.altKey && e.key == 'g') {
-        modeBinary = !modeBinary;
-        if (modeBinary) {
-            scoringMode = 1
-        } else {
-            scoringMode = 0
+        if (enableBinary === false) {
+            return;
         }
+        modeBinary = !modeBinary;
 
-        if (scoringMode === 1) {
+        if (scoringMode === true) {
             doCORSRequest({
                 method: 'get',
                 url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=titles`,
@@ -171,12 +189,37 @@ async function changeMode(e) {
         }
         gameChat.systemMessage(modeBinary ? "Scoring Mode: 1" : "Scoring Mode: 0");
     }
+
+    if (e.altKey && e.key == 'h') {
+        enableBinary = !enableBinary;
+
+        gameChat.systemMessage(enableBinary ? "Song/Artist plugin has been ENABLED" : "Song/Artist plugin has been DISABLED");
+        if (enableBinary === false) {
+            let songArtistDOMElement = document.querySelector('#songartist');
+            songArtistDOMElement.style.display = 'none';
+            let playerScore = document.querySelector('.qpsPlayerRig')
+            playerScore.style.display = 'none';
+        }
+        if (enableBinary === true) {
+            let songArtistDOMElement = document.querySelector('#songartist');
+            songArtistDOMElement.style.display = 'block';
+            let playerScore = document.querySelector('.qpsPlayerRig');
+            console.log(playerScore);
+            playerScore.style.display = 'block';
+        }
+    }
 }
 
 // Initial setup on quiz start
 quizReadyRigTracker = new Listener("quiz ready", async (data) => {
+    gameChat.systemMessage('Current Scoring Mode: 1')
+    gameChat.systemMessage('Press [Alt+G] to change it or [Alt+H] to hide it')
+    document.addEventListener('keydown', changeMode)
+    if (enableBinary === false) {
+        return;
+    }
     //Fetches title and artist list from an API
-    if (scoringMode === 1) {
+    if (scoringMode === true) {
         await doCORSRequest({
             method: 'get',
             url: `https://quiz-site-bice.vercel.app/api/autocomplete?type=titles`,
@@ -202,10 +245,6 @@ quizReadyRigTracker = new Listener("quiz ready", async (data) => {
         });
     }
 
-    gameChat.systemMessage('Current Scoring Mode: 1')
-    gameChat.systemMessage('Press [Alt+G] to change it.')
-    document.addEventListener('keydown', changeMode)
-
     playerAmount = Object.entries(quiz.players).length
     returningToLobby = false;
     clearPlayerData();
@@ -219,12 +258,15 @@ quizReadyRigTracker = new Listener("quiz ready", async (data) => {
 
 // Reset data when joining a lobby
 joinLobbyListener = new Listener("Join Game", async (payload) => {
+    if (enableBinary === false) {
+        return;
+    }
     titlesInit = false
     artistInit = false
     if (titlesInit === false && artistsInit === false) {
         titles = ''
         artists = ''
-        if (scoringMode === 1) {
+        if (scoringMode === true) {
             doCORSRequest({
                 method: 'get',
                 url: `https://quiz-site-bice.vercel.app/autocomplete?type=titles`,
@@ -263,6 +305,9 @@ joinLobbyListener = new Listener("Join Game", async (payload) => {
 
 // stuff to do on answer reveal
 answerResultsRigTracker = new Listener("answer results", async (result) => {
+    if (enableBinary === false) {
+        return;
+    }
     for (let player of result.players) {
         if (player.correct === true) {
             playerData[player.gamePlayerId].score++;
@@ -274,6 +319,9 @@ answerResultsRigTracker = new Listener("answer results", async (result) => {
 
 // Reset data when spectating a lobby
 spectateLobbyListener = new Listener("Spectate Game", (payload) => {
+    if (enableBinary === false) {
+        return;
+    }
     if (payload.error) {
         return;
     }
@@ -284,6 +332,9 @@ spectateLobbyListener = new Listener("Spectate Game", (payload) => {
 
 //Remove Alt+G listener on the end of the game
 quizEndTracker = new Listener("quiz end result", (result) => {
+    if (enableBinary === false) {
+        return;
+    }
     document.removeEventListener('keydown', changeMode)
     writeRigToScoreboard()
 })
@@ -319,6 +370,10 @@ class SongArtistMode {
     #songField
     #artistField
     constructor() {
+        if (enableBinary === false) {
+            return;
+        }
+
         if (window.socket === undefined) {
             return
         }
@@ -864,7 +919,7 @@ class SongArtistMode {
                 answerMap.set(sender, '')
             }
 
-            if (scoringMode === 1) {
+            if (scoringMode === true) {
                 let exceptionsList = [`christy&clinton`,
                     `myth & roid`,
                     `toss & turn`,
@@ -1164,7 +1219,10 @@ class SongArtistMode {
     }
 }
 
-window.songArtist = new SongArtistMode()
+if (enableBinary === true) {
+    window.songArtist = new SongArtistMode()
+}
+
 
 AMQ_addScriptData({
     name: " AMQ Better Song Artist Mode",
