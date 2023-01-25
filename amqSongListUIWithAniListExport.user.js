@@ -1055,7 +1055,7 @@ async function printIncorrectAll() {
         delete incorrectGuessArray[i]
     }
     incorrectGuessArray = incorrectGuessArray.filter(n => n)
-    let one = await mediaListInfo("AMQLajf", 'Completed')
+    let one = await mediaListInfo("AMQLajf", 'Watching')
     console.log(one)
     console.log(one.length)
     console.log(incorrectGuessArray)
@@ -1072,7 +1072,7 @@ async function printIncorrectAll() {
             alert('Adding incorrect guesses to your list... I can only process 20 requests at a time. Retrying in 30 seconds.')
             sleep(30000)
         }
-        addCompletedListEntry(incorrectGuessArray[i].querySelector('.alId').innerText)
+        addMediaListEntry(incorrectGuessArray[i].querySelector('.alId').innerText, "WATCHING")
     }
 }
 
@@ -1214,7 +1214,7 @@ async function removeListEntry(id) {
     xhr.send(JSON.stringify(json))
 }
 
-async function addCompletedListEntry(mediaId) {
+async function addMediaListEntry(mediaId, status) {
     let query = `
     mutation ($mediaId: Int, $status: MediaListStatus) {
         SaveMediaListEntry (mediaId: $mediaId, status: $status) {
@@ -1226,7 +1226,7 @@ async function addCompletedListEntry(mediaId) {
 
     let variables = {
         mediaId: mediaId,
-        status: 'COMPLETED'
+        status: status
     };
 
     const xhr = new XMLHttpRequest()
