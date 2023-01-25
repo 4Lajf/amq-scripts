@@ -971,7 +971,8 @@ function createAuthWindow() {
                     authAL();
                 }))
             )
-            .append($(`<span style="display: block;"><b>1. Go to <a href="https://anilist.co/settings/developer"> AniList's Developer Settings </a><br>
+            .append($(`<span style="display: block;"><b>
+            Before you do anything, log off your current AniList account and create a brand new one.<br>1. Go to <a href="https://anilist.co/settings/developer"> AniList's Developer Settings </a><br>
             2. Click on "Create New Client"<br>
             3. In "Redirect URL" type "https://anilist.co/api/v2/oauth/pin" and name the app whatever you like<br>
             4. Click on "Save"<br>
@@ -1056,9 +1057,6 @@ async function printIncorrectAll() {
     }
     incorrectGuessArray = incorrectGuessArray.filter(n => n)
     let one = await mediaListInfo("AMQLajf", 'Watching')
-    console.log(one)
-    console.log(one.length)
-    console.log(incorrectGuessArray)
     for (let i = 0; i < one.length; i++) {
         if (i % 20 === 0 && i !== 0 && i !== 1) {
             alert('Cleaning list... I can only process 20 requests at a time. Retrying in 30 seconds.')
@@ -1110,7 +1108,6 @@ function mediaListInfo(username, state) {
         xhr.onload = () => {
             if (xhr.status === 200) {
                 let response = JSON.parse(xhr.response)
-                console.log(response.data.MediaListCollection.lists.find(o => o.name === state))
                 if (!response.data.MediaListCollection.lists.find(o => o.name === state)) {
                     resolve([]);
                     return [];
@@ -1131,6 +1128,7 @@ function mediaListInfo(username, state) {
                     statusText: xhr.statusText
                 });
             } else {
+                console.log(xhr)
                 alert("Something bad happened and i couldn't complete the request. Try again (deatils have been printed to console)")
                 reject({
                     status: this.status,
@@ -1139,6 +1137,7 @@ function mediaListInfo(username, state) {
             }
         }
         xhr.onerror = function () {
+            console.log(xhr)
             alert("Something bad happened and i couldn't complete the request. Try again (deatils have been printed to console)")
             reject({
                 status: this.status,
@@ -1188,6 +1187,7 @@ async function removeListEntry(id) {
                 statusText: xhr.statusText
             });
         } else {
+            console.log(xhr)
             alert("Something bad happened and i couldn't complete the request. Try again (deatils have been printed to console)")
             reject({
                 status: this.status,
@@ -1245,6 +1245,7 @@ async function addMediaListEntry(mediaId, status) {
                 statusText: xhr.statusText
             });
         } else {
+            console.log(xhr)
             alert("Something bad happened and i couldn't complete the request. Try again (deatils have been printed to console)")
             reject({
                 status: this.status,
