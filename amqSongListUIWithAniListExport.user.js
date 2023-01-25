@@ -1056,7 +1056,7 @@ async function printIncorrectAll() {
         delete incorrectGuessArray[i]
     }
     incorrectGuessArray = incorrectGuessArray.filter(n => n)
-    let one = await mediaListInfo("AMQLajf", 'Watching')
+    let one = await mediaListInfo("AMQLajf", 'Current')
     for (let i = 0; i < one.length; i++) {
         if (i % 20 === 0 && i !== 0 && i !== 1) {
             alert('Cleaning list... I can only process 20 requests at a time. Retrying in 30 seconds.')
@@ -1070,7 +1070,7 @@ async function printIncorrectAll() {
             alert('Adding incorrect guesses to your list... I can only process 20 requests at a time. Retrying in 30 seconds.')
             sleep(30000)
         }
-        addMediaListEntry(incorrectGuessArray[i].querySelector('.alId').innerText, "WATCHING")
+        addMediaListEntry(incorrectGuessArray[i].querySelector('.alId').innerText, "CURRENT")
     }
 }
 
@@ -1119,6 +1119,7 @@ function mediaListInfo(username, state) {
                 resolve(CompletedIDs)
 
             } else if (xhr.status === 401 || xhr.status === 400) {
+                console.log(xhr)
                 alert('Authentication failed! Please login in again')
                 savedSettings.accessToken = ''
                 saveSettings()
@@ -1178,6 +1179,7 @@ async function removeListEntry(id) {
             console.log(xhr)
 
         } else if (xhr.status === 401 || xhr.status === 400) {
+            console.log(xhr)
             alert('Authentication failed! Please login in again')
             savedSettings.accessToken = ''
             saveSettings()
@@ -1236,6 +1238,7 @@ async function addMediaListEntry(mediaId, status) {
             let response = JSON.parse(xhr.responseText)
             console.log(xhr)
         } else if (xhr.status === 401 || xhr.status === 400) {
+            console.log(xhr)
             alert('Authentication failed! Please login in again')
             savedSettings.accessToken = ''
             saveSettings()
