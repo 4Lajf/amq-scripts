@@ -1,17 +1,25 @@
 # amq_scripts
 
+### amqSongListUIWithAniListExport.user.js
+A fork [TheJoseph98](https://github.com/TheJoseph98)'s [amqSongListUI](https://github.com/TheJoseph98/AMQ-Scripts/blob/master/amqSongListUI.user.js)
+- Let's you export your wrong guessed anime to AniList so you can use them in your next game
+- Everything else that the base script offers
+
 ### amqAnswerTimeDiference.js
+A fork of [Zolhungaj]'s(https://github.com/amq-script-project) [amqPlayerAnswerTimeDisplay](https://github.com/amq-script-project/AMQ-Scripts/blob/master/gameplay/amqPlayerAnswerTimeDisplay.user.js)
 - See the diference in answering time to the fastest player, updates dynamicly
 - See how fast you were on a per round basis (chat leaderboards)
 - See how much time you spent answering questions (main leaderboard)
 - Settings for toggling diferent parts of the script (can be found where normal settings would be)
 ---
 ### amqBuzzer.js
+An improved version ofBob's [amqBuzzer](https://files.catbox.moe/lipeqk.js)
 - Click "Ctrl" button to stop the song and answer at your own speed. Be the first to win the game.
 - See how fast you were on a per round basis (chat leaderboards)
 - See how much time you spent answering questions (main leaderboard)
 ---
 ### amqBetterSongArtist.user.js
+An improved version of [Zolhungaj]'s(https://github.com/amq-script-project) [amqSongArtist](https://github.com/amq-script-project/AMQ-Scripts/blob/master/gameplay/amqSongArtistMode.user.js)
 - Guess the anime song by title or aritst
 - Has AMQ-like dropdown (auto-updating, hilighting matches, ignoring special characters, supports partial searching, navigateable with arrows etc.)
 - And a leaderboard when you can track scores in place of the existing one
