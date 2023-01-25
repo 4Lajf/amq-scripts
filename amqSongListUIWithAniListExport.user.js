@@ -1007,7 +1007,7 @@ function createWarningWindow() {
             THIS SCRIPT WILL WIPE YOUR LISTS<br>
             DO NOT LINK YOUR MAIN ACCOUNT<br>
             USE ONLY EMPTY ACCOUNTS</b></span>`))
-            .append($(`<span style="display: block; text-align: center"><b>This script works by wiping your list everytime you use it to ensure that only animes from current session are being added.<br>
+            .append($(`<span style="display: block; text-align: center"><b>This script works by wiping your watching list everytime you use it to ensure that only animes from current session are being added.<br>
             Type "I understand" to proceed.<br>
             This warning will only appear once</b></span>`))
             .append($(`<div class="slCheckbox"></div>`)
