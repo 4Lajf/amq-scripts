@@ -9,8 +9,7 @@
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqWindows.js
 // @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/amqAnswerTimesUtility.user.js
-// @updateURL    https://github.com/TheJoseph98/AMQ-Scripts/raw/master/amqSongListUI.user.js
-
+// @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqSongListUIWithAniListExport.user.js
 // ==/UserScript==
 
 // don't load on login page
