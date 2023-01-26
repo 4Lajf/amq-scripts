@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Song List UI with AniList Export
 // @namespace    https://github.com/4Lajf
-// @version      3.4.0
+// @version      3.4.1
 // @description  Let's you export your wrong guessed anime to AniList so you can use them in your next game. Adds a song list window, accessible with a button below song info while in quiz, each song in the list is clickable for extra information
 // @author       TheJoseph98 & 4Lajf
 // @match        https://animemusicquiz.com/*
@@ -9,7 +9,7 @@
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqWindows.js
 // @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/amqAnswerTimesUtility.user.js
-// @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqSongListUIWithAniListExport.user.js
+// @updateURL    https://github.com/TheJoseph98/AMQ-Scripts/raw/master/amqSongListUI.user.js
 
 // ==/UserScript==
 
@@ -37,7 +37,6 @@ let authWindow
 
 let exportData = [];
 let incorrectGuesses = new Set()
-let incorrectGuesses2 = new Set()
 
 // default settings
 let savedSettings = {
@@ -170,19 +169,51 @@ function createListWindow() {
                         authWindow.open();
                     }
                 } else {
-                    printIncorrectAll()
+                    updateAniList('ADD')
                 }
             })
+            .popover({
+                placement: "bottom",
+                content: `Incremently save your gesses to AniList`,
+                trigger: "hover",
+                container: "body",
+                animation: false
+            })
+        )
+        .append($(`<button class="btn btn-default songListOptionsButton" type="button"><i aria-hidden="true" class="fa fa-trash"></i></button>`)
+            .dblclick(() => {
+                if (firstTimeUse === true) {
+                    warningWindow.open();
+                    return;
+                }
+                if (!accessToken) {
+                    if (authWindow.isVisible()) {
+                        authWindow.close();
+                    }
+                    else {
+                        authWindow.open();
+                    }
+                } else {
+                    updateAniList('DELETE')
+                }
+            })
+            .popover({
+                placement: "bottom",
+                content: "Double-Click to wipe your list",
+                trigger: "hover",
+                container: "body",
+                animation: false
+            })
+        )
+        .append($(`<button class="btn btn-default songListOptionsButton" type="button"><i aria-hidden="true" class="fa fa-trash"></i></button>`)
             .dblclick(() => {
                 savedSettings.accessToken = ''
                 accessToken = ''
                 saveSettings();
-                alert('Logged out of AniList')
-                return;
             })
             .popover({
                 placement: "bottom",
-                content: "Save Incorrect Guesses To AniList\nDouble-Click to logout",
+                content: "Double-Click to Logout",
                 trigger: "hover",
                 container: "body",
                 animation: false
@@ -596,7 +627,7 @@ function applySearch(elem) {
     let searchQuery = $("#slSearch").val();
     let regexQuery = createAnimeSearchRegexQuery(searchQuery);
     let searchRegex = new RegExp(regexQuery, "i");
-    applyRegex(elem, searchRegex);
+    applyRegex(elem, searchRegex, 1);
 }
 
 
@@ -606,13 +637,19 @@ function applySearchAll() {
     });
 }
 
-function applyRegex(elem, searchRegex) {
-    if (searchRegex.test($(elem).text())) {
-        $(elem).show();
-        incorrectGuesses.add(elem)
-    }
-    else {
-        $(elem).hide();
+function applyRegex(elem, searchRegex, aniListMode) {
+    if (aniListMode === 1) {
+        if (searchRegex.test($(elem).text())) {
+            incorrectGuesses.add(elem)
+        }
+    } else {
+        if (searchRegex.test($(elem).text())) {
+            $(elem).show();
+            incorrectGuesses.add(elem)
+        }
+        else {
+            $(elem).hide();
+        }
     }
 }
 
@@ -925,14 +962,14 @@ function clearInfo() {
 function createAuthWindow() {
     authWindow = new AMQWindow({
         width: 400,
-        height: 670,
+        height: 680,
         title: "Login",
         draggable: true,
         zIndex: 1070
     });
     authWindow.addPanel({
         width: 1.0,
-        height: 580,
+        height: 590,
         id: "slAuthWindow"
     });
 
@@ -1016,7 +1053,7 @@ function createWarningWindow() {
                     )
                 ).append($(`<button id="slWarningConfirm" class="btn btn-danger songListOptionsButton" type="button">Proceed</button>`).click(() => {
                     if (slWarnWindow.querySelector('#slWarningInput').value.toLowerCase() !== "i understand") {
-                        alert ("Read the warning first!")
+                        alert("Read the warning first!")
                         return;
                     }
                     firstTimeUse = false;
@@ -1044,33 +1081,39 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function printIncorrectAll() {
+async function updateAniList(mode) {
     $(".songData").each((index, elem) => {
         printIncorrect(elem);
     });
-    let incorrectGuessArray = Array.from(incorrectGuesses);
-    for (let i = 0; i < incorrectGuessArray.length; i++) {
+    let incorrectGuessesArray = Array.from(incorrectGuesses);
+    for (let i = 0; i < incorrectGuessesArray.length; i++) {
         if (i % 2 !== 0) {
             continue
         }
-        delete incorrectGuessArray[i]
+        delete incorrectGuessesArray[i]
     }
-    incorrectGuessArray = incorrectGuessArray.filter(n => n)
-    let one = await mediaListInfo("AMQLajf", 'Current')
-    for (let i = 0; i < one.length; i++) {
-        if (i % 20 === 0 && i !== 0 && i !== 1) {
-            alert('Cleaning list... I can only process 20 requests at a time. Retrying in 30 seconds.')
-            sleep(30000)
-        }
-        removeListEntry(one[i])
-    }
+    incorrectGuessesArray = incorrectGuessesArray.filter(n => n)
 
-    for (let i = 0; i < incorrectGuessArray.length; i++) {
-        if (i % 20 === 0 && i !== 0 && i !== 1) {
-            alert('Adding incorrect guesses to your list... I can only process 20 requests at a time. Retrying in 30 seconds.')
-            sleep(30000)
+    if (mode === 'DELETE') {
+        console.log('DELETE')
+        let userListEntries = await mediaListInfo("AMQLajf", 'Watching')
+        console.log(userListEntries)
+        for (let i = 0; i < userListEntries.length; i++) {
+            if (i % 20 === 0 && i !== 0 && i !== 1) {
+                alert('Cleaning list... I can only process 20 requests at a time. Retrying in 30 seconds.')
+                sleep(30000)
+            }
+            removeListEntry(userListEntries[i])
         }
-        addMediaListEntry(incorrectGuesses[i].querySelector('.alId').innerText, "CURRENT")
+    }
+    if (mode === 'ADD') {
+        for (let i = 0; i < incorrectGuessesArray.length; i++) {
+            if (i % 20 === 0 && i !== 0 && i !== 1) {
+                alert('Adding incorrect guesses to your list... I can only process 20 requests at a time. Retrying in 30 seconds.')
+                sleep(30000)
+            }
+            addMediaListEntry(incorrectGuessesArray[i].querySelector('.alId').innerText, "CURRENT")
+        }
     }
 }
 
@@ -1108,11 +1151,11 @@ function mediaListInfo(username, state) {
         xhr.onload = () => {
             if (xhr.status === 200) {
                 let response = JSON.parse(xhr.response)
-                if (!response.data.MediaListCollection.lists.find(o => o.name === state)) {
+                if (!response.data.MediaListCollection.lists.find(o => o.name === state && o.isCustomList === false)) {
                     resolve([]);
                     return [];
                 }
-                let mediaList = response.data.MediaListCollection.lists.find(o => o.name === state)
+                let mediaList = response.data.MediaListCollection.lists.find(o => o.name === state && o.isCustomList === false)
                 mediaList.entries.forEach(e => {
                     CompletedIDs.push(e.id)
                 });
@@ -1158,7 +1201,8 @@ function mediaListInfo(username, state) {
 }
 
 
-async function removeListEntry(id) {
+function removeListEntry(id) {
+    console.log('rmlistentry')
     let query = `
     mutation ($id: Int) {
         DeleteMediaListEntry (id: $id) {
