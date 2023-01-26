@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Song List UI with AniList Export
 // @namespace    https://github.com/4Lajf
-// @version      3.4.0
+// @version      3.4.1
 // @description  Let's you export your wrong guessed anime to AniList so you can use them in your next game. Adds a song list window, accessible with a button below song info while in quiz, each song in the list is clickable for extra information
 // @author       TheJoseph98 & 4Lajf
 // @match        https://animemusicquiz.com/*
@@ -1070,7 +1070,7 @@ async function printIncorrectAll() {
             alert('Adding incorrect guesses to your list... I can only process 20 requests at a time. Retrying in 30 seconds.')
             sleep(30000)
         }
-        addMediaListEntry(incorrectGuessArray[i].querySelector('.alId').innerText, "CURRENT")
+        addMediaListEntry(incorrectGuesses[i].querySelector('.alId').innerText, "CURRENT")
     }
 }
 
