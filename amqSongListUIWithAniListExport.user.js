@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Song List UI with AniList Export
 // @namespace    https://github.com/4Lajf
-// @version      3.4.1
+// @version      3.4.2
 // @description  Let's you export your wrong guessed anime to AniList so you can use them in your next game. Adds a song list window, accessible with a button below song info while in quiz, each song in the list is clickable for extra information
 // @author       TheJoseph98 & 4Lajf
 // @match        https://animemusicquiz.com/*
@@ -1086,7 +1086,10 @@ async function updateAniList(mode) {
     });
     let incorrectGuessesArray = Array.from(incorrectGuesses);
     for (let i = 0; i < incorrectGuessesArray.length; i++) {
-        if (i % 2 !== 0) {
+        if (!incorrectGuessesArray[i][0]) {
+            break;
+        }
+        if (!incorrectGuessesArray[i][0] && incorrectGuessesArray[i][0].classList[2] === 'incorrectGuess') {
             continue
         }
         delete incorrectGuessesArray[i]
@@ -1094,9 +1097,7 @@ async function updateAniList(mode) {
     incorrectGuessesArray = incorrectGuessesArray.filter(n => n)
 
     if (mode === 'DELETE') {
-        console.log('DELETE')
         let userListEntries = await mediaListInfo("AMQLajf", 'Watching')
-        console.log(userListEntries)
         for (let i = 0; i < userListEntries.length; i++) {
             if (i % 20 === 0 && i !== 0 && i !== 1) {
                 alert('Cleaning list... I can only process 20 requests at a time. Retrying in 30 seconds.')
@@ -1201,7 +1202,6 @@ function mediaListInfo(username, state) {
 
 
 function removeListEntry(id) {
-    console.log('rmlistentry')
     let query = `
     mutation ($id: Int) {
         DeleteMediaListEntry (id: $id) {
