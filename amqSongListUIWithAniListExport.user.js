@@ -356,6 +356,7 @@ function createNewTable() {
 
 function clearTable() {
     listWindowTable.children().remove();
+    incorrectGuesses.clear();
 }
 
 function addTableHeader() {
