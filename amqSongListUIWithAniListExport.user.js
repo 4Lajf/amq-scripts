@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Song List UI with AniList Export
 // @namespace    https://github.com/4Lajf
-// @version      3.4.3
+// @version      3.4.4
 // @description  Let's you export your wrong guessed anime to AniList so you can use them in your next game. Adds a song list window, accessible with a button below song info while in quiz, each song in the list is clickable for extra information
 // @author       TheJoseph98 & 4Lajf
 // @match        https://animemusicquiz.com/*
@@ -9,7 +9,7 @@
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqWindows.js
 // @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/amqAnswerTimesUtility.user.js
-// @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqSongListUIWithAniListExport.user.js
+// @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqSongListUIWithAniListExport.user.jsFau
 // ==/UserScript==
 
 // don't load on login page
@@ -168,7 +168,7 @@ function createListWindow() {
                         authWindow.open();
                     }
                 } else {
-                    updateAniList('ADD')
+                    addingWindow.open();
                 }
             })
             .popover({
@@ -1017,6 +1017,68 @@ function createAuthWindow() {
         )
 }
 
+function createAddingWindow() {
+    addingWindow = new AMQWindow({
+        width: 350,
+        height: 300,
+        title: "Add entries",
+        draggable: true,
+        zIndex: 1070
+    });
+    addingWindow.addPanel({
+        width: 1.0,
+        height: 200,
+        id: "slAddingWindow"
+    });
+
+    addingWindow.panels[0].panel
+        .append($(`<div class="slAddingWindow"></div>`)
+            .append($(`<span style="display: block;"><b>How many entries would you like to export?<br>Maximum 20 at a time</b></span>`))
+            .append($(`<span style="display: block;"><b>"From" Index</b></span>`))
+            .append($(`<div class="slCheckbox"></div>`)
+                .append($(`<div class="customCheckbox"></div>`)
+                    .append($(`<input id='slAddEntriesInputMin' type='text'>`)
+                    )
+                )
+            )
+            .append($(`<span style="display: block;"><b>"To" Index</b></span>`))
+            .append($(`<div class="slCheckbox"></div>`)
+                .append($(`<div class="customCheckbox"></div>`)
+                    .append($(`<input id='slAddEntriesInputMax' type='text'>`)
+                    )
+                ).append($(`<button id="slAddEntriesButton" class="btn btn-primary songListOptionsButton" type="button">Proceed</button>`).click(async () => {
+                    let startingPosition = parseInt(slAddingWindow.querySelector('#slAddEntriesInputMin').value)
+                    let endingPosition = parseInt(slAddingWindow.querySelector('#slAddEntriesInputMax').value)
+
+                    if (startingPosition.length < 1 || endingPosition.length < 1 || isNaN(startingPosition) === true || isNaN(endingPosition) === true) {
+                        alert("Please input a number")
+                        return;
+                    }
+                    if (startingPosition < 1 || endingPosition < 1) {
+                        alert("Please enter a number that's greater than 0")
+                        return;
+                    }
+                    if (endingPosition - startingPosition > 20) {
+                        alert("The range must be less than 20")
+                        return;
+                    }
+                    if (startingPosition > endingPosition) {
+                        alert(`"From" field must be lesser than "To" field`)
+                        return;
+                    }
+
+                    let incorrectGuessesCount = await updateAniList('COUNT')
+                    if (startingPosition > incorrectGuessesCount || endingPosition > incorrectGuessesCount) {
+                        alert("Amount specified is greater than the number of incorrecly guessed anime")
+                        return;
+                    }
+                    updateAniList('ADD', startingPosition, endingPosition)
+                    addingWindow.close();
+                }))
+            )
+        )
+}
+
 function createWarningWindow() {
     warningWindow = new AMQWindow({
         width: 800,
@@ -1070,32 +1132,33 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function updateAniList(mode) {
+async function updateAniList(mode, addingStartPosition, addingEndPosition) {
     $(".songData").each((index, elem) => {
         printIncorrect(elem);
     });
-    console.log(incorrectGuesses)
     let incorrectGuessesArray = Array.from(incorrectGuesses);
-    console.log(incorrectGuessesArray)
     incorrectGuessesArray = incorrectGuessesArray.filter(n => n)
     if (mode === 'DELETE') {
         let userListEntries = await mediaListInfo("AMQLajf", 'Watching')
         for (let i = 0; i < userListEntries.length; i++) {
-            if (i % 20 === 0 && i !== 0 && i !== 1) {
-                alert('Cleaning list... I can only process 20 requests at a time. Retrying in 30 seconds.')
-                sleep(30000)
-            }
             removeListEntry(userListEntries[i])
+            if (i === userListEntries.length - 1) {
+                alert('List wiped!')
+            }
         }
     }
+
     if (mode === 'ADD') {
-        for (let i = 0; i < incorrectGuessesArray.length; i++) {
-            if (i % 20 === 0 && i !== 0 && i !== 1) {
-                alert('Adding incorrect guesses to your list... I can only process 20 requests at a time. Retrying in 30 seconds.')
-                sleep(30000)
-            }
+        for (let i = addingStartPosition - 1; i < addingEndPosition; i++) {
             addMediaListEntry(incorrectGuessesArray[i].querySelector('.alId').innerText, "CURRENT")
+            if (i === addingEndPosition - 1) {
+                alert(`Incorrect guesses from positon ${addingStartPosition} to ${addingEndPosition} has been added to your AniList`)
+            }
         }
+    }
+
+    if (mode === 'COUNT') {
+        return incorrectGuessesArray.length
     }
 }
 
@@ -1153,6 +1216,9 @@ function mediaListInfo(username, state) {
                     status: this.status,
                     statusText: xhr.statusText
                 });
+            } else if (xhr.status === 429) {
+                console.log(xhr)
+                alert("Processing limit reached (~23 elements). Please try again in a while.")
             } else {
                 console.log(xhr)
                 alert("Something bad happened and i couldn't complete the request. Try again (deatils have been printed to console)")
@@ -1200,9 +1266,7 @@ function removeListEntry(id) {
 
     xhr.onload = () => {
         if (xhr.status === 200) {
-            let response = JSON.parse(xhr.responseText)
             console.log(xhr)
-
         } else if (xhr.status === 401 || xhr.status === 400) {
             console.log(xhr)
             alert('Authentication failed! Please login in again')
@@ -1213,6 +1277,9 @@ function removeListEntry(id) {
                 status: this.status,
                 statusText: xhr.statusText
             });
+        } else if (xhr.status === 429) {
+            console.log(xhr)
+            alert("Processing limit reached (~23 elements). Please try again in a while.")
         } else {
             console.log(xhr)
             alert("Something bad happened and i couldn't complete the request. Try again (deatils have been printed to console)")
@@ -1899,6 +1966,7 @@ function setup() {
     loadSettings();
     createInfoWindow();
     createListWindow();
+    createAddingWindow();
 
     // lowers the z-index when a modal window is shown so it doesn't overlap
     $(".modal").on("show.bs.modal", () => {
