@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Song List UI with AniList Export
 // @namespace    https://github.com/4Lajf
-// @version      3.4.2
+// @version      3.4.3
 // @description  Let's you export your wrong guessed anime to AniList so you can use them in your next game. Adds a song list window, accessible with a button below song info while in quiz, each song in the list is clickable for extra information
 // @author       TheJoseph98 & 4Lajf
 // @match        https://animemusicquiz.com/*
@@ -627,7 +627,7 @@ function applySearch(elem) {
     let searchQuery = $("#slSearch").val();
     let regexQuery = createAnimeSearchRegexQuery(searchQuery);
     let searchRegex = new RegExp(regexQuery, "i");
-    applyRegex(elem, searchRegex, 1);
+    applyRegex(elem, searchRegex);
 }
 
 
@@ -638,18 +638,11 @@ function applySearchAll() {
 }
 
 function applyRegex(elem, searchRegex, aniListMode) {
-    if (aniListMode === 1) {
-        if (searchRegex.test($(elem).text())) {
-            incorrectGuesses.add(elem)
-        }
-    } else {
-        if (searchRegex.test($(elem).text())) {
-            $(elem).show();
-            incorrectGuesses.add(elem)
-        }
-        else {
-            $(elem).hide();
-        }
+    if (searchRegex.test($(elem).text())) {
+        $(elem).show();
+    }
+    else {
+        $(elem).hide();
     }
 }
 
@@ -1069,12 +1062,8 @@ function createWarningWindow() {
 let listSize = 0;
 function printIncorrect(elem) {
     if ($(elem).hasClass("incorrectGuess")) {
-        $(elem).removeClass("rowFiltered");
+        incorrectGuesses.add(elem)
     }
-    else {
-        $(elem).addClass("rowFiltered");
-    }
-    applySearch(elem);
 }
 
 function sleep(ms) {
@@ -1085,18 +1074,10 @@ async function updateAniList(mode) {
     $(".songData").each((index, elem) => {
         printIncorrect(elem);
     });
+    console.log(incorrectGuesses)
     let incorrectGuessesArray = Array.from(incorrectGuesses);
-    for (let i = 0; i < incorrectGuessesArray.length; i++) {
-        if (!incorrectGuessesArray[i][0]) {
-            break;
-        }
-        if (!incorrectGuessesArray[i][0] && incorrectGuessesArray[i][0].classList[2] === 'incorrectGuess') {
-            continue
-        }
-        delete incorrectGuessesArray[i]
-    }
+    console.log(incorrectGuessesArray)
     incorrectGuessesArray = incorrectGuessesArray.filter(n => n)
-
     if (mode === 'DELETE') {
         let userListEntries = await mediaListInfo("AMQLajf", 'Watching')
         for (let i = 0; i < userListEntries.length; i++) {
