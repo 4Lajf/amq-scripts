@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Song List UI with AniList Export
 // @namespace    https://github.com/4Lajf
-// @version      3.4.4
+// @version      3.4.5
 // @description  Let's you export your wrong guessed anime to AniList so you can use them in your next game. Adds a song list window, accessible with a button below song info while in quiz, each song in the list is clickable for extra information
 // @author       TheJoseph98 & 4Lajf
 // @match        https://animemusicquiz.com/*
@@ -39,6 +39,7 @@ let incorrectGuesses = new Set()
 
 // default settings
 let savedSettings = {
+    ALUsername: "",
     firstTimeUse: true,
     appID: "",
     appSecret: "",
@@ -969,6 +970,13 @@ function createAuthWindow() {
 
     authWindow.panels[0].panel
         .append($(`<div class="slAuthWindow"></div>`)
+            .append($(`<span style="display: block;"><b>Your AniList username</b></span>`))
+            .append($(`<div class="slCheckbox"></div>`)
+                .append($(`<div class="customCheckbox"></div>`)
+                    .append($(`<input id='slALUsername' type='text'>`)
+                    )
+                )
+            )
             .append($(`<span style="display: block;"><b>Your App's ID</b></span>`))
             .append($(`<div class="slCheckbox"></div>`)
                 .append($(`<div class="customCheckbox"></div>`)
@@ -984,6 +992,7 @@ function createAuthWindow() {
                     )
                 )
                 .append($(`<button id="slGetCode" class="btn btn-primary songListOptionsButton" type="button">Get Login Code</button>`).click(() => {
+                    savedSettings.ALUsername = slAuthWindow.querySelector('#slALUsername').value
                     savedSettings.appID = slAuthWindow.querySelector('#slAppID').value
                     saveSettings();
                     window.open(`https://anilist.co/api/v2/oauth/authorize?client_id=${slAuthWindow.querySelector('#slAppID').value}&response_type=code`, "_blank");
@@ -1140,7 +1149,7 @@ async function updateAniList(mode, addingStartPosition, addingEndPosition) {
     let incorrectGuessesArray = Array.from(incorrectGuesses);
     incorrectGuessesArray = incorrectGuessesArray.filter(n => n)
     if (mode === 'DELETE') {
-        let userListEntries = await mediaListInfo("AMQLajf", 'Watching')
+        let userListEntries = await mediaListInfo(savedSettings.ALUsername, 'Watching')
         for (let i = 0; i < userListEntries.length; i++) {
             removeListEntry(userListEntries[i])
             if (i === userListEntries.length - 1) {
@@ -1821,6 +1830,7 @@ function loadSettings() {
 // update settings after loading
 function updateSettings() {
     firstTimeUse = savedSettings.firstTimeUse
+    $("#slALUsername")[0].value = savedSettings.ALUsername
     $("#slAppID")[0].value = savedSettings.appID
     $("#slAppSecret")[0].value = savedSettings.appSecret
     accessToken = savedSettings.accessToken;
