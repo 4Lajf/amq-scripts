@@ -209,6 +209,7 @@ function createListWindow() {
                 savedSettings.accessToken = ''
                 accessToken = ''
                 saveSettings();
+                alert("Logged out of AniList!")
             })
             .popover({
                 placement: "bottom",
