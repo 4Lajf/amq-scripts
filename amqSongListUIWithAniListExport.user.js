@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Song List UI with AniList Export
 // @namespace    https://github.com/4Lajf
-// @version      3.4.5
+// @version      3.4.6
 // @description  Let's you export your wrong guessed anime to AniList so you can use them in your next game. Adds a song list window, accessible with a button below song info while in quiz, each song in the list is clickable for extra information
 // @author       TheJoseph98 & 4Lajf
 // @match        https://animemusicquiz.com/*
@@ -1030,20 +1030,20 @@ function createAuthWindow() {
 function createAddingWindow() {
     addingWindow = new AMQWindow({
         width: 350,
-        height: 300,
+        height: 350,
         title: "Add entries",
         draggable: true,
         zIndex: 1070
     });
     addingWindow.addPanel({
         width: 1.0,
-        height: 200,
+        height: 250,
         id: "slAddingWindow"
     });
 
     addingWindow.panels[0].panel
         .append($(`<div class="slAddingWindow"></div>`)
-            .append($(`<span style="display: block;"><b>How many entries would you like to export?<br>Maximum 20 at a time</b></span>`))
+            .append($(`<span style="display: block;"><b>How many entries would you like to export?<br>Input them as a raw line numbers. Correct guesses are also counted towards indexes.<br>You can export maxiumum of 20 incorrect guesses at a time.</b></span>`))
             .append($(`<span style="display: block;"><b>"From" Index</b></span>`))
             .append($(`<div class="slCheckbox"></div>`)
                 .append($(`<div class="customCheckbox"></div>`)
@@ -1056,9 +1056,25 @@ function createAddingWindow() {
                 .append($(`<div class="customCheckbox"></div>`)
                     .append($(`<input id='slAddEntriesInputMax' type='text'>`)
                     )
-                ).append($(`<button id="slAddEntriesButton" class="btn btn-primary songListOptionsButton" type="button">Proceed</button>`).click(async () => {
+                ).append($(`<button id="slAddEntriesButton" class="btn btn-primary songListOptionsButton" type="button">Proceed</button>`).click(() => {
                     let startingPosition = parseInt(slAddingWindow.querySelector('#slAddEntriesInputMin').value)
                     let endingPosition = parseInt(slAddingWindow.querySelector('#slAddEntriesInputMax').value)
+                    let end = 0, start = 0, total = 0;
+
+                    $("tr.songData").each((index, elem) => {
+                        total++
+                        if (index + 1 < startingPosition) {
+
+                        } else if (index + 1 > endingPosition) {
+
+                        }
+                        else {
+                            if ($(elem).hasClass("incorrectGuess")) {
+                                end++;
+                                console.log("start", start, 'end', end)
+                            }
+                        }
+                    });
 
                     if (startingPosition.length < 1 || endingPosition.length < 1 || isNaN(startingPosition) === true || isNaN(endingPosition) === true) {
                         alert("Please input a number")
@@ -1068,20 +1084,22 @@ function createAddingWindow() {
                         alert("Please enter a number that's greater than 0")
                         return;
                     }
-                    if (endingPosition - startingPosition > 20) {
+                    console.log("if end", end)
+                    if (end > 20) {
                         alert("The range must be less than 20")
                         return;
                     }
+
                     if (startingPosition > endingPosition) {
                         alert(`"From" field must be lesser than "To" field`)
                         return;
                     }
 
-                    let incorrectGuessesCount = await updateAniList('COUNT')
-                    if (startingPosition > incorrectGuessesCount || endingPosition > incorrectGuessesCount) {
-                        alert("Amount specified is greater than the number of incorrecly guessed anime")
+                    if (endingPosition > total) {
+                        alert(`"To" Field cannot be greater than the list's length ${total}`)
                         return;
                     }
+
                     updateAniList('ADD', startingPosition, endingPosition)
                     addingWindow.close();
                 }))
