@@ -6,28 +6,21 @@
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
 // @grant        none
-// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.user.js
-// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtist.user.js
+// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtistWIP.user.js
+// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBetterSongArtistWIP.user.js
 // @require      https://github.com/amq-script-project/AMQ-Scripts/raw/master/gameplay/simpleLogger.js
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @copyright    MIT license
 // ==/UserScript==
-// It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyway, it works.
+// It only shows score on scoreboard during guess phase and IDK how to bypass it buy anyways, it works.
 // I'm sure you can guess which parts of code were written by me. I don't know js very much so it's dirty garbage but hey, again, it works! (I hope)
 
 /* Limits how many songs can be rendered when you type a keyword. Larger number means more lag and requires more computing power. */
 let dropdownListLimit = 50
 
-/*
-Scoring Mode:
-false - artist must be exactly as AMQ shows. That means with all the featuring artists etc.
-true - artist may contain only one of participating artists (for easier difficulty)
-*/
-let scoringMode = true
-
 //true = scoringMode 1; false = scoringMode 0
 let modeBinary = true,
-    enableBinary = true,
+    enableScript = true,
     scoreboardReady = false,
     playerDataReady = false,
     returningToLobby = false,
@@ -92,7 +85,7 @@ function sleep(ms) {
 
 // Writes the current rig to scoreboard
 function writeRigToScoreboard() {
-    if (enableBinary === false) {
+    if (enableScript === false) {
         return;
     }
     if (playerDataReady) {
@@ -107,7 +100,7 @@ function writeRigToScoreboard() {
 
 // Clears the rig counters from scoreboard
 function clearScoreboard() {
-    if (enableBinary === false) {
+    if (enableScript === false) {
         return;
     }
     $(".qpsPlayerRig").remove();
@@ -116,7 +109,7 @@ function clearScoreboard() {
 
 // Clears player data
 function clearPlayerData() {
-    if (enableBinary === false) {
+    if (enableScript === false) {
         return;
     }
     playerData = {};
@@ -126,7 +119,7 @@ function clearPlayerData() {
 
 // Creates the player data for counting rig (and score)
 function initialisePlayerData() {
-    if (enableBinary === false) {
+    if (enableScript === false) {
         return;
     }
     clearPlayerData();
@@ -143,7 +136,7 @@ function initialisePlayerData() {
 
 // Creates the rig counters on the scoreboard and sets them to 0
 function initialiseScoreboard() {
-    if (enableBinary === false) {
+    if (enableScript === false) {
         return;
     }
     clearScoreboard();
@@ -157,16 +150,16 @@ function initialiseScoreboard() {
 
 async function toggleScript(e) {
     if (e.altKey && e.key == 'h') {
-        enableBinary = !enableBinary;
+        enableScript = !enableScript;
 
-        gameChat.systemMessage(enableBinary ? "Song/Artist plugin has been ENABLED" : "Song/Artist plugin has been DISABLED");
-        if (enableBinary === false) {
+        gameChat.systemMessage(enableScript ? "Song/Artist plugin has been ENABLED" : "Song/Artist plugin has been DISABLED");
+        if (enableScript === false) {
             let songArtistDOMElement = document.querySelector('#songartist');
             songArtistDOMElement.style.display = 'none';
             let playerScore = document.querySelector('.qpsPlayerRig')
             playerScore.style.display = 'none';
         }
-        if (enableBinary === true) {
+        if (enableScript === true) {
             let songArtistDOMElement = document.querySelector('#songartist');
             songArtistDOMElement.style.display = 'block';
             let playerScore = document.querySelector('.qpsPlayerRig');
@@ -1134,7 +1127,7 @@ quizReadyRigTracker = new Listener("quiz ready", async (data) => {
 
 // Reset data when joining a lobby
 joinLobbyListener = new Listener("Join Game", async (payload) => {
-    if (enableBinary === false) {
+    if (enableScript === false) {
         return;
     }
     songsInit = false
@@ -2091,7 +2084,7 @@ joinLobbyListener = new Listener("Join Game", async (payload) => {
 
 // stuff to do on answer reveal
 answerResultsRigTracker = new Listener("answer results", async (result) => {
-    if (enableBinary === false) {
+    if (enableScript === false) {
         return;
     }
     for (let player of result.players) {
@@ -2105,7 +2098,7 @@ answerResultsRigTracker = new Listener("answer results", async (result) => {
 
 // Reset data when spectating a lobby
 spectateLobbyListener = new Listener("Spectate Game", (payload) => {
-    if (enableBinary === false) {
+    if (enableScript === false) {
         return;
     }
     if (payload.error) {
@@ -2118,7 +2111,7 @@ spectateLobbyListener = new Listener("Spectate Game", (payload) => {
 
 //Remove Alt+G listener on the end of the game
 quizEndTracker = new Listener("quiz end result", (result) => {
-    if (enableBinary === false) {
+    if (enableScript === false) {
         return;
     }
     document.removeEventListener('keydown', toggleScript)
@@ -2156,7 +2149,7 @@ class SongArtistMode {
     #songField
     #artistField
     constructor() {
-        if (enableBinary === false) {
+        if (enableScript === false) {
             return;
         }
 
@@ -2941,7 +2934,7 @@ class SongArtistMode {
     }
 }
 
-if (enableBinary === true) {
+if (enableScript === true) {
     window.songArtist = new SongArtistMode()
 }
 
