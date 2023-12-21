@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         AMQ Better Song Artist Mode
+// @name         [WIP] AMQ Better Song Artist Mode
 // @namespace    http://tampermonkey.net/
 // @version      2.0.0
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
