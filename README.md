@@ -1,5 +1,9 @@
 # amq_scripts
 
+### amqTrainingMode.user.js
+Extended version of [kempanator](https://github.com/kempanator)'s[Custom Song List Game](https://github.com/kempanator/amq-scripts/blob/main/amqCustomSongListGame.user.js)
+Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
+
 ### amqSongListUIWithAniListExport.user.js
 A fork [TheJoseph98](https://github.com/TheJoseph98)'s [amqSongListUI](https://github.com/TheJoseph98/AMQ-Scripts/blob/master/amqSongListUI.user.js)
 - Let's you export your wrong guessed anime to AniList so you can use them in your next game
