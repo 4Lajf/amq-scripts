@@ -12,9 +12,12 @@ A fork [TheJoseph98](https://github.com/TheJoseph98)'s [amqSongListUI](https://g
 ### amqAnswerTimeDiference.js
 A fork of [Zolhungaj]'s(https://github.com/amq-script-project) [amqPlayerAnswerTimeDisplay](https://github.com/amq-script-project/AMQ-Scripts/blob/master/gameplay/amqPlayerAnswerTimeDisplay.user.js)
 - See the diference in answering time to the fastest player, updates dynamicly
-- See how fast you were on a per round basis (chat leaderboards)
-- See how much time you spent answering questions (main leaderboard)
+- See how fast you were on a per round basis (round leaderboard)
+- See how much time you spent answering questions (after-quiz leaderboard)
+- See in which round people gave fastest answers (after-quiz leaderboard)
 - Settings for toggling diferent parts of the script (can be found where normal settings would be)
+And decide to either send those stats to yourself only or to the entire chat. The settings for this script can be found where the usual settings are.
+
 ---
 ### amqBuzzer.js
 An improved version ofBob's [amqBuzzer](https://files.catbox.moe/lipeqk.js)
