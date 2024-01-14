@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Player Answer Time Diference
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.5
 // @description  Makes you able to see how quickly people answered and the diference beetween the first player and everyone else, sends the result on chat at the end of a round and sends some stats and the end of the game
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -39,7 +39,7 @@
                 {
                     label: "Write times to chat",
                     id: "smTimeDiferenceChat",
-                    popover: "Sends song's and quiz's leaderboard at the end of each one",
+                    popover: "Send song's leaderboard at the end of each round",
                     unchecks: ["smTimeDiferenceChatHidden", "smTimeDiferenceChatSilent"],
                     offset: 1,
                     default: false
@@ -47,7 +47,7 @@
                 {
                     label: "Write times to chat (only you)",
                     id: "smTimeDiferenceChatHidden",
-                    popover: "Sends song's and quiz's leaderboard at the end of each one, but only you can see that messages",
+                    popover: "Send song's leaderboard at the end of each round, but only you can see those messages",
                     unchecks: ["smTimeDiferenceChat", "smTimeDiferenceChatSilent"],
                     offset: 1,
                     default: true,
@@ -55,7 +55,7 @@
                 {
                     label: "Don't Write times to chat",
                     id: "smTimeDiferenceChatSilent",
-                    popover: "Disables Sending song's and quiz's leaderboard to chat",
+                    popover: "Send song's leaderboard to chat",
                     unchecks: ["smTimeDiferenceChat", "smTimeDiferenceChatHidden"],
                     offset: 1,
                     default: false,
@@ -77,7 +77,7 @@
                 {
                     label: "Time Diferences",
                     id: "smTimeDiferenceTimes",
-                    popover: "Toggle time diferences at the place of player's answer",
+                    popover: "Toggle time diferences at a place of player's answer",
                     offset: 1,
                     default: true
                 },
@@ -509,47 +509,43 @@
 
     function quizEndResult(results) {
         if ($("#smTimeDiference").prop("checked")) {
-            if ($("#smTimeDiferenceChatSilent").prop("checked")) {
-                //Do nothing
-            } else {
-                if ($("#smTimeDiferenceRoundLeaderboard").prop("checked")) {
-                    let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-                    fastestLeaderboard = fastestLeaderboard.sort(compare)
-                    fastestLeaderboardToSum = fastestLeaderboard
-                    let limiter = 0;
-                    if ($("#smTimeDiferenceChatHidden").prop("checked")) {
-                        gameChat.systemMessage(`===== FASTEST ANSWERS =====`)
-                        for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                            if (limiter > 9) break;
-                            gamechat.systemMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
-                            limiter++
-                        }
-                    } else {
-                        sendLobbyMessage(`===== FASTEST ANSWERS =====`)
-                        for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                            if (limiter > 9) break;
-                            sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
-                            limiter++
-                        }
+            if ($("#smTimeDiferenceRoundLeaderboard").prop("checked")) {
+                let placeNumber = ['⚡', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+                fastestLeaderboard = fastestLeaderboard.sort(compare)
+                fastestLeaderboardToSum = fastestLeaderboard
+                let limiter = 0;
+                if ($("#smTimeDiferenceChatHidden").prop("checked")) {
+                    gameChat.systemMessage(`===== FASTEST ANSWERS =====`)
+                    for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
+                        if (limiter > 9) break;
+                        gameChat.systemMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
+                        limiter++
                     }
+                } else {
+                    sendLobbyMessage(`===== FASTEST ANSWERS =====`)
+                    for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
+                        if (limiter > 9) break;
+                        sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
+                        limiter++
+                    }
+                }
 
-                    //Display leaderboard, player's scores are summed up
-                    summedUpLeaderBoard = mergeArray(fastestLeaderboardToSum)
+                //Display leaderboard, player's scores are summed up
+                summedUpLeaderBoard = mergeArray(fastestLeaderboardToSum)
 
-                    if ($("#smTimeDiferenceChatHidden").prop("checked")) {
-                        gameChat.systemMessage(`===== SUMMED UP TIMES =====`)
-                        for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                            if (limiter > 9) break;
-                            gamechat.systemMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
-                            limiter++
-                        }
-                    } else {
-                        sendLobbyMessage(`===== SUMMED UP TIMES =====`)
-                        for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                            if (limiter > 9) break;
-                            sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
-                            limiter++
-                        }
+                if ($("#smTimeDiferenceChatHidden").prop("checked")) {
+                    gameChat.systemMessage(`===== SUMMED UP TIMES =====`)
+                    for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
+                        if (limiter > 9) break;
+                        gameChat.systemMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
+                        limiter++
+                    }
+                } else {
+                    sendLobbyMessage(`===== SUMMED UP TIMES =====`)
+                    for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
+                        if (limiter > 9) break;
+                        sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
+                        limiter++
                     }
                 }
             }
