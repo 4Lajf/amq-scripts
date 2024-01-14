@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         AMQ Mute Button Buzzer
+// @name         AMQ Buzzer Gamemode
 // @namespace    http://tampermonkey.net/
-// @version      1.2
-// @description  Posts the time when the player mutes their audio per round, acting as a buzzer
+// @version      1.0
+// @description  Click "Ctrl" to mute song, whoever mutes their song earliest will get the most points. At the end of the quiz whoever was the fastest in recognizing songs wins.
 // @author       4Lajf (forked from BobTheSheriff)
 // @match        https://animemusicquiz.com/*
 // @grant        none
@@ -16,8 +16,10 @@
 When you recognize a song, mute the audio by clicking the control button
 Then, enter your answer in the answer bar. Do not unmute your audio (if you do, it will be counted as a missed buzzer).
 Your audio will be automatically unmuted going into the results phase, and when the next song is loaded.
-
 The time taken to hit the buzzer, as well as whether or not your answer was correct, will be posted in the chat.
+Every milisecond counts towrads your final score, the lower the better.
+If you cheat or won't get the answer right you will be penalized by +3000ms. If you will hear the song for longer than 3000ms but get the answer right, your timing will be back to 2000ms.
+Maybe not the most balanced mode but I'm welcome to suggestions.
 
 Shoutout to Zolhungaj and TheJoseph98 as I mostly looked at their scripts to figure out how to write this
 */
@@ -83,6 +85,14 @@ const amqAnswerTimesUtility = new function () {
         }
     }).bindListener()
 }()
+
+function sendLobbyMessage(message) {
+    socket.sendCommand({
+        type: 'lobby',
+        command: 'game chat message',
+        data: { msg: message, teamMessage: false }
+    });
+}
 
 function compare(a, b) {
     if (a.time < b.time) {
@@ -205,12 +215,12 @@ quiz._playerAnswerListner = new Listener(
         if (!quiz.isSpectator) {
             let time = songMuteTime - songStartTime
             if (buzzerFired === false || time < 0) {
-                gameChat.systemMessage(`[time] none`)
+                sendLobbyMessage(`[time] none`)
             } else if (time > 3000) {
                 time = 3000;
-                gameChat.systemMessage(`[time] ${(time).toString()}`)
+                sendLobbyMessage(`[time] ${(time).toString()}`)
             } else {
-                gameChat.systemMessage(`[time] ${(time).toString()}`)
+                sendLobbyMessage(`[time] ${(time).toString()}`)
             }
             quiz.answerInput.showSubmitedAnswer()
             quiz.answerInput.resetAnswerState()
@@ -312,7 +322,7 @@ new Listener("answer results", (result) => {
     for (let i = 0; i < displayCorrectPlayers.length; i++) {
         if (limiter < 10) {
             if (i === 0) {
-                gameChat.systemMessage(`⚡${displayCorrectPlayers[0].name} 🡆 ${displayCorrectPlayers[0].time}ms`);
+                sendLobbyMessage(`⚡${displayCorrectPlayers[0].name} 🡆 ${displayCorrectPlayers[0].time}ms`);
                 globalFastestLeaderboard.push({
                     'name': displayCorrectPlayers[0].name,
                     'time': parseInt(displayCorrectPlayers[0].time),
@@ -323,7 +333,7 @@ new Listener("answer results", (result) => {
                 writeRigToScoreboard();
                 limiter++
             } else {
-                gameChat.systemMessage(`${placeNumber[i]} ${displayCorrectPlayers[i].name} 🡆 +${displayCorrectPlayers[i].time - displayCorrectPlayers[0].time}ms`);
+                sendLobbyMessage(`${placeNumber[i]} ${displayCorrectPlayers[i].name} 🡆 +${displayCorrectPlayers[i].time - displayCorrectPlayers[0].time}ms`);
                 globalFastestLeaderboard.push({
                     'name': displayCorrectPlayers[i].name,
                     'time': parseInt(displayCorrectPlayers[i].time),
@@ -349,7 +359,7 @@ new Listener("answer results", (result) => {
     for (let i = 0; i < displayInCorrectPlayers.length; i++) {
         if (limiter < 10) {
             displayInCorrectPlayers[i].time = 3000;
-            gameChat.systemMessage(`❌${displayInCorrectPlayers[i].name} 🡆 Penalty +3000ms`);
+            sendLobbyMessage(`❌${displayInCorrectPlayers[i].name} 🡆 Penalty +3000ms`);
             globalFastestLeaderboard.push({
                 'name': displayInCorrectPlayers[i].name,
                 'time': 3000,
@@ -377,10 +387,10 @@ function quizEndResult(results) {
 
     //Display leaderboard, player's scores are summed up
     globalFastestLeaderboard = mergeArray(globalFastestLeaderboard)
-    gameChat.systemMessage(`===== SUMMED UP TIMES =====`)
+    sendLobbyMessage(`===== SUMMED UP TIMES =====`)
     for (let i = 0; i <= globalFastestLeaderboard.length - 1; i++) {
         if (i > 10) break;
-        gameChat.systemMessage(`${placeNumber[i]} ${globalFastestLeaderboard[i].name} 🡆 ${globalFastestLeaderboard[i].time}ms`);
+        sendLobbyMessage(`${placeNumber[i]} ${globalFastestLeaderboard[i].name} 🡆 ${globalFastestLeaderboard[i].time}ms`);
     }
 }
 
@@ -413,7 +423,15 @@ new Listener("quiz end result", quizEndResult).bindListener();
 AMQ_addScriptData({
     name: "AMQ Mute Button Buzzer",
     author: "4Lajf (forked from BobTheSheriff)",
-    description: `Posts the time when the player mutes their audio per round, acting as a buzzer`
+    description: `Click "Ctrl" to mute song, whoever mutes their song earliest will get the most points. At the end of the quiz whoever was the fastest in recognizing songs wins.
+Usage:
+When you recognize a song, mute the audio by clicking the control button
+Then, enter your answer in the answer bar. Do not unmute your audio (if you do, it will be counted as a missed buzzer).
+Your audio will be automatically unmuted going into the results phase, and when the next song is loaded.
+The time taken to hit the buzzer, as well as whether or not your answer was correct, will be posted in the chat.
+Every milisecond counts towrads your final score, the lower the better.
+If you cheat or won't get the answer right you will be penalized by +3000ms. If you will hear the song for longer than 3000ms but get the answer right, your timing will be back to 2000ms.
+Maybe not the most balanced mode but I'm welcome to suggestions.`
 });
 
 // Writes the current rig to scoreboard
