@@ -559,8 +559,11 @@
         AMQ_addScriptData({
             name: "AMQ Player Answer Time Diference",
             author: "4Lajf (forked from Zolhungaj)",
-            description: `Displays time diference in seconds between the fastest player and the rest, then and the end of the round sends results in chat. Send to chat the final leaderboard once the game ends`
+            description: `See the diference in answering time to the fastest player, updates dynamicly
+See how fast you were on a per round basis (round leaderboard)
+See how much time you spent answering questions (after-quiz leaderboard)
+See in which round people gave fastest answers (after-quiz leaderboard)
+Settings for toggling diferent parts of the script (can be found where normal settings would be) And decide to either send those stats to yourself only or to the entire chat. The settings for this script can be found where the usual settings are.`
         });
     }
-
 })();
