@@ -23,8 +23,8 @@ Gameified version of Bob's [amqBuzzer](https://files.catbox.moe/lipeqk.js)
 - Every milisecond while the buzzer is not muted will add to your score. Person with the lowest score wins. Bascially a reaction speed contest instead of speed typing / shortcut memorization like quickdraw.
 
 ---
-### amqStylePoints.user.js
-- Awards additional "style points" (on the right side of your score in leaderboard) if you are the fastest one to get the answer right.
+### amqTiebreakPoints.user.js
+- Awards additional tiebreak points (on the right side of your score in leaderboard) if you are the fastest one to get the answer right. This script is meant to serve as a way to tiebreak places.
 
 ---
 ### amqHotkeyFunctions.js
