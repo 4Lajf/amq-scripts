@@ -2,7 +2,7 @@
 // @name         AMQ Style Points
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  Awards additional "style points" (on the right side of your score in leaderboard) if you are the fastest one to get the answer right.
+// @description  Awards additional "style points" (on the right side of your score in leaderboard) if you are the fastest one to get the answer right. This script is meant to serve as a way to tiebreak points. 
 // @author       4Lajf
 // @match        https://animemusicquiz.com/*
 // @grant        none
@@ -75,7 +75,7 @@ function filterAndSortPlayerTimes(correctPlayers, playerTimes) {
 AMQ_addScriptData({
     name: "AMQ Style Points",
     author: "4Lajf",
-    description: `Awards additional "style points" (on the right side of your score in leaderboard) if you are the fastest one to get the answer right.`
+    description: `Awards additional "style points" (on the right side of your score in leaderboard) if you are the fastest one to get the answer right. This script is meant to serve as a way to tiebreak points.`
 });
 
 // Writes the current rig to scoreboard
