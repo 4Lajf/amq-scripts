@@ -2,13 +2,13 @@
 // @name         AMQ Style Points
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  Awards additional "style points" if you are the first one to get the answer right.
+// @description  Awards additional "style points" (on the right side of your score in leaderboard) if you are the first one to get the answer right.
 // @author       4Lajf
 // @match        https://animemusicquiz.com/*
 // @grant        none
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
-// @downloadURL  https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBuzzer.user.js
-// @updateURL    https://raw.githubusercontent.com/4Lajf/amq-scripts/main/amqBuzzer.user.js
+// @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqStylePoints.user.js
+// @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqStylePoints.user.js
 // @copyright    MIT license
 // ==/UserScript==
 
@@ -63,18 +63,11 @@ const amqAnswerTimesUtility = new function () {
     }).bindListener()
 }()
 
-//On pre-show-answer phase
-
 function filterAndSortPlayerTimes(correctPlayers, playerTimes) {
-    // Create a set containing all the gamePlayerIds from the correctPlayers array for efficient lookup
     const correctPlayerIdsSet = new Set(correctPlayers.map((player) => player.gamePlayerId));
-
-    // Filter playerTimes array, keeping only those entries whose gamePlayerId exists in the correctPlayers set
     const filteredPlayerTimes = playerTimes.filter((playerTime) =>
         correctPlayerIdsSet.has(playerTime.gamePlayerId)
     );
-
-    // Sort the filtered playerTimes by answerTime in ascending order
     const sortedPlayerTimes = filteredPlayerTimes.sort((a, b) => a.answerTime - b.answerTime);
     return sortedPlayerTimes[0];
 }
@@ -82,7 +75,7 @@ function filterAndSortPlayerTimes(correctPlayers, playerTimes) {
 AMQ_addScriptData({
     name: "AMQ Style Points",
     author: "4Lajf",
-    description: `Awards additional "style points" if you are the first one to get the answer right.`
+    description: `Awards additional "style points" (on the right side of your score in leaderboard) if you are the first one to get the answer right.`
 });
 
 // Writes the current rig to scoreboard
