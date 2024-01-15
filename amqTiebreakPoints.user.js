@@ -7,8 +7,8 @@
 // @match        https://animemusicquiz.com/*
 // @grant        none
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
-// @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqStylePoints.user.js
-// @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqStylePoints.user.js
+// @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqTiebreakPoints.user.js
+// @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqTiebreakPoints.user.js
 // @copyright    MIT license
 // ==/UserScript==
 
