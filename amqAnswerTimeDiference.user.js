@@ -12,6 +12,10 @@
 // @copyright    MIT license
 // ==/UserScript==
 
+/* KNOWN BUG######################################################################################################### KNOWN BUG */
+/* IF PLAYER GETS ANSWER WRONG IT ADDS [ROUND_LENGTH_TIME] (AS IT SHOULD) TO THEIR ANSWER TIME BUT NOT WHEN THE ANSWER IS EMPTY */
+/* KNOWN BUG######################################################################################################### KNOWN BUG */
+
 (() => {
     // don't load on login page
     if (document.getElementById("startPage")) return;
@@ -204,27 +208,18 @@
 
     //sort object by time (fastest first)
     function compare(a, b) {
-        if (a.time < b.time) {
-            return -1;
-        }
-        if (a.time > b.time) {
-            return 1;
-        }
-        return 0;
+        return a.time - b.time;
     }
 
     function mergeArray(data) {
-        return [...data].reduce((acc, val, i, arr) => {
+        return [...data].reduce((acc, val) => {
             let { time, name } = val;
             time = parseFloat(time);
             const ind = acc.findIndex((el) => el.name === name);
             if (ind !== -1) {
                 acc[ind].time += time;
             } else {
-                acc.push({
-                    time,
-                    name,
-                });
+                acc.push({ time, name });
             }
             return acc;
         }, []);
@@ -451,122 +446,79 @@
     //On show answer phase
     function answerResults(results) {
         let gameRound = parseInt($("#qpCurrentSongCount").text()) + 1;
-        if ($("#smTimeDifference").prop("checked")) {
-            if ($("#smTimeDifferenceChatSilent").prop("checked")) {
-                return;
-            } else {
-                if ($("#smTimeDifferenceRoundLeaderboard").prop("checked")) {
-                    let limiter = 0,
-                        correctIds = [],
-                        displayPlayers = [];
-                    //Get only those who answered correctly
-                    const correctPlayers = results.players.filter((player) => player.correct);
-                    for (let i = 0; i < correctPlayers.length; i++) {
-                        correctIds.push(correctPlayers[i].gamePlayerId);
-                    }
+        if ($("#smTimeDifference").prop("checked") && !$("#smTimeDifferenceChatSilent").prop("checked") && $("#smTimeDifferenceRoundLeaderboard").prop("checked")) {
+            let correctIds = results.players.filter((player) => player.correct).map((player) => player.gamePlayerId);
+            let displayPlayers = [];
 
-                    //add them into 'displayPlayers' array
-                    for (let i = 0; i <= correctIds.length - 1; i++) {
-                        displayPlayers.push(amqAnswerTimesUtility.playerTimes.find((item) => item.gamePlayerId === correctIds[i]));
-                    }
+            amqAnswerTimesUtility.playerTimes.forEach((player) => {
+                const isCorrect = correctIds.includes(player.gamePlayerId);
+                const time = isCorrect ? player.time : quiz.nextSongPlayLength * 1000;
 
-                    //If no one got the question right, display all the scores
-                    //Otherwise show only those who answered correctly
-                    if (displayPlayers.length > 0) {
-                        displayPlayers = displayPlayers.sort(compare);
+                fastestLeaderboard.push({
+                    name: player.name,
+                    time: time,
+                    round: gameRound - 1,
+                    correct: isCorrect,
+                });
 
-                        for (let i = 0; i < displayPlayers.length; i++) {
-                            if (limiter < 10) {
-                                let placeNumber = ["⚡", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
-
-                                if (limiter === 0) {
-                                    fastestLeaderboard.push({
-                                        name: displayPlayers[0].name,
-                                        time: displayPlayers[0].time,
-                                        round: gameRound - 1,
-                                    });
-                                    summedUpLeaderBoard = mergeArray(fastestLeaderboard);
-                                    if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                                        gameChat.systemMessage(`⚡ ${displayPlayers[0].name} ➔ ${displayPlayers[0].time}ms`);
-                                    } else {
-                                        sendLobbyMessage(`⚡ ${displayPlayers[0].name} ➔ ${displayPlayers[0].time}ms`);
-                                    }
-                                } else {
-                                    fastestLeaderboard.push({
-                                        name: displayPlayers[limiter].name,
-                                        time: displayPlayers[limiter].time,
-                                        round: gameRound - 1,
-                                    });
-                                    summedUpLeaderBoard = mergeArray(fastestLeaderboard);
-
-                                    if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                                        gameChat.systemMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} ➔ +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
-                                    } else {
-                                        sendLobbyMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} ➔ +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
-                                    }
-                                }
-                            }
-                            limiter++;
-                        }
-                    } else if (amqAnswerTimesUtility.playerTimes.length === 0) {
-                        if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                            gameChat.systemMessage(`Not even trying? I see...`);
-                        } else {
-                            sendLobbyMessage(`Not even trying? I see...`);
-                        }
-                    } else {
-                        if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                            gameChat.systemMessage(`You are all terrible at this...`);
-                        } else {
-                            sendLobbyMessage(`You are all terrible at this...`);
-                        }
-                    }
+                if (isCorrect) {
+                    displayPlayers.push({ ...player, time: time });
                 }
+            });
+
+            displayPlayers.sort(compare);
+
+            if (displayPlayers.length > 0) {
+                let placeNumber = ["⚡", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+                displayPlayers.slice(0, 10).forEach((player, index) => {
+                    let message = index === 0 ? `⚡ ${player.name} ➔ ${player.time}ms` : `${placeNumber[index]} ${player.name} ➔ +${player.time - displayPlayers[0].time}ms`;
+
+                    if ($("#smTimeDifferenceChatHidden").prop("checked")) {
+                        gameChat.systemMessage(message);
+                    } else {
+                        sendLobbyMessage(message);
+                    }
+                });
+            } else if (amqAnswerTimesUtility.playerTimes.length === 0) {
+                let message = "Not even trying? I see...";
+                $("#smTimeDifferenceChatHidden").prop("checked") ? gameChat.systemMessage(message) : sendLobbyMessage(message);
+            } else {
+                let message = "You are all terrible at this...";
+                $("#smTimeDifferenceChatHidden").prop("checked") ? gameChat.systemMessage(message) : sendLobbyMessage(message);
             }
         }
+        console.log(fastestLeaderboard);
     }
 
     function quizEndResult(results) {
-        if ($("#smTimeDifference").prop("checked")) {
-            if ($("#smTimeDifferenceRoundLeaderboard").prop("checked")) {
-                let placeNumber = ["⚡", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
-                fastestLeaderboard = fastestLeaderboard.sort(compare);
-                fastestLeaderboardToSum = fastestLeaderboard;
-                let limiter = 0;
-                if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                    gameChat.systemMessage(`===== FASTEST ANSWERS =====`);
-                    for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                        if (limiter > 9) break;
-                        gameChat.systemMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} ➔ ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
-                        limiter++;
-                    }
-                } else {
-                    sendLobbyMessage(`===== FASTEST ANSWERS =====`);
-                    for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                        if (limiter > 9) break;
-                        sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} ➔ ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
-                        limiter++;
-                    }
-                }
+        if ($("#smTimeDifference").prop("checked") && $("#smTimeDifferenceGameLeaderboard").prop("checked")) {
+            let placeNumber = ["⚡", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
 
-                //Display leaderboard, player's scores are summed up
-                summedUpLeaderBoard = mergeArray(fastestLeaderboardToSum);
-                console.log(summedUpLeaderBoard);
-                if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                    gameChat.systemMessage(`===== SUMMED UP TIMES =====`);
-                    for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                        if (limiter > 9) break;
-                        gameChat.systemMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} ➔ ${summedUpLeaderBoard[i].time}ms`);
-                        limiter++;
-                    }
-                } else {
-                    sendLobbyMessage(`===== SUMMED UP TIMES =====`);
-                    for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
-                        if (limiter > 9) break;
-                        sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} ➔ ${summedUpLeaderBoard[i].time}ms`);
-                        limiter++;
-                    }
-                }
+            // Sort fastestLeaderboard by time
+            fastestLeaderboard.sort(compare);
+
+            // Display fastest correct answers
+            let correctAnswers = fastestLeaderboard.filter((entry) => entry.correct).slice(0, 10);
+
+            let fastestMessage = "===== FASTEST ANSWERS =====\n" + correctAnswers.map((entry, index) => `${placeNumber[index]} ${entry.name} ➔ ${entry.time}ms (R${entry.round})`).join("\n");
+
+            // Calculate and display summed up times (including all answers)
+            let summedUpLeaderBoard = mergeArray(fastestLeaderboard);
+            summedUpLeaderBoard.sort((a, b) => a.time - b.time);
+
+            let summedMessage =
+                "===== SUMMED UP TIMES =====\n" +
+                summedUpLeaderBoard
+                    .slice(0, 10)
+                    .map((entry, index) => `${placeNumber[index]} ${entry.name} ➔ ${entry.time}ms`)
+                    .join("\n");
+
+            if ($("#smTimeDifferenceChatHidden").prop("checked")) {
+                gameChat.systemMessage(fastestMessage);
+                gameChat.systemMessage(summedMessage);
+            } else {
+                sendLobbyMessage(fastestMessage);
+                sendLobbyMessage(summedMessage);
             }
         }
     }
