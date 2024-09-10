@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Player Answer Time Difference
 // @namespace    http://tampermonkey.net/
-// @version      1.6.1
+// @version      1.6.2
 // @description  Makes you able to see how quickly people answered and the difference between the first player and everyone else, sends the result on chat at the end of a round and sends some stats at the end of the game
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -450,6 +450,7 @@
 
     //On show answer phase
     function answerResults(results) {
+        let gameRound = parseInt($("#qpCurrentSongCount").text()) + 1;
         if ($("#smTimeDifference").prop("checked")) {
             if ($("#smTimeDifferenceChatSilent").prop("checked")) {
                 return;
@@ -550,7 +551,7 @@
 
                 //Display leaderboard, player's scores are summed up
                 summedUpLeaderBoard = mergeArray(fastestLeaderboardToSum);
-
+                console.log(summedUpLeaderBoard);
                 if ($("#smTimeDifferenceChatHidden").prop("checked")) {
                     gameChat.systemMessage(`===== SUMMED UP TIMES =====`);
                     for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
