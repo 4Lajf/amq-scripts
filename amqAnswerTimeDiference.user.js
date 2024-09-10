@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Player Answer Time Difference
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.6.1
 // @description  Makes you able to see how quickly people answered and the difference between the first player and everyone else, sends the result on chat at the end of a round and sends some stats at the end of the game
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -257,23 +257,22 @@
         if (typeof Listener === "undefined") {
             return;
         }
+
         new Listener("play next song", () => {
             if ($("#smTimeDifference").prop("checked")) {
-                if ($("#smTimeDifferenceChatSilent").prop("checked")) {
-                    //Do nothing
-                } else {
+                if (!$("#smTimeDifferenceChatSilent").prop("checked")) {
                     let gameRound = parseInt($("#qpCurrentSongCount").text()) + 1;
                     if ($("#smTimeDifferenceRoundLeaderboard").prop("checked")) {
+                        const message = `===== ROUND ${gameRound} =====`;
                         if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                            gameChat.systemMessage(`===== ROUND ${gameRound} =====`);
+                            gameChat.systemMessage(message);
                         } else {
-                            sendLobbyMessage(`===== ROUND ${gameRound} =====`);
+                            sendLobbyMessage(message);
                         }
                     }
                 }
                 this.songStartTime = Date.now();
                 this.playerTimes = [];
-                gameRound++;
             }
         }).bindListener();
 
@@ -289,37 +288,46 @@
                         name: quizPlayer._name,
                     });
 
-                    //Deletes duplicate entry and leaves only the newest one
-                    if (isDuplicate(this.playerTimes) === true) {
-                        for (var i = 0; i <= this.playerTimes.length - 1; i++) {
-                            let tmp = this.playerTimes[i].gamePlayerId;
-                            if (tmp === gamePlayerId) {
-                                delete this.playerTimes[i].date;
-                                delete this.playerTimes[i].gamePlayerId;
-                                delete this.playerTimes[i].time;
-                                delete this.playerTimes[i].name;
-                                this.playerTimes = this.playerTimes.filter((obj) => !(obj && Object.keys(obj).length === 0 && obj.constructor === Object));
+                    // Deletes duplicate entry and leaves only the newest one
+                    if (isDuplicate(this.playerTimes)) {
+                        for (let i = 0; i < this.playerTimes.length; i++) {
+                            if (this.playerTimes[i].gamePlayerId === gamePlayerId) {
+                                this.playerTimes.splice(i, 1);
                                 break;
                             }
                         }
                     }
 
-                    //Helper function to code above
-                    function isDuplicate(values) {
-                        var valueArr = values.map(function (item) {
-                            return item.gamePlayerId;
-                        });
-                        var isDuplicate = valueArr.some(function (item, idx) {
-                            return valueArr.indexOf(item) != idx;
-                        });
-                        return isDuplicate;
-                    }
-
-                    //Sort object by time (faster is first)
-                    this.playerTimes = this.playerTimes.sort(compare);
+                    // Sort object by time (faster is first)
+                    this.playerTimes.sort(compare);
                 });
             }
         }).bindListener();
+
+        new Listener("Join Game", (data) => {
+            const quizState = data.quizState;
+            if (quizState) {
+                this.songStartTime = Date.now() - quizState.songTimer * 1000;
+            }
+        }).bindListener();
+
+        new Listener("Spectate Game", (data) => {
+            const quizState = data.quizState;
+            if (quizState) {
+                this.songStartTime = Date.now() - quizState.songTimer * 1000;
+            }
+        }).bindListener();
+
+        // Helper function to check for duplicates
+        function isDuplicate(values) {
+            const valueArr = values.map((item) => item.gamePlayerId);
+            return valueArr.some((item, idx) => valueArr.indexOf(item) != idx);
+        }
+
+        // Comparison function for sorting
+        function compare(a, b) {
+            return a.time - b.time;
+        }
     })();
 
     new Listener("Game Starting", ({ players }) => {
@@ -478,9 +486,9 @@
                                     });
                                     summedUpLeaderBoard = mergeArray(fastestLeaderboard);
                                     if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                                        gameChat.systemMessage(`⚡ ${displayPlayers[0].name} 🡆 ${displayPlayers[0].time}ms`);
+                                        gameChat.systemMessage(`⚡ ${displayPlayers[0].name} ➔ ${displayPlayers[0].time}ms`);
                                     } else {
-                                        sendLobbyMessage(`⚡ ${displayPlayers[0].name} 🡆 ${displayPlayers[0].time}ms`);
+                                        sendLobbyMessage(`⚡ ${displayPlayers[0].name} ➔ ${displayPlayers[0].time}ms`);
                                     }
                                 } else {
                                     fastestLeaderboard.push({
@@ -491,9 +499,9 @@
                                     summedUpLeaderBoard = mergeArray(fastestLeaderboard);
 
                                     if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                                        gameChat.systemMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} 🡆 +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
+                                        gameChat.systemMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} ➔ +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
                                     } else {
-                                        sendLobbyMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} 🡆 +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
+                                        sendLobbyMessage(`${placeNumber[limiter]} ${displayPlayers[limiter].name} ➔ +${displayPlayers[limiter].time - displayPlayers[0].time}ms`);
                                     }
                                 }
                             }
@@ -528,14 +536,14 @@
                     gameChat.systemMessage(`===== FASTEST ANSWERS =====`);
                     for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
                         if (limiter > 9) break;
-                        gameChat.systemMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
+                        gameChat.systemMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} ➔ ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
                         limiter++;
                     }
                 } else {
                     sendLobbyMessage(`===== FASTEST ANSWERS =====`);
                     for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
                         if (limiter > 9) break;
-                        sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} 🡆 ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
+                        sendLobbyMessage(`${placeNumber[i]} ${fastestLeaderboard[i].name} ➔ ${fastestLeaderboard[i].time}ms (R${fastestLeaderboard[i].round})`);
                         limiter++;
                     }
                 }
@@ -547,14 +555,14 @@
                     gameChat.systemMessage(`===== SUMMED UP TIMES =====`);
                     for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
                         if (limiter > 9) break;
-                        gameChat.systemMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
+                        gameChat.systemMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} ➔ ${summedUpLeaderBoard[i].time}ms`);
                         limiter++;
                     }
                 } else {
                     sendLobbyMessage(`===== SUMMED UP TIMES =====`);
                     for (let i = 0; i <= fastestLeaderboard.length - 1; i++) {
                         if (limiter > 9) break;
-                        sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} 🡆 ${summedUpLeaderBoard[i].time}ms`);
+                        sendLobbyMessage(`${placeNumber[i]} ${summedUpLeaderBoard[i].name} ➔ ${summedUpLeaderBoard[i].time}ms`);
                         limiter++;
                     }
                 }
