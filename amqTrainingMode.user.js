@@ -7,8 +7,8 @@
 // @author       4Lajf & kempanator
 // @grant        none
 // @require      https://github.com/joske2865/AMQ-Scripts/raw/master/common/amqScriptInfo.js
-// @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqTraningMode.user.js
-// @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqTraningMode.user.js
+// @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqTrainingMode.user.js
+// @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqTrainingMode.user.js
 // ==/UserScript==
 
 /*
