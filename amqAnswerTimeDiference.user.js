@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Player Answer Time Difference
 // @namespace    http://tampermonkey.net/
-// @version      1.6.3
+// @version      1.6.4
 // @description  Makes you able to see how quickly people answered and the difference between the first player and everyone else, sends the result on chat at the end of a round and sends some stats at the end of the game
 // @author       4Lajf (forked from Zolhungaj)
 // @match        https://animemusicquiz.com/*
@@ -450,6 +450,7 @@
             let correctIds = results.players.filter((player) => player.correct).map((player) => player.gamePlayerId);
             let displayPlayers = [];
 
+            // Process players who answered
             amqAnswerTimesUtility.playerTimes.forEach((player) => {
                 const isCorrect = correctIds.includes(player.gamePlayerId);
                 const time = isCorrect ? player.time : quiz.nextSongPlayLength * 1000;
@@ -466,6 +467,21 @@
                 }
             });
 
+            // Process players who didn't answer
+            // FIXME: it should opreate on usernames not gameplayerids thus broken
+            results.players.forEach((player) => {
+                if (!amqAnswerTimesUtility.playerTimes.some((p) => p.gamePlayerId === player.gamePlayerId)) {
+                    const time = quiz.nextSongPlayLength * 1000;
+
+                    fastestLeaderboard.push({
+                        name: player.name,
+                        time: time,
+                        round: gameRound - 1,
+                        correct: false,
+                    });
+                }
+            });
+
             displayPlayers.sort(compare);
 
             if (displayPlayers.length > 0) {
@@ -479,7 +495,7 @@
                         sendLobbyMessage(message);
                     }
                 });
-            } else if (amqAnswerTimesUtility.playerTimes.length === 0) {
+            } else if (results.players.length === 0) {
                 let message = "Not even trying? I see...";
                 $("#smTimeDifferenceChatHidden").prop("checked") ? gameChat.systemMessage(message) : sendLobbyMessage(message);
             } else {
@@ -500,25 +516,30 @@
             // Display fastest correct answers
             let correctAnswers = fastestLeaderboard.filter((entry) => entry.correct).slice(0, 10);
 
-            let fastestMessage = "===== FASTEST ANSWERS =====\n" + correctAnswers.map((entry, index) => `${placeNumber[index]} ${entry.name} ➔ ${entry.time}ms (R${entry.round})`).join("\n");
-
             // Calculate and display summed up times (including all answers)
             let summedUpLeaderBoard = mergeArray(fastestLeaderboard);
             summedUpLeaderBoard.sort((a, b) => a.time - b.time);
 
-            let summedMessage =
-                "===== SUMMED UP TIMES =====\n" +
-                summedUpLeaderBoard
-                    .slice(0, 10)
-                    .map((entry, index) => `${placeNumber[index]} ${entry.name} ➔ ${entry.time}ms`)
-                    .join("\n");
-
             if ($("#smTimeDifferenceChatHidden").prop("checked")) {
-                gameChat.systemMessage(fastestMessage);
-                gameChat.systemMessage(summedMessage);
+                gameChat.systemMessage("===== FASTEST ANSWERS =====");
+                correctAnswers.forEach((entry, index) => {
+                    gameChat.systemMessage(`${placeNumber[index]} ${entry.name} ➔ ${entry.time}ms (R${entry.round})`);
+                });
+
+                gameChat.systemMessage("===== SUMMED UP TIMES =====");
+                summedUpLeaderBoard.slice(0, 10).forEach((entry, index) => {
+                    gameChat.systemMessage(`${placeNumber[index]} ${entry.name} ➔ ${entry.time}ms`);
+                });
             } else {
-                sendLobbyMessage(fastestMessage);
-                sendLobbyMessage(summedMessage);
+                sendLobbyMessage("===== FASTEST ANSWERS =====");
+                correctAnswers.forEach((entry, index) => {
+                    sendLobbyMessage(`${placeNumber[index]} ${entry.name} ➔ ${entry.time}ms (R${entry.round})`);
+                });
+
+                sendLobbyMessage("===== SUMMED UP TIMES =====");
+                summedUpLeaderBoard.slice(0, 10).forEach((entry, index) => {
+                    sendLobbyMessage(`${placeNumber[index]} ${entry.name} ➔ ${entry.time}ms`);
+                });
             }
         }
     }
