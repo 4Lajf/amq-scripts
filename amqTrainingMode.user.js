@@ -1,15 +1,19 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.62
+// @version      0.63
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://animemusicquiz.com/*
 // @author       4Lajf & kempanator
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      myanimelist.net
 // @require      https://github.com/joske2865/AMQ-Scripts/raw/master/common/amqScriptInfo.js
 // @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqTrainingMode.user.js
 // @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqTrainingMode.user.js
 // ==/UserScript==
+
+/* CHECK IF PROGRESS SAVES IN LOCAL STORAGE
+APPLY FILTERS IN A NORMAL WAY */
 
 /*
 How to start a custom song list game:
@@ -354,51 +358,54 @@ createHotkeyElement("Open Window", "cslgWindow", "cslgWindowHotkeySelect", "cslg
 //createHotkeyElement("Merge All", "mergeAll", "cslgMergeAllHotkeySelect", "cslgMergeAllHotkeyInput");
 
 $("#cslTrainingModeButton").click(() => {
-    startTrainingMode();
+    isTraining = true;
+    if (!lobby.inLobby) return;
     songOrder = {};
     if (!lobby.isHost) {
-        return displayMessage("Unable to start", "must be host");
+        return messageDisplayer.displayMessage("Unable to start", "must be host");
     }
     if (lobby.numberOfPlayers !== lobby.numberOfPlayersReady) {
-        return displayMessage("Unable to start", "all players must be ready");
+        return messageDisplayer.displayMessage("Unable to start", "all players must be ready");
     }
     if (!songList || !songList.length) {
-        return displayMessage("Unable to start", "no songs");
+        return messageDisplayer.displayMessage("Unable to start", "no songs");
     }
     if (autocomplete.length === 0) {
-        return displayMessage("Unable to start", "autocomplete list empty");
+        return messageDisplayer.displayMessage("Unable to start", "autocomplete list empty");
     }
     let numSongs = parseInt($("#cslgSettingsSongs").val());
     if (isNaN(numSongs) || numSongs < 1) {
-        return displayMessage("Unable to start", "invalid number of songs");
+        return messageDisplayer.displayMessage("Unable to start", "invalid number of songs");
     }
     guessTime = parseInt($("#cslgSettingsGuessTime").val());
     if (isNaN(guessTime) || guessTime < 1 || guessTime > 99) {
-        return displayMessage("Unable to start", "invalid guess time");
+        return messageDisplayer.displayMessage("Unable to start", "invalid guess time");
     }
     extraGuessTime = parseInt($("#cslgSettingsExtraGuessTime").val());
     if (isNaN(extraGuessTime) || extraGuessTime < 0 || extraGuessTime > 15) {
-        return displayMessage("Unable to start", "invalid extra guess time");
+        return messageDisplayer.displayMessage("Unable to start", "invalid extra guess time");
     }
     let startPointText = $("#cslgSettingsStartPoint").val().trim();
     if (/^[0-9]+$/.test(startPointText)) {
         startPointRange = [parseInt(startPointText), parseInt(startPointText)];
     } else if (/^[0-9]+[\s-]+[0-9]+$/.test(startPointText)) {
-        startPointRange = [parseInt(/^([0-9]+)[\s-]+[0-9]+$/.exec(startPointText)[1]), parseInt(/^[0-9]+[\s-]+([0-9]+)$/.exec(startPointText)[1])];
+        let regex = /^([0-9]+)[\s-]+([0-9]+)$/.exec(startPointText);
+        startPointRange = [parseInt(regex[1]), parseInt(regex[2])];
     } else {
-        return displayMessage("Unable to start", "song start sample must be a number or range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "song start sample must be a number or range 0-100");
     }
     if (startPointRange[0] < 0 || startPointRange[0] > 100 || startPointRange[1] < 0 || startPointRange[1] > 100 || startPointRange[0] > startPointRange[1]) {
-        return displayMessage("Unable to start", "song start sample must be a number or range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "song start sample must be a number or range 0-100");
     }
     let difficultyText = $("#cslgSettingsDifficulty").val().trim();
     if (/^[0-9]+[\s-]+[0-9]+$/.test(difficultyText)) {
-        difficultyRange = [parseInt(/^([0-9]+)[\s-]+[0-9]+$/.exec(difficultyText)[1]), parseInt(/^[0-9]+[\s-]+([0-9]+)$/.exec(difficultyText)[1])];
+        let regex = /^([0-9]+)[\s-]+([0-9]+)$/.exec(difficultyText);
+        difficultyRange = [parseInt(regex[1]), parseInt(regex[2])];
     } else {
-        return displayMessage("Unable to start", "difficulty must be a range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
     }
     if (difficultyRange[0] < 0 || difficultyRange[0] > 100 || difficultyRange[1] < 0 || difficultyRange[1] > 100 || difficultyRange[0] > difficultyRange[1]) {
-        return displayMessage("Unable to start", "difficulty must be a range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
     }
     let ops = $("#cslgSettingsOPCheckbox").prop("checked");
     let eds = $("#cslgSettingsEDCheckbox").prop("checked");
@@ -411,59 +418,50 @@ $("#cslTrainingModeButton").click(() => {
     let correctGuesses = $("#cslgSettingsCorrectGuessCheckbox").prop("checked");
     let incorrectGuesses = $("#cslgSettingsIncorrectGuessCheckbox").prop("checked");
 
-    function getFilteredSongKeys() {
-        return Object.keys(songList)
-            .filter((key) => songTypeFilter(songList[key], ops, eds, ins))
-            .filter((key) => animeTypeFilter(songList[key], tv, movie, ova, ona, special))
-            .filter((key) => difficultyFilter(songList[key], difficultyRange[0], difficultyRange[1]))
-            .filter((key) => guessTypeFilter(songList[key], correctGuesses, incorrectGuesses));
+    // Flatten the songList recursively and apply filters
+    function flattenSongList(arr) {
+        return arr.reduce((acc, val) => (Array.isArray(val) ? acc.concat(flattenSongList(val)) : acc.concat(val)), []);
     }
 
-    let songKeys = getFilteredSongKeys();
+    let flattenedSongList = flattenSongList(songList);
 
-    while (songKeys.length < numSongs) {
-        console.log(`After filtering, only ${songKeys.length} songs remain. Adding more to reach ${numSongs}.`);
-        const additionalSongsNeeded = numSongs - songKeys.length;
-        const additionalSongs = prepareSongForTraining(songList, additionalSongsNeeded);
+    let filteredSongList = flattenedSongList.filter(
+        (song) => songTypeFilter(song, ops, eds, ins) && animeTypeFilter(song, tv, movie, ova, ona, special) && difficultyFilter(song, difficultyRange[0], difficultyRange[1]) && guessTypeFilter(song, correctGuesses, incorrectGuesses)
+    );
 
-        // Add new songs to songList
-        songList = songList.concat(additionalSongs);
-
-        // Reapply filters to get updated songKeys
-        songKeys = getFilteredSongKeys();
+    if (filteredSongList.length === 0) {
+        return messageDisplayer.displayMessage("Unable to start", "no songs match the selected criteria");
     }
 
-    // If we ended up with more songs than needed, trim the excess
-    if (songKeys.length > numSongs) {
-        console.log(`After adding songs, we have ${songKeys.length}. Trimming to ${numSongs}.`);
-        songKeys = songKeys.slice(0, numSongs);
+    // Prepare the playlist from the filtered song list
+    let playlist = prepareSongForTraining(filteredSongList, numSongs);
+
+    songList = flattenSongList(playlist);
+
+    // Create songOrder based on the filtered list
+    if (songOrderType === "random") {
+        shuffleArray(songList);
+    } else if (songOrderType === "descending") {
+        songList.reverse();
     }
 
-    if (songOrderType === "random") shuffleArray(songKeys);
-    else if (songOrderType === "descending") songKeys.reverse();
-
-    songKeys.forEach((key, i) => {
-        songOrder[i + 1] = parseInt(key);
+    songList.forEach((song, i) => {
+        songOrder[i + 1] = i;
     });
 
     totalSongs = Object.keys(songOrder).length;
     if (totalSongs === 0) {
-        return displayMessage("Unable to start", "no songs");
+        return messageDisplayer.displayMessage("Unable to start", "no songs");
     }
-    if (totalSongs !== numSongs) {
-        return displayMessage("Unable to start", `Unexpected number of songs: ${totalSongs}, expected: ${numSongs}`);
-    }
-
     fastSkip = $("#cslgSettingsFastSkip").prop("checked");
     $("#cslgSettingsModal").modal("hide");
     console.log("song order: ", songOrder);
     if (lobby.soloMode) {
-        isTraining = true;
+        console.log(songList);
         startQuiz();
     } else if (lobby.isHost) {
-        cslMessage("§CSL0" + btoa(encodeURI(`${showSelection}-${currentSong}-${totalSongs}-${guessTime}-${extraGuessTime}-${fastSkip ? "1" : "0"}`)));
+        cslMessage("§CSL0" + btoa(`${showSelection}§${currentSong}§${totalSongs}§${guessTime}§${extraGuessTime}§${fastSkip ? "1" : "0"}`));
     }
-    console.log("song list: ", songList);
 });
 $("#lobbyPage .topMenuBar").append(`<div id="lnCustomSongListButton" class="clickAble topMenuButton topMenuMediumButton"><h3>CSL</h3></div>`);
 $("#lnCustomSongListButton").click(() => {
@@ -826,13 +824,13 @@ tabReset();
 $("#cslgSongListTab").addClass("selected");
 $("#cslgSongListContainer").show();
 
-function loadSongs() {
-    const data = localStorage.getItem("tracks");
-    return data ? JSON.parse(data) : [];
+function saveReviewData(reviewData) {
+    localStorage.setItem("spacedRepetitionData", JSON.stringify(reviewData));
 }
 
-function saveSongs(tracks) {
-    localStorage.setItem("tracks", JSON.stringify(tracks));
+function loadReviewData() {
+    const data = localStorage.getItem("spacedRepetitionData");
+    return data ? JSON.parse(data) : {};
 }
 
 function updateEFactor(oldEFactor, qualityOfResponse) {
@@ -855,72 +853,81 @@ function updateEFactor(oldEFactor, qualityOfResponse) {
 
 function reviewSong(song, success) {
     if (!isTraining) return;
-    let songs = loadSongs();
-    const songIndex = songs.findIndex((s) => s.video720 === song.video720);
-    if (songIndex !== -1) {
-        const grade = success ? 5 : 0;
-        const lastReview = songs[songIndex].reviewState;
-        const efactor = updateEFactor(lastReview.efactor, grade);
-        let successCount = lastReview.successCount;
-        let successStreak = lastReview.successStreak;
-        let failureCount = lastReview.failureCount;
-        let failureStreak = lastReview.failureStreak;
+    let reviewData = loadReviewData();
+    const songKey = song.video720; // Use a unique identifier for the song
 
-        if (success) {
-            failureStreak = 0;
-            successStreak++;
-            successCount++;
-        } else {
-            successStreak = 0;
-            failureStreak++;
-            failureCount++;
-        }
-
-        songs[songIndex].reviewState = {
+    if (!reviewData[songKey]) {
+        reviewData[songKey] = {
             date: Date.now(),
-            efactor,
-            successCount,
-            successStreak,
-            failureCount,
-            failureStreak,
-            isLastTryCorrect: success,
+            efactor: 2.5,
+            successCount: 0,
+            successStreak: 0,
+            failureCount: 0,
+            failureStreak: 0,
+            isLastTryCorrect: false,
+            lastReviewDate: null,
+            weight: 9999 // Initial weight
         };
-
-        songs[songIndex].weight = calculateWeight(songs[songIndex]);
-
-        // Save changes immediately
-        saveSongs(songs);
     }
+
+    const grade = success ? 5 : 0;
+    const lastReview = reviewData[songKey];
+    lastReview.efactor = updateEFactor(lastReview.efactor, grade);
+
+    if (success) {
+        lastReview.failureStreak = 0;
+        lastReview.successStreak++;
+        lastReview.successCount++;
+    } else {
+        lastReview.successStreak = 0;
+        lastReview.failureStreak++;
+        lastReview.failureCount++;
+    }
+
+    lastReview.isLastTryCorrect = success;
+    lastReview.lastReviewDate = Date.now();
+
+    // Calculate and store the new weight
+    lastReview.weight = calculateWeight({
+        reviewState: lastReview
+    });
+    console.log(song)
+    saveReviewData(reviewData);
 }
 
 function getReviewState(track) {
-    const lastReview = track.reviewState;
-    const efactor = lastReview ? lastReview.efactor : 2.5;
-    const date = lastReview ? lastReview.date : Date.now();
-    const successCount = lastReview ? lastReview.successCount : 0;
-    const successStreak = lastReview ? lastReview.successStreak : 0;
-    const failureCount = lastReview ? lastReview.failureCount : 0;
-    const failureStreak = lastReview ? lastReview.failureStreak : 0;
-    const isLastTryCorrect = lastReview ? lastReview.isLastTryCorrect : false;
+    const reviewData = loadReviewData();
+    const songKey = track.video720;
+    const lastReview = reviewData[songKey] || {
+        date: Date.now(),
+        efactor: 2.5,
+        successCount: 0,
+        successStreak: 0,
+        failureCount: 0,
+        failureStreak: 0,
+        isLastTryCorrect: false,
+        weight: 9999 // Default weight for new songs
+    };
 
-    // Return a new object composed of the original track properties
-    // along with the additional properties needed for the cooldown logic.
     return {
-        ...track, // Preserve existing track properties
+        ...track,
         reviewState: {
-            date,
-            efactor,
-            successCount,
-            successStreak,
-            failureCount,
-            failureStreak,
-            isLastTryCorrect,
+            date: lastReview.lastReviewDate || Date.now(),
+            efactor: lastReview.efactor,
+            successCount: lastReview.successCount,
+            successStreak: lastReview.successStreak,
+            failureCount: lastReview.failureCount,
+            failureStreak: lastReview.failureStreak,
+            isLastTryCorrect: lastReview.isLastTryCorrect
         },
+        weight: lastReview.weight
     };
 }
+
 let appearanceCounter = {};
 
 function calculateWeight(track) {
+    if (!isTraining) return;
     const OVERDUE_FACTOR_PERCENTAGE = 0.1;
     const LAST_PERFORMANCE_PERCENTAGE = 0.05;
     const EFACTOR_IMPACT_PERCENTAGE = 0.6;
@@ -972,12 +979,14 @@ function calculateWeight(track) {
     let correctGuessPercentage = totalAttempts > 0 ? successCount / totalAttempts : 1;
 
     // Using logarithmic function to control the growth of the interval increase factor
-    const MIN_EFACTOR = 1.3; // The minimum efactor to prevent intervals from being too short
+    const MIN_EFACTOR = 1.0; // The minimum efactor to prevent intervals from being too short
     const successCountEffect = successCount > 0 ? Math.log(successCount) / Math.log(2) : 0;
     const intervalIncreaseFactor = Math.max(MIN_EFACTOR, efactor) * Math.pow(correctGuessPercentage, successCountEffect);
 
     // Calculate the ideal review date based on the interval increase factor
+    // console.log(reviewDate, intervalIncreaseFactor)
     const idealReviewDate = reviewDate + intervalIncreaseFactor * (24 * 60 * 60 * 1000) - 2 * (24 * 60 * 60 * 1000);
+    // console.log(idealReviewDate)
     let overdueFactor = Math.max(0, (currentDate - idealReviewDate) / (24 * 60 * 60 * 1000));
     overdueFactor /= 10;
 
@@ -994,9 +1003,8 @@ function calculateWeight(track) {
     weight *= 100;
     weight += 100;
 
+    console.log(track)
     // Log the calculated variables
-    console.log(songList);
-    console.log(track);
     console.log(`
     Ideal review date: ${new Date(idealReviewDate).toISOString()}
     OverdueFactor: ${overdueFactor * OVERDUE_FACTOR_PERCENTAGE}
@@ -1030,87 +1038,96 @@ function weightedRandomSelection(reviewCandidates, maxSongs) {
 
     // Calculate the total adjusted weight after applying the adjustment
     let totalAdjustedWeight = candidatesArray.reduce((total, candidate) => total + candidate.adjustedWeight, 0);
-
     // Function to randomly select a candidate based on adjusted weights
     const selectRandomly = () => {
         let r = Math.random() * totalAdjustedWeight;
-        for (const candidate of candidatesArray) {
-            r -= candidate.adjustedWeight;
+        for (let i = 0; i < candidatesArray.length; i++) {
+            r -= candidatesArray[i].adjustedWeight;
             if (r <= 0) {
-                return candidate;
+                return candidatesArray[i];
             }
         }
-        // If by some floating-point arithmetic error we got here, return the last candidate
-        console.error("Floating-point arithmetic error, returning the last candidate");
-        return candidatesArray[candidatesArray.length - 1];
     };
-
     // Perform selections
     const selections = [];
     for (let i = 0; i < maxSongs; i++) {
         const selectedCandidate = selectRandomly();
+        if (!selectedCandidate) continue;
         selections.push(selectedCandidate);
         // Update the total adjusted weight after picking a song
         totalAdjustedWeight -= selectedCandidate.adjustedWeight;
         // Remove the selected candidate from the pool to prevent duplicate selections
         candidatesArray.splice(candidatesArray.indexOf(selectedCandidate), 1);
     }
-
     return selections;
 }
 
 function penalizeDuplicateRomajiNames(selectedTracks, reviewCandidates) {
+    console.log(`penalizeDuplicateRomajiNames started with ${selectedTracks.length} tracks`);
+
+    const MAX_ITERATIONS = 1000;
+    let iterations = 0;
     let index = 0;
-    while (index < selectedTracks.length) {
+    let totalReplacements = 0;
+
+    while (index < selectedTracks.length && iterations < MAX_ITERATIONS) {
+        iterations++;
         let duplicateIndexes = [];
-        // Window to look for duplicate "animeRomajiName"
-        console.log("--------------------------------------------");
+
         for (let i = index + 1; i < selectedTracks.length; i++) {
-            // console.log(
-            //     i,
-            //     index,
-            //     selectedTracks[i].animeRomajiName,
-            //     selectedTracks[index].animeRomajiName,
-            //     selectedTracks[i].animeRomajiName === selectedTracks[index].animeRomajiName,
-            //     selectedTracks[i].animeRomajiName == selectedTracks[index].animeRomajiName
-            // );
             if (selectedTracks[i].animeRomajiName === selectedTracks[index].animeRomajiName) {
                 if (i - index <= 7) {
-                    // Only count as a duplicate if within 7 items
-                    console.log("DUPLICATE DETECTED");
-                    console.log(selectedTracks[i].animeRomajiName);
                     duplicateIndexes.push(i);
                 }
             }
         }
 
+        console.log(`Iteration ${iterations}: Found ${duplicateIndexes.length} duplicates at index ${index}`);
+
         while (duplicateIndexes.length > 0 && selectedTracks.length > 1) {
             let randomChance = Math.random() * 10;
-            // TODO: let weight influence it
             if (randomChance >= 3) {
-                console.log(randomChance);
-                console.log("RNG PASSED", selectedTracks[index]);
                 let dupeIndex = duplicateIndexes.pop();
-                selectedTracks.splice(dupeIndex, 1); // Remove duplicate entry
+                let duplicateTrack = selectedTracks[dupeIndex];
+                selectedTracks.splice(dupeIndex, 1);
 
                 let newTrack;
+                let attempts = 0;
                 do {
+                    attempts++;
                     let selectionResult = weightedRandomSelection(reviewCandidates, 1);
-                    newTrack = selectionResult[0]; // Get the new track
-                } while (selectedTracks.some((track) => track.animeRomajiName === newTrack.animeRomajiName));
-                console.log("NEW TRACK:", newTrack);
-                selectedTracks.splice(dupeIndex, 0, newTrack); // Insert the new track
+                    newTrack = selectionResult[0];
+                } while (selectedTracks.some((track) => track.animeRomajiName === newTrack.animeRomajiName) && attempts < 100);
+
+                if (attempts < 100) {
+                    selectedTracks.splice(dupeIndex, 0, newTrack);
+                    totalReplacements++;
+                    console.log(`Replaced duplicate at index ${dupeIndex} after ${attempts} attempts:`);
+                    console.log(`  Removed: "${duplicateTrack.animeRomajiName}" (${duplicateTrack.songName} by ${duplicateTrack.songArtist})`);
+                    console.log(`  Added:   "${newTrack.animeRomajiName}" (${newTrack.songName} by ${newTrack.songArtist})`);
+                } else {
+                    console.log(`Failed to find non-duplicate replacement after 100 attempts for:`);
+                    console.log(`  "${duplicateTrack.animeRomajiName}" (${duplicateTrack.songName} by ${duplicateTrack.songArtist})`);
+                }
             } else {
-                console.log("RNG FAILED", selectedTracks[index + 1]);
-                console.log(randomChance);
+                let skippedIndex = duplicateIndexes.pop();
+                console.log(`Skipped replacement due to random chance for duplicate at index ${skippedIndex}:`);
+                console.log(`  "${selectedTracks[skippedIndex].animeRomajiName}" (${selectedTracks[skippedIndex].songName} by ${selectedTracks[skippedIndex].songArtist})`);
             }
         }
 
-        // Only increase the index if no duplicates found, otherwise recheck the same index
         if (duplicateIndexes.length === 0) {
             index++;
         }
     }
+
+    if (iterations >= MAX_ITERATIONS) {
+        console.warn(`penalizeDuplicateRomajiNames reached maximum iterations (${MAX_ITERATIONS})`);
+    }
+
+    console.log(`penalizeDuplicateRomajiNames completed after ${iterations} iterations`);
+    console.log(`Total replacements made: ${totalReplacements}`);
+    console.log(`Final track count: ${selectedTracks.length}`);
 }
 
 // Check for and take action against penalized tracks, generating extra picks as necessary
@@ -1129,30 +1146,23 @@ function penalizeAndAdjustSelection(selectedCandidates, reviewCandidates, maxSon
 }
 
 function prepareSongForTraining(tracks, maxSongs) {
-    // Prepare review candidates with initial weights
+    console.log(`prepareSongForTraining started with ${tracks.length} tracks and maxSongs: ${maxSongs}`);
+
     let reviewCandidates = tracks.map((track) => {
-        let candidate = getReviewState(track);
-        candidate.weight = calculateWeight(candidate);
-        return candidate;
+        return getReviewState(track);
     });
-    saveSongs(reviewCandidates);
+    console.log(`Created ${reviewCandidates.length} review candidates`);
 
-    // Randomly select tracks based on weight
-
+    console.log("Starting weightedRandomSelection");
     let selectedCandidates = weightedRandomSelection(reviewCandidates, maxSongs);
-
-    // Get the final list of selected candidates after penalty adjustments
+    console.log(`weightedRandomSelection returned ${selectedCandidates.length} candidates`);
+    console.log("Starting penalizeAndAdjustSelection");
     selectedCandidates = penalizeAndAdjustSelection(selectedCandidates, reviewCandidates, maxSongs);
+    console.log(`penalizeAndAdjustSelection returned ${selectedCandidates.length} candidates`);
+    console.log("prepareSongForTraining completed");
+
     return selectedCandidates;
 }
-
-function startTrainingMode() {
-    songOrderType = "ascending";
-    const tracks = loadSongs();
-    const numSongs = parseInt($("#cslgSettingsSongs").val());
-    songList = prepareSongForTraining(tracks, numSongs);
-}
-
 // setup
 function setup() {
     new Listener("New Player", (payload) => {
@@ -1442,6 +1452,7 @@ function setup() {
 
 // validate all settings and attempt to start csl quiz
 function validateStart() {
+    isTraining = false;
     if (!lobby.inLobby) return;
     songOrder = {};
     if (!lobby.isHost) {
@@ -2507,341 +2518,184 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
         });
 }
 
-function handleData(newData) {
-    let existingSongs = loadSongs();
-
-    if (!newData) return;
-
-    if (Array.isArray(newData) && newData.length && newData[0].animeJPName) {
-        // AnisongDB data
-        newData.forEach((newSong) => {
-            let existingSong = existingSongs.find((song) => song.video720 === newSong.HQ);
-            if (existingSong) {
-                // Update existing song, preserving training data
-                Object.assign(existingSong, {
-                    animeRomajiName: newSong.animeJPName,
-                    animeEnglishName: newSong.animeENName,
-                    altAnimeNames: [].concat(newSong.animeJPName, newSong.animeENName, newSong.animeAltName || []),
-                    songArtist: newSong.songArtist,
-                    songName: newSong.songName,
-                    songType: Object({ O: 1, E: 2, I: 3 })[newSong.songType[0]],
-                    songTypeNumber: newSong.songType[0] === "I" ? null : parseInt(newSong.songType.split(" ")[1]),
-                    songDifficulty: newSong.songDifficulty,
-                    animeType: newSong.animeType,
-                    animeVintage: newSong.animeVintage,
-                    annId: newSong.annId,
-                    audio: newSong.audio,
-                    video480: newSong.MQ,
-                    video720: newSong.HQ,
-                });
-            } else {
-                // Add new song
-                existingSongs.push({
-                    animeRomajiName: newSong.animeJPName,
-                    animeEnglishName: newSong.animeENName,
-                    altAnimeNames: [].concat(newSong.animeJPName, newSong.animeENName, newSong.animeAltName || []),
-                    altAnimeNamesAnswers: [],
-                    songArtist: newSong.songArtist,
-                    songName: newSong.songName,
-                    songType: Object({ O: 1, E: 2, I: 3 })[newSong.songType[0]],
-                    songTypeNumber: newSong.songType[0] === "I" ? null : parseInt(newSong.songType.split(" ")[1]),
-                    songDifficulty: newSong.songDifficulty,
-                    animeType: newSong.animeType,
-                    animeVintage: newSong.animeVintage,
-                    annId: newSong.annId,
-                    malId: null,
-                    kitsuId: null,
-                    aniListId: null,
-                    animeTags: [],
-                    animeGenre: [],
-                    audio: newSong.audio,
-                    video480: newSong.MQ,
-                    video720: newSong.HQ,
-                    weight: null,
-                    reviewState: {
-                        date: Date.now(),
-                        efactor: 2.5,
-                        successCount: 0,
-                        successStreak: 0,
-                        failureCount: 0,
-                        failureStreak: 0,
-                        isLastTryCorrect: false,
-                    },
-                });
+function handleData(data) {
+    songList = [];
+    if (!data) return;
+    // anisongdb structure
+    if (Array.isArray(data) && data.length && data[0].animeJPName) {
+        data = data.filter((song) => song.audio || song.MQ || song.HQ);
+        for (let song of data) {
+            songList.push({
+                animeRomajiName: song.animeJPName,
+                animeEnglishName: song.animeENName,
+                altAnimeNames: [].concat(song.animeJPName, song.animeENName, song.animeAltName || []),
+                altAnimeNamesAnswers: [],
+                songArtist: song.songArtist,
+                songName: song.songName,
+                songType: Object({ O: 1, E: 2, I: 3 })[song.songType[0]],
+                songTypeNumber: song.songType[0] === "I" ? null : parseInt(song.songType.split(" ")[1]),
+                songDifficulty: song.songDifficulty,
+                animeType: song.animeType,
+                animeVintage: song.animeVintage,
+                annId: song.annId,
+                malId: song.linked_ids?.myanimelist,
+                kitsuId: song.linked_ids?.kitsu,
+                aniListId: song.linked_ids?.anilist,
+                animeTags: [],
+                animeGenre: [],
+                rebroadcast: null,
+                dub: null,
+                startPoint: null,
+                audio: song.audio,
+                video480: song.MQ,
+                video720: song.HQ,
+                correctGuess: true,
+                incorrectGuess: true,
+            });
+        }
+        for (let song of songList) {
+            let otherAnswers = new Set();
+            for (let s of songList) {
+                if (s.songName === song.songName && s.songArtist === song.songArtist) {
+                    s.altAnimeNames.forEach((x) => otherAnswers.add(x));
+                }
             }
-        });
-    } else if (typeof newData === "object" && newData.roomName && newData.startTime && newData.songs) {
-        // Official AMQ song export structure
-        newData.songs.forEach((song) => {
-            let existingSong = existingSongs.find((s) => s.video720 === song.videoUrl);
-            if (existingSong) {
-                // Update existing song, preserving training data
-                Object.assign(existingSong, {
-                    animeRomajiName: song.songInfo.animeNames.romaji,
-                    animeEnglishName: song.songInfo.animeNames.english,
-                    altAnimeNames: song.songInfo.altAnimeNames || [song.songInfo.animeNames.romaji, song.songInfo.animeNames.english],
-                    altAnimeNamesAnswers: song.songInfo.altAnimeNamesAnswers || [],
-                    songArtist: song.songInfo.artist,
-                    songName: song.songInfo.songName,
-                    songType: song.songInfo.type,
-                    songTypeNumber: song.songInfo.typeNumber,
-                    songDifficulty: song.songInfo.animeDifficulty,
-                    animeType: song.songInfo.animeType,
-                    animeVintage: song.songInfo.vintage,
-                    annId: song.songInfo.siteIds.annId,
-                    malId: song.songInfo.siteIds.malId,
-                    kitsuId: song.songInfo.siteIds.kitsuId,
-                    aniListId: song.songInfo.siteIds.aniListId,
-                    animeTags: song.songInfo.animeTags,
-                    animeGenre: song.songInfo.animeGenre,
-                    startPoint: song.startPoint,
-                    audio: String(song.videoUrl).endsWith(".mp3") ? song.videoUrl : null,
-                    video480: null,
-                    video720: String(song.videoUrl).endsWith(".webm") ? song.videoUrl : null,
-                    correctGuess: song.correctGuess,
-                    incorrectGuess: song.wrongGuess,
-                });
-            } else {
-                // Add new song
-                existingSongs.push({
-                    animeRomajiName: song.songInfo.animeNames.romaji,
-                    animeEnglishName: song.songInfo.animeNames.english,
-                    altAnimeNames: song.songInfo.altAnimeNames || [song.songInfo.animeNames.romaji, song.songInfo.animeNames.english],
-                    altAnimeNamesAnswers: song.songInfo.altAnimeNamesAnswers || [],
-                    songArtist: song.songInfo.artist,
-                    songName: song.songInfo.songName,
-                    songType: song.songInfo.type,
-                    songTypeNumber: song.songInfo.typeNumber,
-                    songDifficulty: song.songInfo.animeDifficulty,
-                    animeType: song.songInfo.animeType,
-                    animeVintage: song.songInfo.vintage,
-                    annId: song.songInfo.siteIds.annId,
-                    malId: song.songInfo.siteIds.malId,
-                    kitsuId: song.songInfo.siteIds.kitsuId,
-                    aniListId: song.songInfo.siteIds.aniListId,
-                    animeTags: song.songInfo.animeTags,
-                    animeGenre: song.songInfo.animeGenre,
-                    startPoint: song.startPoint,
-                    audio: String(song.videoUrl).endsWith(".mp3") ? song.videoUrl : null,
-                    video480: null,
-                    video720: String(song.videoUrl).endsWith(".webm") ? song.videoUrl : null,
-                    correctGuess: song.correctGuess,
-                    incorrectGuess: song.wrongGuess,
-                    weight: null,
-                    reviewState: {
-                        date: Date.now(),
-                        efactor: 2.5,
-                        successCount: 0,
-                        successStreak: 0,
-                        failureCount: 0,
-                        failureStreak: 0,
-                        isLastTryCorrect: false,
-                    },
-                });
-            }
-        });
-    } else if (Array.isArray(newData) && newData.length && newData[0].gameMode) {
-        // Joseph song export script structure
-        newData.forEach((song) => {
-            let existingSong = existingSongs.find((s) => s.video720 === (song.urls?.catbox?.[720] ?? song.urls?.openingsmoe?.[720]));
-            if (existingSong) {
-                // Update existing song, preserving training data
-                Object.assign(existingSong, {
-                    animeRomajiName: song.anime.romaji,
-                    animeEnglishName: song.anime.english,
-                    altAnimeNames: song.altAnswers || [song.anime.romaji, song.anime.english],
-                    altAnimeNamesAnswers: [],
-                    songArtist: song.artist,
-                    songName: song.name,
-                    songType: Object({ O: 1, E: 2, I: 3 })[song.type[0]],
-                    songTypeNumber: song.type[0] === "I" ? null : parseInt(song.type.split(" ")[1]),
-                    songDifficulty: parseFloat(song.difficulty),
-                    animeType: song.animeType,
-                    animeVintage: song.vintage,
-                    annId: song.siteIds.annId,
-                    malId: song.siteIds.malId,
-                    kitsuId: song.siteIds.kitsuId,
-                    aniListId: song.siteIds.aniListId,
-                    animeTags: song.tags,
-                    animeGenre: song.genre,
-                    startPoint: song.startSample,
-                    audio: song.urls?.catbox?.[0] ?? song.urls?.openingsmoe?.[0] ?? null,
-                    video480: song.urls?.catbox?.[480] ?? song.urls?.openingsmoe?.[480] ?? null,
-                    video720: song.urls?.catbox?.[720] ?? song.urls?.openingsmoe?.[720] ?? null,
-                    correctGuess: song.correct,
-                    incorrectGuess: !song.correct,
-                });
-            } else {
-                // Add new song
-                existingSongs.push({
-                    animeRomajiName: song.anime.romaji,
-                    animeEnglishName: song.anime.english,
-                    altAnimeNames: song.altAnswers || [song.anime.romaji, song.anime.english],
-                    altAnimeNamesAnswers: [],
-                    songArtist: song.artist,
-                    songName: song.name,
-                    songType: Object({ O: 1, E: 2, I: 3 })[song.type[0]],
-                    songTypeNumber: song.type[0] === "I" ? null : parseInt(song.type.split(" ")[1]),
-                    songDifficulty: parseFloat(song.difficulty),
-                    animeType: song.animeType,
-                    animeVintage: song.vintage,
-                    annId: song.siteIds.annId,
-                    malId: song.siteIds.malId,
-                    kitsuId: song.siteIds.kitsuId,
-                    aniListId: song.siteIds.aniListId,
-                    animeTags: song.tags,
-                    animeGenre: song.genre,
-                    startPoint: song.startSample,
-                    audio: song.urls?.catbox?.[0] ?? song.urls?.openingsmoe?.[0] ?? null,
-                    video480: song.urls?.catbox?.[480] ?? song.urls?.openingsmoe?.[480] ?? null,
-                    video720: song.urls?.catbox?.[720] ?? song.urls?.openingsmoe?.[720] ?? null,
-                    correctGuess: song.correct,
-                    incorrectGuess: !song.correct,
-                    weight: null,
-                    reviewState: {
-                        date: Date.now(),
-                        efactor: 2.5,
-                        successCount: 0,
-                        successStreak: 0,
-                        failureCount: 0,
-                        failureStreak: 0,
-                        isLastTryCorrect: false,
-                    },
-                });
-            }
-        });
-    } else if (Array.isArray(newData) && newData.length && newData[0].animeRomaji) {
-        // Blissfulyoshi ranked data export structure
-        newData.forEach((song) => {
-            let existingSong = existingSongs.find((s) => s.video720 === song.LinkVideo);
-            if (existingSong) {
-                // Update existing song, preserving training data
-                Object.assign(existingSong, {
-                    animeRomajiName: song.animeRomaji,
-                    animeEnglishName: song.animeEng,
-                    altAnimeNames: [song.animeRomaji, song.animeEng],
-                    altAnimeNamesAnswers: [],
-                    songArtist: song.artist,
-                    songName: song.songName,
-                    songType: Object({ O: 1, E: 2, I: 3 })[song.type[0]],
-                    songTypeNumber: song.type[0] === "I" ? null : parseInt(song.type.split(" ")[1]),
-                    songDifficulty: song.songDifficulty,
-                    animeType: null,
-                    animeVintage: song.vintage,
-                    annId: song.annId,
-                    malId: song.malId,
-                    kitsuId: song.kitsuId,
-                    aniListId: song.aniListId,
-                    animeTags: [],
-                    animeGenre: [],
-                    startPoint: null,
-                    audio: song.LinkMp3,
-                    video480: null,
-                    video720: song.LinkVideo,
-                    correctGuess: true,
-                    incorrectGuess: true,
-                });
-            } else {
-                // Add new song
-                existingSongs.push({
-                    animeRomajiName: song.animeRomaji,
-                    animeEnglishName: song.animeEng,
-                    altAnimeNames: [song.animeRomaji, song.animeEng],
-                    altAnimeNamesAnswers: [],
-                    songArtist: song.artist,
-                    songName: song.songName,
-                    songType: Object({ O: 1, E: 2, I: 3 })[song.type[0]],
-                    songTypeNumber: song.type[0] === "I" ? null : parseInt(song.type.split(" ")[1]),
-                    songDifficulty: song.songDifficulty,
-                    animeType: null,
-                    animeVintage: song.vintage,
-                    annId: song.annId,
-                    malId: song.malId,
-                    kitsuId: song.kitsuId,
-                    aniListId: song.aniListId,
-                    animeTags: [],
-                    animeGenre: [],
-                    startPoint: null,
-                    audio: song.LinkMp3,
-                    video480: null,
-                    video720: song.LinkVideo,
-                    correctGuess: true,
-                    incorrectGuess: true,
-                    weight: null,
-                    reviewState: {
-                        date: Date.now(),
-                        efactor: 2.5,
-                        successCount: 0,
-                        successStreak: 0,
-                        failureCount: 0,
-                        failureStreak: 0,
-                        isLastTryCorrect: false,
-                    },
-                });
-            }
-        });
-    } else if (Array.isArray(newData) && newData.length && newData[0].animeRomajiName) {
-        // This script structure
-        newData.forEach((song) => {
-            let existingSong = existingSongs.find((s) => s.video720 === song.video720);
-            if (existingSong) {
-                // Update existing song, preserving training data
-                Object.assign(existingSong, song, {
-                    weight: existingSong.weight,
-                    reviewState: existingSong.reviewState,
-                });
-            } else {
-                // Add new song
-                existingSongs.push({
-                    ...song,
-                    weight: null,
-                    reviewState: {
-                        date: Date.now(),
-                        efactor: 2.5,
-                        successCount: 0,
-                        successStreak: 0,
-                        failureCount: 0,
-                        failureStreak: 0,
-                        isLastTryCorrect: false,
-                    },
-                });
-            }
-        });
-    }
-
-    // Filter out songs without audio or video
-    existingSongs = existingSongs.filter((song) => song.audio || song.video480 || song.video720);
-
-    // Merge alt anime names
-    for (let i = 0; i < existingSongs.length; i++) {
-        for (let j = i + 1; j < existingSongs.length; j++) {
-            const songA = existingSongs[i];
-            const songB = existingSongs[j];
-            if (songA.songArtist === songB.songArtist && songA.songName === songB.songName) {
-                const mergedAltNames = new Set([...songA.altAnimeNames, ...songB.altAnimeNames, ...songA.altAnimeNamesAnswers, ...songB.altAnimeNamesAnswers]);
-                songA.altAnimeNames = [...mergedAltNames];
-                songB.altAnimeNames = [...mergedAltNames];
-                songA.altAnimeNamesAnswers = [];
-                songB.altAnimeNamesAnswers = [];
-            }
+            song.altAnimeNamesAnswers = Array.from(otherAnswers).filter((x) => !song.altAnimeNames.includes(x));
         }
     }
-
-    // Recalculate weights for all songs
-    existingSongs.forEach((song) => {
-        if (song.reviewState) {
-            song.weight = calculateWeight(song);
+    // official amq song export structure
+    else if (typeof data === "object" && data.roomName && data.startTime && data.songs) {
+        for (let song of data.songs) {
+            songList.push({
+                animeRomajiName: song.songInfo.animeNames.romaji,
+                animeEnglishName: song.songInfo.animeNames.english,
+                altAnimeNames: song.songInfo.altAnimeNames || [song.songInfo.animeNames.romaji, song.songInfo.animeNames.english],
+                altAnimeNamesAnswers: song.songInfo.altAnimeNamesAnswers || [],
+                songArtist: song.songInfo.artist,
+                songName: song.songInfo.songName,
+                songType: song.songInfo.type,
+                songTypeNumber: song.songInfo.typeNumber,
+                songDifficulty: song.songInfo.animeDifficulty,
+                animeType: song.songInfo.animeType,
+                animeVintage: song.songInfo.vintage,
+                annId: song.songInfo.siteIds.annId,
+                malId: song.songInfo.siteIds.malId,
+                kitsuId: song.songInfo.siteIds.kitsuId,
+                aniListId: song.songInfo.siteIds.aniListId,
+                animeTags: song.songInfo.animeTags,
+                animeGenre: song.songInfo.animeGenre,
+                rebroadcast: song.songInfo.rebroadcast || null,
+                dub: song.songInfo.dub || null,
+                startPoint: song.startPoint,
+                audio: String(song.videoUrl).endsWith(".mp3") ? song.videoUrl : null,
+                video480: null,
+                video720: String(song.videoUrl).endsWith(".webm") ? song.videoUrl : null,
+                correctGuess: song.correctGuess,
+                incorrectGuess: song.wrongGuess,
+            });
         }
-    });
-
-    // Save updated songs back to localStorage
-    saveSongs(existingSongs);
-
-    // Update global songList
-    songList = existingSongs;
-
-    // Log the updated song count
-    console.log(`Updated song list. Total songs: ${existingSongs.length}`);
+    }
+    // joseph song export script structure
+    else if (Array.isArray(data) && data.length && data[0].gameMode) {
+        for (let song of data) {
+            songList.push({
+                animeRomajiName: song.anime.romaji,
+                animeEnglishName: song.anime.english,
+                altAnimeNames: song.altAnswers || [song.anime.romaji, song.anime.english],
+                altAnimeNamesAnswers: [],
+                songArtist: song.artist,
+                songName: song.name,
+                songType: Object({ O: 1, E: 2, I: 3 })[song.type[0]],
+                songTypeNumber: song.type[0] === "I" ? null : parseInt(song.type.split(" ")[1]),
+                songDifficulty: parseFloat(song.difficulty),
+                animeType: song.animeType,
+                animeVintage: song.vintage,
+                annId: song.siteIds.annId,
+                malId: song.siteIds.malId,
+                kitsuId: song.siteIds.kitsuId,
+                aniListId: song.siteIds.aniListId,
+                animeTags: song.tags,
+                animeGenre: song.genre,
+                rebroadcast: null,
+                dub: null,
+                startPoint: song.startSample,
+                audio: song.urls?.catbox?.[0] ?? song.urls?.openingsmoe?.[0] ?? null,
+                video480: song.urls?.catbox?.[480] ?? song.urls?.openingsmoe?.[480] ?? null,
+                video720: song.urls?.catbox?.[720] ?? song.urls?.openingsmoe?.[720] ?? null,
+                correctGuess: song.correct,
+                incorrectGuess: !song.correct,
+            });
+        }
+    }
+    // blissfulyoshi ranked data export structure
+    else if (Array.isArray(data) && data.length && data[0].animeRomaji) {
+        for (let song of data) {
+            songList.push({
+                animeRomajiName: song.animeRomaji,
+                animeEnglishName: song.animeEng,
+                altAnimeNames: [song.animeRomaji, song.animeEng],
+                altAnimeNamesAnswers: [],
+                songArtist: song.artist,
+                songName: song.songName,
+                songType: Object({ O: 1, E: 2, I: 3 })[song.type[0]],
+                songTypeNumber: song.type[0] === "I" ? null : parseInt(song.type.split(" ")[1]),
+                songDifficulty: song.songDifficulty,
+                animeType: null,
+                animeVintage: song.vintage,
+                annId: song.annId,
+                malId: song.malId,
+                kitsuId: song.kitsuId,
+                aniListId: song.aniListId,
+                animeTags: [],
+                animeGenre: [],
+                rebroadcast: null,
+                dub: null,
+                startPoint: null,
+                audio: song.LinkMp3,
+                video480: null,
+                video720: song.LinkVideo,
+                correctGuess: true,
+                incorrectGuess: true,
+            });
+        }
+    }
+    // kempanator answer stats script export structure
+    else if (typeof data === "object" && data.songHistory && data.playerInfo) {
+        for (let song of Object.values(data.songHistory)) {
+            songList.push({
+                animeRomajiName: song.animeRomajiName,
+                animeEnglishName: song.animeEnglishName,
+                altAnimeNames: song.altAnimeNames || [],
+                altAnimeNamesAnswers: song.altAnimeNamesAnswers || [],
+                songArtist: song.songArtist,
+                songName: song.songName,
+                songType: song.songType,
+                songTypeNumber: song.songTypeNumber,
+                songDifficulty: song.songDifficulty,
+                animeType: song.animeType,
+                animeVintage: song.animeVintage,
+                annId: song.annId,
+                malId: song.malId,
+                kitsuId: song.kitsuId,
+                aniListId: song.aniListId,
+                animeTags: song.animeTags || [],
+                animeGenre: song.animeGenre || [],
+                rebroadcast: song.rebroadcast || null,
+                dub: song.dub || null,
+                startPoint: null,
+                audio: song.audio,
+                video480: song.video480,
+                video720: song.video720,
+                correctGuess: true,
+                incorrectGuess: true,
+            });
+        }
+    }
+    // this script structure
+    else if (Array.isArray(data) && data.length && data[0].animeRomajiName) {
+        songList = data;
+    }
+    songList = songList.filter((song) => song.audio || song.video480 || song.video720);
 }
 
 // create song list table
