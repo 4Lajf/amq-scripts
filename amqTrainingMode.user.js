@@ -12,9 +12,6 @@
 // @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqTrainingMode.user.js
 // ==/UserScript==
 
-/* CHECK IF PROGRESS SAVES IN LOCAL STORAGE
-APPLY FILTERS IN A NORMAL WAY */
-
 /*
 How to start a custom song list game:
   1. create a solo lobby
