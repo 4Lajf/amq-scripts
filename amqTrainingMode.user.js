@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.63
+// @version      0.64
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -1017,45 +1017,60 @@ function calculateWeight(track) {
 
 function weightedRandomSelection(reviewCandidates, maxSongs) {
     const centerWeight = 145;
+    let newSongs = [];
+    let regularSongs = [];
 
-    // Convert the object to an array of candidates and adjust their weights
-    const candidatesArray = Object.values(reviewCandidates).map((candidate) => {
-        return {
-            ...candidate,
-            adjustedWeight: adjustWeight(candidate.weight),
-        };
+    // Separate new songs from regular songs
+    reviewCandidates.forEach(candidate => {
+        if (candidate.weight === 9999) {
+            newSongs.push(candidate);
+        } else {
+            regularSongs.push(candidate);
+        }
     });
 
     // Function to adjust the weight in favor of higher weights
     function adjustWeight(weight) {
         const weightDifferenceRatio = (weight - centerWeight) / centerWeight;
-        // Using an exponent to increase the adjusted weight for items above the center, without excluding lower-weight items
         return weight * Math.pow(2, weightDifferenceRatio);
     }
 
-    // Calculate the total adjusted weight after applying the adjustment
-    let totalAdjustedWeight = candidatesArray.reduce((total, candidate) => total + candidate.adjustedWeight, 0);
+    // Adjust weights for regular songs
+    regularSongs = regularSongs.map(candidate => ({
+        ...candidate,
+        adjustedWeight: adjustWeight(candidate.weight)
+    }));
+
+    let totalAdjustedWeight = regularSongs.reduce((total, candidate) => total + candidate.adjustedWeight, 0);
+
     // Function to randomly select a candidate based on adjusted weights
     const selectRandomly = () => {
         let r = Math.random() * totalAdjustedWeight;
-        for (let i = 0; i < candidatesArray.length; i++) {
-            r -= candidatesArray[i].adjustedWeight;
+        for (let i = 0; i < regularSongs.length; i++) {
+            r -= regularSongs[i].adjustedWeight;
             if (r <= 0) {
-                return candidatesArray[i];
+                return regularSongs[i];
             }
         }
     };
+
     // Perform selections
-    const selections = [];
-    for (let i = 0; i < maxSongs; i++) {
+    let selections = [];
+    
+    // First, add all new songs
+    selections = [...newSongs];
+
+    // Then fill the rest with regular songs
+    while (selections.length < maxSongs && regularSongs.length > 0) {
         const selectedCandidate = selectRandomly();
         if (!selectedCandidate) continue;
         selections.push(selectedCandidate);
         // Update the total adjusted weight after picking a song
         totalAdjustedWeight -= selectedCandidate.adjustedWeight;
         // Remove the selected candidate from the pool to prevent duplicate selections
-        candidatesArray.splice(candidatesArray.indexOf(selectedCandidate), 1);
+        regularSongs.splice(regularSongs.indexOf(selectedCandidate), 1);
     }
+
     return selections;
 }
 
@@ -1071,7 +1086,16 @@ function penalizeDuplicateRomajiNames(selectedTracks, reviewCandidates) {
         iterations++;
         let duplicateIndexes = [];
 
+        // Skip penalization for songs with weight 9999
+        if (selectedTracks[index].weight === 9999) {
+            index++;
+            continue;
+        }
+
         for (let i = index + 1; i < selectedTracks.length; i++) {
+            // Allow duplicates for songs with weight 9999
+            if (selectedTracks[i].weight === 9999) continue;
+
             if (selectedTracks[i].animeRomajiName === selectedTracks[index].animeRomajiName) {
                 if (i - index <= 7) {
                     duplicateIndexes.push(i);
@@ -1094,7 +1118,11 @@ function penalizeDuplicateRomajiNames(selectedTracks, reviewCandidates) {
                     attempts++;
                     let selectionResult = weightedRandomSelection(reviewCandidates, 1);
                     newTrack = selectionResult[0];
-                } while (selectedTracks.some((track) => track.animeRomajiName === newTrack.animeRomajiName) && attempts < 100);
+                } while (
+                    newTrack.weight !== 9999 && 
+                    selectedTracks.some(track => track.animeRomajiName === newTrack.animeRomajiName) && 
+                    attempts < 100
+                );
 
                 if (attempts < 100) {
                     selectedTracks.splice(dupeIndex, 0, newTrack);
@@ -1130,13 +1158,38 @@ function penalizeDuplicateRomajiNames(selectedTracks, reviewCandidates) {
 // Check for and take action against penalized tracks, generating extra picks as necessary
 function penalizeAndAdjustSelection(selectedCandidates, reviewCandidates, maxSongs) {
     let adjustedSelection = [...selectedCandidates];
-    let remainingCandidates = [...reviewCandidates];
+    let remainingCandidates = reviewCandidates.filter(c => !selectedCandidates.includes(c));
 
     penalizeDuplicateRomajiNames(adjustedSelection, remainingCandidates);
+
+    // Separate new songs and regular songs
+    let newSongs = adjustedSelection.filter(c => c.weight === 9999);
+    let regularSongs = adjustedSelection.filter(c => c.weight !== 9999);
+
+    // If we removed any new songs during penalization, try to replace them with other new songs first
+    let newSongsNeeded = selectedCandidates.filter(c => c.weight === 9999).length - newSongs.length;
+    let availableNewSongs = remainingCandidates.filter(c => c.weight === 9999);
+
+    while (newSongsNeeded > 0 && availableNewSongs.length > 0) {
+        let randomNewSong = availableNewSongs.splice(Math.floor(Math.random() * availableNewSongs.length), 1)[0];
+        newSongs.push(randomNewSong);
+        remainingCandidates = remainingCandidates.filter(c => c !== randomNewSong);
+        newSongsNeeded--;
+    }
+
+    // Combine new songs and regular songs
+    adjustedSelection = [...newSongs, ...regularSongs];
+
+    // Fill remaining slots with regular songs if needed
     while (adjustedSelection.length < maxSongs && remainingCandidates.length > 0) {
-        // Select additional tracks if needed after penalization
-        let extraPick = weightedRandomSelection(remainingCandidates, 1);
-        adjustedSelection.push(extraPick);
+        let regularCandidates = remainingCandidates.filter(c => c.weight !== 9999);
+        if (regularCandidates.length > 0) {
+            let selected = weightedRandomSelection(regularCandidates, 1)[0];
+            adjustedSelection.push(selected);
+            remainingCandidates = remainingCandidates.filter(c => c !== selected);
+        } else {
+            break;
+        }
     }
 
     return adjustedSelection.slice(0, maxSongs);
@@ -1150,16 +1203,31 @@ function prepareSongForTraining(tracks, maxSongs) {
     });
     console.log(`Created ${reviewCandidates.length} review candidates`);
 
-    console.log("Starting weightedRandomSelection");
-    let selectedCandidates = weightedRandomSelection(reviewCandidates, maxSongs);
-    console.log(`weightedRandomSelection returned ${selectedCandidates.length} candidates`);
+    let newSongs = reviewCandidates.filter(candidate => candidate.weight === 9999);
+    let regularSongs = reviewCandidates.filter(candidate => candidate.weight !== 9999);
+
+    console.log(`Found ${newSongs.length} new songs and ${regularSongs.length} regular songs`);
+
+    let selectedCandidates;
+    if (newSongs.length >= maxSongs) {
+        // If we have more new songs than maxSongs, randomly select maxSongs new songs
+        selectedCandidates = newSongs.sort(() => 0.5 - Math.random()).slice(0, maxSongs);
+    } else {
+        // Otherwise, use all new songs and fill the rest with regular songs
+        selectedCandidates = weightedRandomSelection(reviewCandidates, maxSongs);
+    }
+
+    console.log(`Selected ${selectedCandidates.length} candidates`);
+
     console.log("Starting penalizeAndAdjustSelection");
     selectedCandidates = penalizeAndAdjustSelection(selectedCandidates, reviewCandidates, maxSongs);
     console.log(`penalizeAndAdjustSelection returned ${selectedCandidates.length} candidates`);
+    
     console.log("prepareSongForTraining completed");
 
     return selectedCandidates;
 }
+
 // setup
 function setup() {
     new Listener("New Player", (payload) => {
@@ -1513,8 +1581,6 @@ function validateStart() {
         .filter((key) => animeTypeFilter(songList[key], tv, movie, ova, ona, special))
         .filter((key) => difficultyFilter(songList[key], difficultyRange[0], difficultyRange[1]))
         .filter((key) => guessTypeFilter(songList[key], correctGuesses, incorrectGuesses));
-    if (songOrderType === "random") shuffleArray(songKeys);
-    else if (songOrderType === "descending") songKeys.reverse();
     songKeys.slice(0, numSongs).forEach((key, i) => {
         songOrder[i + 1] = parseInt(key);
     });
