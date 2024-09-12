@@ -1421,7 +1421,7 @@ function setup() {
 
 // validate all settings and attempt to start csl quiz
 function validateStart(train) {
-	isTraining = train;
+    isTraining = train;
     if (!lobby.inLobby) return;
     songOrder = {};
     if (!lobby.isHost) {
@@ -1486,25 +1486,25 @@ function validateStart(train) {
         .filter((key) => difficultyFilter(songList[key], difficultyRange[0], difficultyRange[1]))
         .filter((key) => guessTypeFilter(songList[key], correctGuesses, incorrectGuesses));
 
-	if (isTraining) {
-		// Prepare the playlist from the filtered song keys
-		let playlist = prepareSongForTraining(songKeys, numSongs);
+    if (isTraining) {
+        // Prepare the playlist from the filtered song keys
+        let playlist = prepareSongForTraining(songKeys, numSongs);
 
-		// Create songOrder based on the playlist
-		playlist.forEach((songKey, i) => {
-			songOrder[i + 1] = parseInt(songKey);
-		});
-	} else {
-		if (songOrderType === "random") {
-			shuffleArray(songList);
-		} else if (songOrderType === "descending") {
-			songList.reverse();
-		}
+        // Create songOrder based on the playlist
+        playlist.forEach((songKey, i) => {
+            songOrder[i + 1] = parseInt(songKey);
+        });
+    } else {
+        if (songOrderType === "random") {
+            shuffleArray(songList);
+        } else if (songOrderType === "descending") {
+            songList.reverse();
+        }
 
-		songKeys.slice(0, numSongs).forEach((key, i) => {
-			songOrder[i + 1] = parseInt(key);
-		});
-	}
+        songKeys.slice(0, numSongs).forEach((key, i) => {
+            songOrder[i + 1] = parseInt(key);
+        });
+    }
     totalSongs = Object.keys(songOrder).length;
     if (totalSongs === 0) {
         return messageDisplayer.displayMessage("Unable to start", "no songs");
@@ -1513,7 +1513,7 @@ function validateStart(train) {
     $("#cslgSettingsModal").modal("hide");
     console.log("song order: ", songOrder);
     if (lobby.soloMode) {
-		console.log(songList);
+        console.log(songList);
         startQuiz();
     } else if (lobby.isHost) {
         cslMessage("§CSL0" + btoa(`${showSelection}§${currentSong}§${totalSongs}§${guessTime}§${extraGuessTime}§${fastSkip ? "1" : "0"}`));
