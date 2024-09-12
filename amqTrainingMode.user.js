@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.65
+// @version      0.66
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -47,6 +47,8 @@ let loadInterval = setInterval(() => {
 const version = "0.62";
 const saveData = validateLocalStorage("customSongListGame");
 const catboxHostDict = { 1: "nl.catbox.video", 2: "ladist1.catbox.video", 3: "vhdist1.catbox.video" };
+let currentProfile;
+let profiles;
 let isTraining = false;
 let CSLButtonCSS = saveData.CSLButtonCSS || "calc(25% - 250px)";
 let showCSLMessages = saveData.showCSLMessages ?? true;
@@ -102,6 +104,80 @@ function shuffleArray(array) {
         [array[i], array[j]] = [array[j], array[i]];
     }
     return array;
+}
+
+function saveProfiles() {
+    localStorage.setItem("cslProfiles", JSON.stringify(profiles));
+}
+
+function loadProfiles() {
+    const savedProfiles = localStorage.getItem("cslProfiles");
+    if (savedProfiles) {
+        profiles = JSON.parse(savedProfiles);
+        if (!profiles.includes("default")) {
+            profiles.unshift("default");
+        }
+    } else {
+        // If no profiles exist in localStorage, initialize with default
+        profiles = ["default"];
+    }
+    // Ensure currentProfile is set
+    if (!profiles.includes(currentProfile)) {
+        currentProfile = "default";
+    }
+    // Save the profiles in case we made any changes
+    saveProfiles();
+}
+
+// Function to select a profile
+function selectProfile(profileName) {
+    if (profiles.includes(profileName)) {
+        currentProfile = profileName;
+        updateProfileSelect();
+        // Load the review data for the selected profile
+        loadReviewData();
+        console.log(`Selected profile: ${profileName}`);
+    } else {
+        console.error(`Profile ${profileName} does not exist`);
+    }
+}
+
+// Function to add a new profile
+function addProfile(profileName) {
+    if (!profiles.includes(profileName)) {
+        profiles.push(profileName);
+        saveProfiles();
+        updateProfileSelect();
+        console.log(`Added new profile: ${profileName}`);
+    } else {
+        console.error(`Profile ${profileName} already exists`);
+    }
+}
+
+// Function to delete a profile
+function deleteProfile(profileName) {
+    if (profileName !== "default") {
+        profiles = profiles.filter((p) => p !== profileName);
+        localStorage.removeItem(`spacedRepetitionData_${profileName}`);
+        saveProfiles();
+        if (currentProfile === profileName) {
+            selectProfile("default");
+        } else {
+            updateProfileSelect();
+        }
+        console.log(`Deleted profile: ${profileName}`);
+    } else {
+        console.error("Cannot delete the default profile");
+    }
+}
+
+function updateProfileSelect() {
+    const $select = $("#cslgProfileSelect");
+    $select.empty();
+    profiles.forEach((profile) => {
+        $select.append($("<option></option>").val(profile).text(profile));
+    });
+    $select.val(currentProfile);
 }
 
 $("#gameContainer").append(
@@ -346,16 +422,55 @@ $("#gameContainer").append(
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button id="cslTrainingModeButton" class="btn btn-primary" style="float: left">Training Mode</button>
+                    <div style="float: left; margin-right: 10px;">
+                        <select id="cslgProfileSelect" style="color: black; margin-right: 5px;"></select>
+                        <button id="cslgLoadProfileButton" class="btn btn-default">Load</button>
+                        <button id="cslgAddProfileButton" class="btn btn-success">Add</button>
+                        <button id="cslgDeleteProfileButton" class="btn btn-danger">Delete</button>
+                    </div>
                     <button id="cslgAutocompleteButton" class="btn btn-danger" style="float: left">Autocomplete</button>
-                    <button id="cslgExitButton" class="btn btn-default" data-dismiss="modal">Exit</button>
-                    <button id="cslgStartButton" class="btn btn-primary">Start</button>
+                    <button id="cslgStartButton" class="btn btn-primary">Normal</button>
+                    <button id="cslTrainingModeButton" class="btn btn-primary" >Training</button>
                 </div>
             </div>
         </div>
     </div>
-`)
+    `)
 );
+
+loadProfiles(); // Load saved profiles
+updateProfileSelect(); // Populate profile select
+
+// Load profile button
+$("#cslgLoadProfileButton").click(() => {
+    const selectedProfile = $("#cslgProfileSelect").val();
+    if (selectedProfile) {
+        selectProfile(selectedProfile);
+        alert(`Loaded profile: ${selectedProfile}`);
+    }
+});
+
+// Add profile button
+$("#cslgAddProfileButton").click(() => {
+    const profileName = prompt("Enter new profile name:");
+    if (profileName) {
+        addProfile(profileName);
+        alert(`Added new profile: ${profileName}`);
+    }
+});
+
+// Delete profile button
+$("#cslgDeleteProfileButton").click(() => {
+    const selectedProfile = $("#cslgProfileSelect").val();
+    if (selectedProfile && selectedProfile !== "default") {
+        if (confirm(`Are you sure you want to delete the profile "${selectedProfile}"?`)) {
+            deleteProfile(selectedProfile);
+            alert(`Deleted profile: ${selectedProfile}`);
+        }
+    } else {
+        alert("Cannot delete the default profile.");
+    }
+});
 
 createHotkeyElement("Start CSL", "start", "cslgStartHotkeySelect", "cslgStartHotkeyInput");
 createHotkeyElement("Stop CSL", "stop", "cslgStopHotkeySelect", "cslgStopHotkeyInput");
@@ -818,11 +933,12 @@ $("#cslgSongListTab").addClass("selected");
 $("#cslgSongListContainer").show();
 
 function saveReviewData(reviewData) {
-    localStorage.setItem("spacedRepetitionData", JSON.stringify(reviewData));
+    localStorage.setItem(`spacedRepetitionData_${currentProfile}`, JSON.stringify(reviewData));
 }
 
+// Modify the loadReviewData function
 function loadReviewData() {
-    const data = localStorage.getItem("spacedRepetitionData");
+    const data = localStorage.getItem(`spacedRepetitionData_${currentProfile}`);
     return data ? JSON.parse(data) : {};
 }
 
@@ -915,6 +1031,50 @@ function getReviewState(track) {
         },
         weight: lastReview.weight,
     };
+}
+
+// Update the reviewSong function
+function reviewSong(song, success) {
+    if (!isTraining) return;
+    let reviewData = loadReviewData();
+    const songKey = song.video720; // Use a unique identifier for the song
+
+    if (!reviewData[songKey]) {
+        reviewData[songKey] = {
+            date: Date.now(),
+            efactor: 2.5,
+            successCount: 0,
+            successStreak: 0,
+            failureCount: 0,
+            failureStreak: 0,
+            isLastTryCorrect: false,
+            weight: 9999, // Initial weight for new songs
+        };
+    }
+
+    const grade = success ? 5 : 0;
+    const lastReview = reviewData[songKey];
+    lastReview.efactor = updateEFactor(lastReview.efactor, grade);
+
+    if (success) {
+        lastReview.failureStreak = 0;
+        lastReview.successStreak++;
+        lastReview.successCount++;
+    } else {
+        lastReview.successStreak = 0;
+        lastReview.failureStreak++;
+        lastReview.failureCount++;
+    }
+
+    lastReview.isLastTryCorrect = success;
+    lastReview.lastReviewDate = Date.now();
+
+    // Calculate and store the new weight
+    lastReview.weight = calculateWeight({
+        reviewState: lastReview,
+    });
+
+    saveReviewData(reviewData);
 }
 
 let appearanceCounter = {};
@@ -1160,6 +1320,7 @@ let usedNewSongs = new Set(); // Global variable to track used new songs across 
 
 function prepareSongForTraining(songKeys, maxSongs) {
     console.log(`prepareSongForTraining started with ${songKeys.length} tracks and maxSongs: ${maxSongs}`);
+    console.log(`Current Profile: ${currentProfile}`);
 
     resetUsedNewSongs();
 
