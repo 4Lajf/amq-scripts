@@ -92,6 +92,7 @@ let nextSongChunk;
 let importRunning = false;
 
 hotKeys.start = saveData.hotKeys?.start ?? { altKey: false, ctrlKey: false, key: "" };
+hotKeys.startTrain = saveData.hotKeys?.stop ?? { altKey: false, ctrlKey: false, key: "" };
 hotKeys.stop = saveData.hotKeys?.stop ?? { altKey: false, ctrlKey: false, key: "" };
 hotKeys.cslgWindow = saveData.hotKeys?.cslgWindow ?? { altKey: false, ctrlKey: false, key: "" };
 //hotKeys.mergeAll = saveData.hotKeys?.mergeAll ?? {altKey: false, ctrlKey: false, key: ""};
@@ -358,102 +359,13 @@ $("#gameContainer").append(
 );
 
 createHotkeyElement("Start CSL", "start", "cslgStartHotkeySelect", "cslgStartHotkeyInput");
+createHotkeyElement("Start Training", "startTrain", "cslgStartTrainHotkeySelect", "cslgStartTrainHotkeyInput");
 createHotkeyElement("Stop CSL", "stop", "cslgStopHotkeySelect", "cslgStopHotkeyInput");
 createHotkeyElement("Open Window", "cslgWindow", "cslgWindowHotkeySelect", "cslgWindowHotkeyInput");
 //createHotkeyElement("Merge All", "mergeAll", "cslgMergeAllHotkeySelect", "cslgMergeAllHotkeyInput");
 
 $("#cslTrainingModeButton").click(() => {
-    isTraining = true;
-    if (!lobby.inLobby) return;
-    songOrder = {};
-    if (!lobby.isHost) {
-        return messageDisplayer.displayMessage("Unable to start", "must be host");
-    }
-    if (lobby.numberOfPlayers !== lobby.numberOfPlayersReady) {
-        return messageDisplayer.displayMessage("Unable to start", "all players must be ready");
-    }
-    if (!songList || !songList.length) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs");
-    }
-    if (autocomplete.length === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "autocomplete list empty");
-    }
-    let numSongs = parseInt($("#cslgSettingsSongs").val());
-    if (isNaN(numSongs) || numSongs < 1) {
-        return messageDisplayer.displayMessage("Unable to start", "invalid number of songs");
-    }
-    guessTime = parseInt($("#cslgSettingsGuessTime").val());
-    if (isNaN(guessTime) || guessTime < 1 || guessTime > 99) {
-        return messageDisplayer.displayMessage("Unable to start", "invalid guess time");
-    }
-    extraGuessTime = parseInt($("#cslgSettingsExtraGuessTime").val());
-    if (isNaN(extraGuessTime) || extraGuessTime < 0 || extraGuessTime > 15) {
-        return messageDisplayer.displayMessage("Unable to start", "invalid extra guess time");
-    }
-    let startPointText = $("#cslgSettingsStartPoint").val().trim();
-    if (/^[0-9]+$/.test(startPointText)) {
-        startPointRange = [parseInt(startPointText), parseInt(startPointText)];
-    } else if (/^[0-9]+[\s-]+[0-9]+$/.test(startPointText)) {
-        let regex = /^([0-9]+)[\s-]+([0-9]+)$/.exec(startPointText);
-        startPointRange = [parseInt(regex[1]), parseInt(regex[2])];
-    } else {
-        return messageDisplayer.displayMessage("Unable to start", "song start sample must be a number or range 0-100");
-    }
-    if (startPointRange[0] < 0 || startPointRange[0] > 100 || startPointRange[1] < 0 || startPointRange[1] > 100 || startPointRange[0] > startPointRange[1]) {
-        return messageDisplayer.displayMessage("Unable to start", "song start sample must be a number or range 0-100");
-    }
-    let difficultyText = $("#cslgSettingsDifficulty").val().trim();
-    if (/^[0-9]+[\s-]+[0-9]+$/.test(difficultyText)) {
-        let regex = /^([0-9]+)[\s-]+([0-9]+)$/.exec(difficultyText);
-        difficultyRange = [parseInt(regex[1]), parseInt(regex[2])];
-    } else {
-        return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
-    }
-    if (difficultyRange[0] < 0 || difficultyRange[0] > 100 || difficultyRange[1] < 0 || difficultyRange[1] > 100 || difficultyRange[0] > difficultyRange[1]) {
-        return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
-    }
-    let ops = $("#cslgSettingsOPCheckbox").prop("checked");
-    let eds = $("#cslgSettingsEDCheckbox").prop("checked");
-    let ins = $("#cslgSettingsINCheckbox").prop("checked");
-    let tv = $("#cslgSettingsTVCheckbox").prop("checked");
-    let movie = $("#cslgSettingsMovieCheckbox").prop("checked");
-    let ova = $("#cslgSettingsOVACheckbox").prop("checked");
-    let ona = $("#cslgSettingsONACheckbox").prop("checked");
-    let special = $("#cslgSettingsSpecialCheckbox").prop("checked");
-    let correctGuesses = $("#cslgSettingsCorrectGuessCheckbox").prop("checked");
-    let incorrectGuesses = $("#cslgSettingsIncorrectGuessCheckbox").prop("checked");
-
-    let songKeys = Object.keys(songList)
-        .filter((key) => songTypeFilter(songList[key], ops, eds, ins))
-        .filter((key) => animeTypeFilter(songList[key], tv, movie, ova, ona, special))
-        .filter((key) => difficultyFilter(songList[key], difficultyRange[0], difficultyRange[1]))
-        .filter((key) => guessTypeFilter(songList[key], correctGuesses, incorrectGuesses));
-
-    if (songKeys.length === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs match the selected criteria");
-    }
-
-    // Prepare the playlist from the filtered song keys
-    let playlist = prepareSongForTraining(songKeys, numSongs);
-
-    // Create songOrder based on the playlist
-    playlist.forEach((songKey, i) => {
-        songOrder[i + 1] = parseInt(songKey);
-    });
-
-    totalSongs = Object.keys(songOrder).length;
-    if (totalSongs === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs");
-    }
-    fastSkip = $("#cslgSettingsFastSkip").prop("checked");
-    $("#cslgSettingsModal").modal("hide");
-    console.log("song order: ", songOrder);
-    if (lobby.soloMode) {
-        console.log(songList);
-        startQuiz();
-    } else if (lobby.isHost) {
-        cslMessage("§CSL0" + btoa(`${showSelection}§${currentSong}§${totalSongs}§${guessTime}§${extraGuessTime}§${fastSkip ? "1" : "0"}`));
-    }
+    validateStart(true);
 });
 
 $("#lobbyPage .topMenuBar").append(`<div id="lnCustomSongListButton" class="clickAble topMenuButton topMenuMediumButton"><h3>CSL</h3></div>`);
@@ -647,7 +559,7 @@ $("#cslgListImportDownloadButton").click(() => {
     element.remove();
 });
 $("#cslgStartButton").click(() => {
-    validateStart();
+    validateStart(false);
 });
 $("#cslgSongListTable")
     .on("click", "i.fa-trash", (event) => {
@@ -1462,7 +1374,10 @@ function setup() {
         const altKey = event.altKey;
         const ctrlKey = event.ctrlKey;
         if (testHotkey("start", key, altKey, ctrlKey)) {
-            validateStart();
+            validateStart(false);
+        }
+        if (testHotkey("startTrain", key, altKey, ctrlKey)) {
+            validateStart(true);
         }
         if (testHotkey("stop", key, altKey, ctrlKey)) {
             quizOver();
@@ -1505,8 +1420,8 @@ function setup() {
 }
 
 // validate all settings and attempt to start csl quiz
-function validateStart() {
-    isTraining = false;
+function validateStart(train) {
+	isTraining = train;
     if (!lobby.inLobby) return;
     songOrder = {};
     if (!lobby.isHost) {
@@ -1571,15 +1486,25 @@ function validateStart() {
         .filter((key) => difficultyFilter(songList[key], difficultyRange[0], difficultyRange[1]))
         .filter((key) => guessTypeFilter(songList[key], correctGuesses, incorrectGuesses));
 
-    if (songOrderType === "random") {
-        shuffleArray(songList);
-    } else if (songOrderType === "descending") {
-        songList.reverse();
-    }
+	if (isTraining) {
+		// Prepare the playlist from the filtered song keys
+		let playlist = prepareSongForTraining(songKeys, numSongs);
 
-    songKeys.slice(0, numSongs).forEach((key, i) => {
-        songOrder[i + 1] = parseInt(key);
-    });
+		// Create songOrder based on the playlist
+		playlist.forEach((songKey, i) => {
+			songOrder[i + 1] = parseInt(songKey);
+		});
+	} else {
+		if (songOrderType === "random") {
+			shuffleArray(songList);
+		} else if (songOrderType === "descending") {
+			songList.reverse();
+		}
+
+		songKeys.slice(0, numSongs).forEach((key, i) => {
+			songOrder[i + 1] = parseInt(key);
+		});
+	}
     totalSongs = Object.keys(songOrder).length;
     if (totalSongs === 0) {
         return messageDisplayer.displayMessage("Unable to start", "no songs");
@@ -1588,6 +1513,7 @@ function validateStart() {
     $("#cslgSettingsModal").modal("hide");
     console.log("song order: ", songOrder);
     if (lobby.soloMode) {
+		console.log(songList);
         startQuiz();
     } else if (lobby.isHost) {
         cslMessage("§CSL0" + btoa(`${showSelection}§${currentSong}§${totalSongs}§${guessTime}§${extraGuessTime}§${fastSkip ? "1" : "0"}`));
