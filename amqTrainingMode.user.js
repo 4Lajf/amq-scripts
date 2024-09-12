@@ -759,7 +759,7 @@ function updateEFactor(oldEFactor, qualityOfResponse) {
 function reviewSong(song, success) {
     if (!isTraining) return;
     let reviewData = loadReviewData();
-    const songKey = song.video720; // Use a unique identifier for the song
+    const songKey = song.video720 ?? song.video480; // Use a unique identifier for the song
 
     if (!reviewData[songKey]) {
         reviewData[songKey] = {
