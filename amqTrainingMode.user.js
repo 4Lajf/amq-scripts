@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.67
+// @version      0.68
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -156,19 +156,15 @@ function addProfile(profileName) {
 
 // Function to delete a profile
 function deleteProfile(profileName) {
-    if (profileName !== "default") {
-        profiles = profiles.filter((p) => p !== profileName);
-        localStorage.removeItem(`spacedRepetitionData_${profileName}`);
-        saveProfiles();
-        if (currentProfile === profileName) {
-            selectProfile("default");
-        } else {
-            updateProfileSelect();
-        }
-        console.log(`Deleted profile: ${profileName}`);
+    profiles = profiles.filter((p) => p !== profileName);
+    localStorage.removeItem(`spacedRepetitionData_${profileName}`);
+    saveProfiles();
+    if (currentProfile === profileName) {
+        selectProfile("default");
     } else {
-        console.error("Cannot delete the default profile");
+        updateProfileSelect();
     }
+    console.log(`Deleted profile: ${profileName}`);
 }
 
 function updateProfileSelect() {
@@ -462,14 +458,10 @@ $("#cslgAddProfileButton").click(() => {
 // Delete profile button
 $("#cslgDeleteProfileButton").click(() => {
     const selectedProfile = $("#cslgProfileSelect").val();
-    if (selectedProfile && selectedProfile !== "default") {
         if (confirm(`Are you sure you want to delete the profile "${selectedProfile}"?`)) {
             deleteProfile(selectedProfile);
             alert(`Deleted profile: ${selectedProfile}`);
         }
-    } else {
-        alert("Cannot delete the default profile.");
-    }
 });
 
 createHotkeyElement("Start CSL", "start", "cslgStartHotkeySelect", "cslgStartHotkeyInput");
@@ -960,52 +952,9 @@ function updateEFactor(oldEFactor, qualityOfResponse) {
     return newEFactor;
 }
 
-function reviewSong(song, success) {
-    if (!isTraining) return;
-    let reviewData = loadReviewData();
-    const songKey = song.video720; // Use a unique identifier for the song
-
-    if (!reviewData[songKey]) {
-        reviewData[songKey] = {
-            date: Date.now(),
-            efactor: 2.5,
-            successCount: 0,
-            successStreak: 0,
-            failureCount: 0,
-            failureStreak: 0,
-            isLastTryCorrect: false,
-            weight: 9999, // Initial weight for new songs
-        };
-    }
-
-    const grade = success ? 5 : 0;
-    const lastReview = reviewData[songKey];
-    lastReview.efactor = updateEFactor(lastReview.efactor, grade);
-
-    if (success) {
-        lastReview.failureStreak = 0;
-        lastReview.successStreak++;
-        lastReview.successCount++;
-    } else {
-        lastReview.successStreak = 0;
-        lastReview.failureStreak++;
-        lastReview.failureCount++;
-    }
-
-    lastReview.isLastTryCorrect = success;
-    lastReview.lastReviewDate = Date.now();
-
-    // Calculate and store the new weight
-    lastReview.weight = calculateWeight({
-        reviewState: lastReview,
-    });
-
-    saveReviewData(reviewData);
-}
-
 function getReviewState(track) {
     const reviewData = loadReviewData();
-    const songKey = track.video720;
+    const songKey = `${track.songArtist}_${track.songName}`;
     const lastReview = reviewData[songKey] || {
         date: Date.now(),
         efactor: 2.5,
@@ -1035,9 +984,10 @@ function getReviewState(track) {
 
 // Update the reviewSong function
 function reviewSong(song, success) {
+    console.log(song);
     if (!isTraining) return;
     let reviewData = loadReviewData();
-    const songKey = song.video720; // Use a unique identifier for the song
+    const songKey = `${song.songArtist}_${song.songName}`; // Use a unique identifier for the song
 
     if (!reviewData[songKey]) {
         reviewData[songKey] = {
