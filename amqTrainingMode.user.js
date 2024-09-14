@@ -3810,33 +3810,31 @@ async function getMalIdsFromAnilist(username) {
   if ($('#cslgListImportPlanningCheckbox').prop('checked')) {
     statuses.push('PLANNING');
   }
-  for (let status of statuses) {
-    $('#cslgListImportText').text(`Retrieving Anilist: ${status}`);
-    let hasNextPage = true;
-    while (hasNextPage) {
-      let data = await getAnilistData(username, status, pageNumber);
-      if (data) {
-        for (let item of data.mediaList) {
-          if (item.media.idMal) {
-            malIds.push(item.media.idMal);
-          }
+  $('#cslgListImportText').text(`Retrieving Anilist: ${statuses}`);
+  let hasNextPage = true;
+  while (hasNextPage) {
+    let data = await getAnilistData(username, statuses, pageNumber);
+    if (data) {
+      for (let item of data.mediaList) {
+        if (item.media.idMal) {
+          malIds.push(item.media.idMal);
         }
-        if (data.pageInfo.hasNextPage) {
-          pageNumber += 1;
-        } else {
-          hasNextPage = false;
-        }
+      }
+      if (data.pageInfo.hasNextPage) {
+        pageNumber += 1;
       } else {
-        $('#cslgListImportText').text('Anilist API Error');
         hasNextPage = false;
       }
+    } else {
+      $('#cslgListImportText').text('Anilist API Error');
+      hasNextPage = false;
     }
   }
   return malIds;
 }
 
 // input username, status, and page number
-function getAnilistData(username, status, pageNumber) {
+function getAnilistData(username, statuses, pageNumber) {
   let query = `
         query {
             Page (page: ${pageNumber}, perPage: 50) {
@@ -3844,7 +3842,7 @@ function getAnilistData(username, status, pageNumber) {
                     currentPage
                     hasNextPage
                 }
-                mediaList (userName: "${username}", type: ANIME, status: ${status}) {
+                mediaList (userName: "${username}", type: ANIME, status_in: [${statuses}]) {
                     status
                     media {
                         id
