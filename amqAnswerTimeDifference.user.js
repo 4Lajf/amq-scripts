@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         AMQ Player Answer Time Difference
 // @namespace    http://tampermonkey.net/
-// @version      1.6.5
+// @version      1.6.6
 // @description  Makes you able to see how quickly people answered and the difference between the first player and everyone else, sends the result on chat at the end of a round and sends some stats at the end of the game
 // @author       4Lajf (forked from Zolhungaj)
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=animemusicquiz.com
 // @match        https://animemusicquiz.com/*
 // @grant        none
 // @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqAnswerTimeDifference.user.js
@@ -321,6 +322,28 @@
         }
     })();
 
+    const ignorePlayersNexus = () => {
+        ignoredPlayerIds = [1, 2, 3, 4, 5, 6, 7, 8];
+    };
+    new Listener("nexus enemy encounter", () => {
+        ignorePlayersNexus();
+    }).bindListener();
+    new Listener("nexus map rejoin", () => {
+        ignorePlayersNexus();
+    }).bindListener();
+    new Listener("Game Starting", (data) => {
+        ignorePlayersRegular(data.players);
+        round = 1;
+    }).bindListener();
+    new Listener("Join Game", (data) => {
+        if (data.quizState) {
+        ignorePlayersRegular(data.quizState.players);
+        }
+    }).bindListener();
+    new Listener("Spectate Game", (data) => {
+        ignoredPlayerIds = [];
+    }).bindListener();
+
     new Listener("Game Starting", ({ players }) => {
         if ($("#smTimeDifference").prop("checked")) {
             fastestLeaderboard = [];
@@ -465,7 +488,6 @@
 
             // Process players who didn't answer
             Object.values(quiz.players).forEach((player) => {
-                console.log(player)
                 if (!amqAnswerTimesUtility.playerTimes.some((p) => p.gamePlayerId === player.gamePlayerId)) {
                     const time = quiz.nextSongPlayLength * 1000;
 
@@ -483,7 +505,7 @@
             if (displayPlayers.length > 0) {
                 let placeNumber = ["⚡", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
                 displayPlayers.slice(0, 10).forEach((player, index) => {
-                    let message = index === 0 ? `⚡ ${player.name} ➔ ${player.time}ms` : `${placeNumber[index]} ${player.name} ➔ ${player.time} (+${player.time - displayPlayers[0].time})ms`;
+                    let message = index === 0 ? `⚡ ${player.name} ➔ ${player.time}ms` : `${placeNumber[index]} ${player.name} ➔ ${player.time}ms (+${player.time - displayPlayers[0].time}ms)`;
 
                     if ($("#smTimeDifferenceChatHidden").prop("checked")) {
                         gameChat.systemMessage(message);
