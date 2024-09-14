@@ -2900,7 +2900,6 @@ function updateStatsContent() {
   $modalBody.append(`
     <div class="stats-section">
       <h3>Recently Reviewed Songs</h3>
-      <h5>Higher means better recognized</h5>
       <table class="stats-table">
         <tr>
           <th>Song</th>
