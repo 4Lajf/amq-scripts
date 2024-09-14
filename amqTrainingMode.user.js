@@ -3852,7 +3852,6 @@ function getAnilistData(username, statuses, pageNumber) {
             }
         }
     `;
-  console.log(query)
   let data = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
