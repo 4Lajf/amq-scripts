@@ -1141,7 +1141,8 @@ function calculateWeight(track, reviewData) {
 
     // Focus on last 5 tries
     const last5Tries = reviewState.lastFiveTries || [];
-    const recentCorrectRatio = last5Tries.filter((attempt) => attempt).length / 5;
+    const attemptCount = last5Tries.length;
+    const recentCorrectRatio = attemptCount > 0 ? last5Tries.filter((attempt) => attempt).length / attemptCount : 0;
 
     function calculateSuccessStreakImpact(successStreak, influence, cap) {
         let multiplier = Math.pow(2, successStreak);
@@ -1169,7 +1170,9 @@ function calculateWeight(track, reviewData) {
 
     const efactorImpact = (5 - efactor) / 4;
 
-    let correctGuessPercentageInfluence = (1 - recentCorrectRatio) * CORRECT_GUESSES_PERCENTAGE_INFLUENCE;
+    // Scale down the importance based on the number of attempts
+    const scaleFactor = Math.min(1, attemptCount / 5);
+    let correctGuessPercentageInfluence = (1 - recentCorrectRatio) * CORRECT_GUESSES_PERCENTAGE_INFLUENCE * scaleFactor;
 
     let weight = overdueFactor * OVERDUE_FACTOR_PERCENTAGE + (1 - lastPerformance) * LAST_PERFORMANCE_PERCENTAGE + efactorImpact * EFACTOR_IMPACT_PERCENTAGE + successStreakImpact + failureStreakImpact + correctGuessPercentageInfluence;
     weight *= 100;
@@ -1186,11 +1189,14 @@ function calculateWeight(track, reviewData) {
     FailureStreakImpact: ${failureStreakImpact}
     CorrectGuessPercentage: ${correctGuessPercentageInfluence}
     RecentCorrectRatio: ${recentCorrectRatio}
+    AttemptCount: ${attemptCount}
+    ScaleFactor: ${scaleFactor}
     ManualWeightAdjustment: ${reviewState.manualWeightAdjustment}
     FINAL WEIGHT: ${weight / 100}`);
 
     return weight;
 }
+
 function weightedRandomSelection(reviewCandidates, maxSongs) {
     const centerWeight = 175;
 
