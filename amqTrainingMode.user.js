@@ -44,8 +44,9 @@ let loadInterval = setInterval(() => {
     }
 }, 500);
 
+let trainingLinkadded = false
 let ignoredSongs = [];
-let currentSearchFilter = '';
+let currentSearchFilter = "";
 let buttonContainerAdded = false;
 let statsModal;
 let maxNewSongs24Hours = 0;
@@ -108,6 +109,60 @@ hotKeys.stopTraining = saveData.hotKeys?.stopTraining ?? { altKey: false, ctrlKe
 hotKeys.cslgWindow = saveData.hotKeys?.cslgWindow ?? { altKey: false, ctrlKey: false, key: "" };
 //hotKeys.mergeAll = saveData.hotKeys?.mergeAll ?? {altKey: false, ctrlKey: false, key: ""};
 
+function createTrainingInfoPopup() {
+    const popupHtml = `
+        <div id="trainingInfoPopup" class="modal fade">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h4 class="modal-title">What's Training Mode?</h4>
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Training mode is a feature in CSL that allows you to practice and improve your anime song recognition skills. Here's how it works:</p>
+                        <ul>
+                            <li>Load songs you want to train on in the "Song List" tab.</li>
+                            <li>The game selects songs based on a spaced repetition algorithm, prioritizing songs you need more practice with.</li>
+                            <li>You receive immediate feedback on your answers, and the system adjusts song difficulty accordingly.</li>
+                            <li>Your progress is recorded and used to optimize future training sessions.</li>
+                            <li>You can manually adjust the frequency of specific songs appearing.</li>
+                            <li>You can also "banish" a song by clicking the block button on the "Song List" menu.</li>
+                            <li>That will cause the song to not play ever again and won't appear in the search results.</li>
+                            <li>You can bring it back by checking "Show Banished Songs" and clicking the tick near the appropriate song.</li>
+                        </ul>
+                        <p>Use training mode to efficiently improve your recognition of anime songs, focusing on those you find challenging!</p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+  `;
+
+    $("body").append(popupHtml);
+}
+
+function showTrainingInfo() {
+    if (!$("#trainingInfoPopup").length) {
+        createTrainingInfoPopup();
+    }
+    $("#trainingInfoPopup").modal("show");
+}
+
+// Add this code to your script's initialization or DOMContentLoaded event
+function addTrainingInfoLink() {
+  if (trainingLinkadded) return;
+    console.log("added training info link");
+    const $link = $('<a href="#" class="training-info-link">What\'s Training?</a>');
+    $link.on("click", function (e) {
+        e.preventDefault();
+        showTrainingInfo();
+    });
+    $("#cslgShowIgnoredText").after($link);
+    trainingLinkadded = true
+}
+
 function loadIgnoredSongs() {
     const savedIgnoredSongs = localStorage.getItem(`ignoredSongs_${currentProfile}`);
     if (savedIgnoredSongs) {
@@ -120,14 +175,14 @@ function saveIgnoredSongs() {
 }
 
 function blockSong(song) {
-    songList = songList.filter(s => s !== song);
+    songList = songList.filter((s) => s !== song);
     ignoredSongs.push(song);
     saveIgnoredSongs();
     createSongListTable();
 }
 
 function unblockSong(song) {
-    ignoredSongs = ignoredSongs.filter(s => s !== song);
+    ignoredSongs = ignoredSongs.filter((s) => s !== song);
     songList.push(song);
     saveIgnoredSongs();
     createSongListTable();
@@ -136,7 +191,7 @@ function unblockSong(song) {
 function filterSongList() {
     if (currentSearchFilter) {
         const searchCriteria = $("#cslgSearchCriteria").val();
-        return songList.filter(song => {
+        return songList.filter((song) => {
             const lowerCaseFilter = currentSearchFilter.toLowerCase();
             switch (searchCriteria) {
                 case "songName":
@@ -144,20 +199,21 @@ function filterSongList() {
                 case "songArtist":
                     return song.songArtist.toLowerCase().includes(lowerCaseFilter);
                 case "animeName":
-                    return song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
-                           song.animeEnglishName.toLowerCase().includes(lowerCaseFilter);
+                    return song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) || song.animeEnglishName.toLowerCase().includes(lowerCaseFilter);
                 case "songType":
                     return songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter);
                 case "animeVintage":
                     return song.animeVintage.toLowerCase().includes(lowerCaseFilter);
                 case "all":
                 default:
-                    return song.songName.toLowerCase().includes(lowerCaseFilter) ||
-                           song.songArtist.toLowerCase().includes(lowerCaseFilter) ||
-                           song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
-                           song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
-                           songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter) ||
-                           song.animeVintage.toLowerCase().includes(lowerCaseFilter);
+                    return (
+                        song.songName.toLowerCase().includes(lowerCaseFilter) ||
+                        song.songArtist.toLowerCase().includes(lowerCaseFilter) ||
+                        song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
+                        song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
+                        songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter) ||
+                        song.animeVintage.toLowerCase().includes(lowerCaseFilter)
+                    );
             }
         });
     }
@@ -605,9 +661,9 @@ function validateTrainingStart() {
     if (difficultyRange[0] < 0 || difficultyRange[0] > 100 || difficultyRange[1] < 0 || difficultyRange[1] > 100 || difficultyRange[0] > difficultyRange[1]) {
         return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
     }
-    currentSearchFilter = '';
-    $("#cslgSearchInput").val('');
-    $("#cslgSearchCriteria").val('all');
+    currentSearchFilter = "";
+    $("#cslgSearchInput").val("");
+    $("#cslgSearchCriteria").val("all");
     let ops = $("#cslgSettingsOPCheckbox").prop("checked");
     let eds = $("#cslgSettingsEDCheckbox").prop("checked");
     let ins = $("#cslgSettingsINCheckbox").prop("checked");
@@ -665,7 +721,7 @@ $("#cslgSongListContainer").prepend(`
         <input id="cslgSearchInput" type="text" placeholder="Search songs..." style="width: 200px; margin-right: 10px;">
         <label>
             <input id="cslgShowIgnoredCheckbox" type="checkbox">
-            Show Banished Songs
+            <span id="cslgShowIgnoredText"> Show Banished Songs </span>
         </label>
     </div>
 `);
@@ -758,20 +814,21 @@ $("#cslgMergeAllButton")
         placement: "bottom",
     });
 
-    function clearSongList() {
-        const showIgnored = $("#cslgShowIgnoredCheckbox").prop("checked");
-        if (showIgnored) {
-            ignoredSongs = [];
-            saveIgnoredSongs();
-        } else {
-            songList = [];
-        }
-        createSongListTable();
+function clearSongList() {
+    const showIgnored = $("#cslgShowIgnoredCheckbox").prop("checked");
+    if (showIgnored) {
+        ignoredSongs = [];
+        saveIgnoredSongs();
+    } else {
+        songList = [];
     }
+    createSongListTable();
+}
 
-    $("#cslgClearSongListButton").click(clearSongList)
+$("#cslgClearSongListButton")
+    .click(clearSongList)
     .popover({
-        content: () => $("#cslgShowIgnoredCheckbox").prop("checked") ? "Clear banished songs" : "Clear song list",
+        content: () => ($("#cslgShowIgnoredCheckbox").prop("checked") ? "Clear banished songs" : "Clear song list"),
         trigger: "hover",
         placement: "bottom",
     });
@@ -882,15 +939,15 @@ $("#cslgStartButton").click(() => {
     validateStart();
 });
 
-$("#cslgSearchCriteria, #cslgSearchInput").on("change input", function() {
+$("#cslgSearchCriteria, #cslgSearchInput").on("change input", function () {
     currentSearchFilter = $("#cslgSearchInput").val().toLowerCase();
     createSongListTable();
 });
 
 $("#cslgShowIgnoredCheckbox").on("change", createSongListTable);
 
-$("#cslgSongListTable").on("click", "i.clickAble", function(event) {
-    const $row = $(this).closest('tr');
+$("#cslgSongListTable").on("click", "i.clickAble", function (event) {
+    const $row = $(this).closest("tr");
     const showIgnored = $("#cslgShowIgnoredCheckbox").prop("checked");
     const currentList = showIgnored ? ignoredSongs : filterSongList();
     const index = $row.index();
@@ -901,18 +958,18 @@ $("#cslgSongListTable").on("click", "i.clickAble", function(event) {
         return;
     }
 
-    if ($(this).hasClass('fa-ban')) {
+    if ($(this).hasClass("fa-ban")) {
         blockSong(song);
-    } else if ($(this).hasClass('fa-check')) {
+    } else if ($(this).hasClass("fa-check")) {
         unblockSong(song);
-    } else if ($(this).hasClass('fa-trash')) {
+    } else if ($(this).hasClass("fa-trash")) {
         if (showIgnored) {
-            ignoredSongs = ignoredSongs.filter(s => s !== song);
+            ignoredSongs = ignoredSongs.filter((s) => s !== song);
             saveIgnoredSongs();
         } else {
-            songList = songList.filter(s => s !== song);
+            songList = songList.filter((s) => s !== song);
         }
-    } else if ($(this).hasClass('fa-plus')) {
+    } else if ($(this).hasClass("fa-plus")) {
         mergedSongList.push(song);
         mergedSongList = Array.from(new Set(mergedSongList.map((x) => JSON.stringify(x)))).map((x) => JSON.parse(x));
     }
@@ -939,7 +996,7 @@ $("#cslgSongListTable")
     })
     .on("mouseleave", "i.fa-check", (event) => {
         event.target.parentElement.parentElement.classList.remove("selected");
-    })
+    });
 
 $("#cslgSongListTable")
     .on("mouseenter", "i.fa-plus", (event) => {
@@ -1497,6 +1554,16 @@ function addWeightAdjustmentButtons() {
         .prop("type", "text/css")
         .html(
             `
+      .training-info-link {
+          margin-left: 10px;
+          font-size: 12px;
+          vertical-align: middle;
+      }
+      #trainingInfoPopup .modal-body {
+          max-height: 400px;
+          overflow-y: auto;
+      }
+
       #qpWeightAdjustmentContainer {
           background-color: rgba(0, 0, 0, 0.3);
           border-radius: 5px;
@@ -1666,7 +1733,7 @@ function resetUsedNewSongs() {
 
 // setup
 function setup() {
-    loadIgnoredSongs()
+    loadIgnoredSongs();
     new Listener("New Player", (payload) => {
         if (quiz.cslActive && quiz.inQuiz && quiz.isHost) {
             let player = Object.values(quiz.players).find((p) => p._name === payload.name);
@@ -3067,6 +3134,7 @@ function updateStatsContent() {
 
 // open custom song list settings modal
 function openSettingsModal() {
+  addTrainingInfoLink();
     if (lobby.inLobby) {
         if (autocomplete.length) {
             $("#cslgAutocompleteButton").removeClass("btn-danger").addClass("btn-success disabled");
@@ -3367,11 +3435,7 @@ function handleData(data) {
         songList = data;
     }
     // Filter out ignored songs
-    songList = songList.filter(song => !ignoredSongs.some(ignoredSong =>
-        ignoredSong.songName === song.songName &&
-        ignoredSong.songArtist === song.songArtist &&
-        ignoredSong.animeRomajiName === song.animeRomajiName
-    ));
+    songList = songList.filter((song) => !ignoredSongs.some((ignoredSong) => ignoredSong.songName === song.songName && ignoredSong.songArtist === song.songArtist && ignoredSong.animeRomajiName === song.animeRomajiName));
 
     songList = songList.filter((song) => song.audio || song.video480 || song.video720);
 }
@@ -3482,13 +3546,13 @@ function createSongListTable() {
                     .addClass("difficulty")
                     .text(Number.isFinite(song.songDifficulty) ? Math.floor(song.songDifficulty) : "")
             );
-            $row.append($("<td></td>").addClass("action").append(`
-                ${showIgnored ? '' : '<i class="fa fa-plus clickAble" aria-hidden="true"></i>'}
+            $row.append(
+                $("<td></td>").addClass("action").append(`
+                ${showIgnored ? "" : '<i class="fa fa-plus clickAble" aria-hidden="true"></i>'}
                 <i class="fa fa-trash clickAble" aria-hidden="true"></i>
-                ${showIgnored
-                    ? '<i class="fa fa-check clickAble" aria-hidden="true"></i>'
-                    : '<i class="fa fa-ban clickAble" aria-hidden="true"></i>'}
-            `));
+                ${showIgnored ? '<i class="fa fa-check clickAble" aria-hidden="true"></i>' : '<i class="fa fa-ban clickAble" aria-hidden="true"></i>'}
+            `)
+            );
             $tbody.append($row);
         });
     } else if (songListTableMode === 1) {
