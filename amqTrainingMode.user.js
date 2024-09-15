@@ -129,6 +129,7 @@ function createTrainingInfoPopup() {
                             <li>You can also "banish" a song by clicking the block button on the "Song List" menu.</li>
                             <li>That will cause the song to not play ever again and won't appear in the search results.</li>
                             <li>You can bring it back by checking "Show Banished Songs" and clicking the tick near the appropriate song.</li>
+                            <li>You can also choose how many new songs per 24 hours you will hear in the settings.</li>
                         </ul>
                         <p>Use training mode to efficiently improve your recognition of anime songs, focusing on those you find challenging!</p>
                     </div>
@@ -616,28 +617,28 @@ function validateTrainingStart() {
     if (!lobby.inLobby) return;
     songOrder = {};
     if (!lobby.isHost) {
-        return messageDisplayer.displayMessage("Unable to start", "must be host");
+        return messageDisplayer.displayMessage("Unable to start", "You must be the host to start the game.");
     }
     if (lobby.numberOfPlayers !== lobby.numberOfPlayersReady) {
-        return messageDisplayer.displayMessage("Unable to start", "all players must be ready");
+        return messageDisplayer.displayMessage("Unable to start", "All players must be ready.");
     }
     if (!songList || !songList.length) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs");
+        return messageDisplayer.displayMessage("Unable to start", "No songs match the selected criteria. Check the \"Song List\" tab.");
     }
     if (autocomplete.length === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "autocomplete list empty");
+        return messageDisplayer.displayMessage("Unable to start", "You must click on the \"Autocomplete\" button before starting the game.");
     }
     let numSongs = parseInt($("#cslgSettingsSongs").val());
     if (isNaN(numSongs) || numSongs < 1) {
-        return messageDisplayer.displayMessage("Unable to start", "invalid number of songs");
+        return messageDisplayer.displayMessage("Unable to start", "Invalid number of songs");
     }
     guessTime = parseInt($("#cslgSettingsGuessTime").val());
     if (isNaN(guessTime) || guessTime < 1 || guessTime > 99) {
-        return messageDisplayer.displayMessage("Unable to start", "invalid guess time");
+        return messageDisplayer.displayMessage("Unable to start", "Invalid guess time");
     }
     extraGuessTime = parseInt($("#cslgSettingsExtraGuessTime").val());
     if (isNaN(extraGuessTime) || extraGuessTime < 0 || extraGuessTime > 15) {
-        return messageDisplayer.displayMessage("Unable to start", "invalid extra guess time");
+        return messageDisplayer.displayMessage("Unable to start", "Unvalid extra guess time");
     }
     let startPointText = $("#cslgSettingsStartPoint").val().trim();
     if (/^[0-9]+$/.test(startPointText)) {
@@ -646,20 +647,20 @@ function validateTrainingStart() {
         let regex = /^([0-9]+)[\s-]+([0-9]+)$/.exec(startPointText);
         startPointRange = [parseInt(regex[1]), parseInt(regex[2])];
     } else {
-        return messageDisplayer.displayMessage("Unable to start", "song start sample must be a number or range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "Song start sample must be a number or range 0-100");
     }
     if (startPointRange[0] < 0 || startPointRange[0] > 100 || startPointRange[1] < 0 || startPointRange[1] > 100 || startPointRange[0] > startPointRange[1]) {
-        return messageDisplayer.displayMessage("Unable to start", "song start sample must be a number or range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "Song start sample must be a number or range 0-100");
     }
     let difficultyText = $("#cslgSettingsDifficulty").val().trim();
     if (/^[0-9]+[\s-]+[0-9]+$/.test(difficultyText)) {
         let regex = /^([0-9]+)[\s-]+([0-9]+)$/.exec(difficultyText);
         difficultyRange = [parseInt(regex[1]), parseInt(regex[2])];
     } else {
-        return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "Difficulty must be a range 0-100");
     }
     if (difficultyRange[0] < 0 || difficultyRange[0] > 100 || difficultyRange[1] < 0 || difficultyRange[1] > 100 || difficultyRange[0] > difficultyRange[1]) {
-        return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "Difficulty must be a range 0-100");
     }
     currentSearchFilter = "";
     $("#cslgSearchInput").val("");
@@ -682,7 +683,7 @@ function validateTrainingStart() {
         .filter((key) => guessTypeFilter(songList[key], correctGuesses, incorrectGuesses));
 
     if (songKeys.length === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs match the selected criteria");
+        return messageDisplayer.displayMessage("Unable to start", "No songs match the selected criteria. Check the \"Song List\" tab.");
     }
 
     // Prepare the playlist from the filtered song keys
@@ -695,7 +696,7 @@ function validateTrainingStart() {
 
     totalSongs = Object.keys(songOrder).length;
     if (totalSongs === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs");
+        return messageDisplayer.displayMessage("Unable to start", "No songs match the selected criteria. Check the \"Song List\" tab.");
     }
     fastSkip = $("#cslgSettingsFastSkip").prop("checked");
     $("#cslgSettingsModal").modal("hide");
@@ -876,7 +877,7 @@ $("#cslgMergeDownloadButton").click(() => {
         element.click();
         element.remove();
     } else {
-        messageDisplayer.displayMessage("No songs", "add some songs to the merged song list");
+        messageDisplayer.displayMessage("No songs", "Add some songs to the merged song list");
     }
 });
 $("#cslgAutocompleteButton").click(() => {
@@ -903,7 +904,7 @@ $("#cslgAutocompleteButton").click(() => {
         });
         autocompleteListener.bindListener();
     } else {
-        messageDisplayer.displayMessage("Autocomplete", "For multiplayer, just start the quiz normally and immediately lobby");
+        messageDisplayer.displayMessage("Autocomplete", "For multiplayer, just start the quiz normally and immediately go back to lobby");
     }
 });
 $("#cslgListImportUsernameInput").keypress((event) => {
@@ -2033,28 +2034,28 @@ function validateStart() {
     if (!lobby.inLobby) return;
     songOrder = {};
     if (!lobby.isHost) {
-        return messageDisplayer.displayMessage("Unable to start", "must be host");
+        return messageDisplayer.displayMessage("Unable to start", "You must be the host to start the game.");
     }
     if (lobby.numberOfPlayers !== lobby.numberOfPlayersReady) {
-        return messageDisplayer.displayMessage("Unable to start", "all players must be ready");
+        return messageDisplayer.displayMessage("Unable to start", "All players must be ready.");
     }
     if (!songList || !songList.length) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs");
+        return messageDisplayer.displayMessage("Unable to start", "No songs match the selected criteria. Check the \"Song List\" tab.");
     }
     if (autocomplete.length === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "autocomplete list empty");
+        return messageDisplayer.displayMessage("Unable to start", "You must click on the \"Autocomplete\" button before starting the game.");
     }
     let numSongs = parseInt($("#cslgSettingsSongs").val());
     if (isNaN(numSongs) || numSongs < 1) {
-        return messageDisplayer.displayMessage("Unable to start", "invalid number of songs");
+        return messageDisplayer.displayMessage("Unable to start", "Invalid number of songs");
     }
     guessTime = parseInt($("#cslgSettingsGuessTime").val());
     if (isNaN(guessTime) || guessTime < 1 || guessTime > 99) {
-        return messageDisplayer.displayMessage("Unable to start", "invalid guess time");
+        return messageDisplayer.displayMessage("Unable to start", "Invalid guess time");
     }
     extraGuessTime = parseInt($("#cslgSettingsExtraGuessTime").val());
     if (isNaN(extraGuessTime) || extraGuessTime < 0 || extraGuessTime > 15) {
-        return messageDisplayer.displayMessage("Unable to start", "invalid extra guess time");
+        return messageDisplayer.displayMessage("Unable to start", "Unvalid extra guess time");
     }
     let startPointText = $("#cslgSettingsStartPoint").val().trim();
     if (/^[0-9]+$/.test(startPointText)) {
@@ -2063,20 +2064,20 @@ function validateStart() {
         let regex = /^([0-9]+)[\s-]+([0-9]+)$/.exec(startPointText);
         startPointRange = [parseInt(regex[1]), parseInt(regex[2])];
     } else {
-        return messageDisplayer.displayMessage("Unable to start", "song start sample must be a number or range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "Song start sample must be a number or range 0-100");
     }
     if (startPointRange[0] < 0 || startPointRange[0] > 100 || startPointRange[1] < 0 || startPointRange[1] > 100 || startPointRange[0] > startPointRange[1]) {
-        return messageDisplayer.displayMessage("Unable to start", "song start sample must be a number or range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "Song start sample must be a number or range 0-100");
     }
     let difficultyText = $("#cslgSettingsDifficulty").val().trim();
     if (/^[0-9]+[\s-]+[0-9]+$/.test(difficultyText)) {
         let regex = /^([0-9]+)[\s-]+([0-9]+)$/.exec(difficultyText);
         difficultyRange = [parseInt(regex[1]), parseInt(regex[2])];
     } else {
-        return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "Difficulty must be a range 0-100");
     }
     if (difficultyRange[0] < 0 || difficultyRange[0] > 100 || difficultyRange[1] < 0 || difficultyRange[1] > 100 || difficultyRange[0] > difficultyRange[1]) {
-        return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
+        return messageDisplayer.displayMessage("Unable to start", "Difficulty must be a range 0-100");
     }
     let ops = $("#cslgSettingsOPCheckbox").prop("checked");
     let eds = $("#cslgSettingsEDCheckbox").prop("checked");
@@ -2105,7 +2106,7 @@ function validateStart() {
     });
     totalSongs = Object.keys(songOrder).length;
     if (totalSongs === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs");
+        return messageDisplayer.displayMessage("Unable to start", "No songs match the selected criteria. Check the \"Song List\" tab.");
     }
     fastSkip = $("#cslgSettingsFastSkip").prop("checked");
     $("#cslgSettingsModal").modal("hide");
