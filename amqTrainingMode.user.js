@@ -1374,7 +1374,7 @@ function addWeightAdjustmentButtons() {
     $("<style>")
         .prop("type", "text/css")
         .html(
-      `
+            `
       #qpWeightAdjustmentContainer {
           background-color: rgba(0, 0, 0, 0.3);
           border-radius: 5px;
