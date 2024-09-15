@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.71
+// @version      0.72
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -44,6 +44,8 @@ let loadInterval = setInterval(() => {
     }
 }, 500);
 
+let ignoredSongs = [];
+let currentSearchFilter = '';
 let buttonContainerAdded = false;
 let statsModal;
 let maxNewSongs24Hours = 0;
@@ -105,6 +107,62 @@ hotKeys.startTraining = saveData.hotKeys?.startTraining ?? { altKey: false, ctrl
 hotKeys.stopTraining = saveData.hotKeys?.stopTraining ?? { altKey: false, ctrlKey: false, key: "" };
 hotKeys.cslgWindow = saveData.hotKeys?.cslgWindow ?? { altKey: false, ctrlKey: false, key: "" };
 //hotKeys.mergeAll = saveData.hotKeys?.mergeAll ?? {altKey: false, ctrlKey: false, key: ""};
+
+function loadIgnoredSongs() {
+    const savedIgnoredSongs = localStorage.getItem(`ignoredSongs_${currentProfile}`);
+    if (savedIgnoredSongs) {
+        ignoredSongs = JSON.parse(savedIgnoredSongs);
+    }
+}
+
+function saveIgnoredSongs() {
+    localStorage.setItem(`ignoredSongs_${currentProfile}`, JSON.stringify(ignoredSongs));
+}
+
+function blockSong(index) {
+    const blockedSong = songList.splice(index, 1)[0];
+    ignoredSongs.push(blockedSong);
+    saveIgnoredSongs();
+    createSongListTable();
+}
+
+function unblockSong(index) {
+    const unblockedSong = ignoredSongs.splice(index, 1)[0];
+    songList.push(unblockedSong);
+    saveIgnoredSongs();
+    createSongListTable();
+}
+
+function filterSongList() {
+    if (currentSearchFilter) {
+        const searchCriteria = $("#cslgSearchCriteria").val();
+        return songList.filter(song => {
+            const lowerCaseFilter = currentSearchFilter.toLowerCase();
+            switch (searchCriteria) {
+                case "songName":
+                    return song.songName.toLowerCase().includes(lowerCaseFilter);
+                case "songArtist":
+                    return song.songArtist.toLowerCase().includes(lowerCaseFilter);
+                case "animeName":
+                    return song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
+                           song.animeEnglishName.toLowerCase().includes(lowerCaseFilter);
+                case "songType":
+                    return songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter);
+                case "animeVintage":
+                    return song.animeVintage.toLowerCase().includes(lowerCaseFilter);
+                case "all":
+                default:
+                    return song.songName.toLowerCase().includes(lowerCaseFilter) ||
+                           song.songArtist.toLowerCase().includes(lowerCaseFilter) ||
+                           song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
+                           song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
+                           songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter) ||
+                           song.animeVintage.toLowerCase().includes(lowerCaseFilter);
+            }
+        });
+    }
+    return songList;
+}
 
 function shuffleArray(array) {
     for (let i = array.length - 1; i > 0; i--) {
@@ -547,6 +605,9 @@ function validateTrainingStart() {
     if (difficultyRange[0] < 0 || difficultyRange[0] > 100 || difficultyRange[1] < 0 || difficultyRange[1] > 100 || difficultyRange[0] > difficultyRange[1]) {
         return messageDisplayer.displayMessage("Unable to start", "difficulty must be a range 0-100");
     }
+    currentSearchFilter = '';
+    $("#cslgSearchInput").val('');
+    $("#cslgSearchCriteria").val('all');
     let ops = $("#cslgSettingsOPCheckbox").prop("checked");
     let eds = $("#cslgSettingsEDCheckbox").prop("checked");
     let ins = $("#cslgSettingsINCheckbox").prop("checked");
@@ -590,6 +651,24 @@ function validateTrainingStart() {
         cslMessage("§CSL0" + btoa(`${showSelection}§${currentSong}§${totalSongs}§${guessTime}§${extraGuessTime}§${fastSkip ? "1" : "0"}`));
     }
 }
+
+$("#cslgSongListContainer").prepend(`
+    <div id="cslgSongListControls" style="margin-bottom: 10px;">
+        <select id="cslgSearchCriteria" style="margin-right: 10px;">
+            <option value="all">All</option>
+            <option value="songName">Song Name</option>
+            <option value="songArtist">Song Artist</option>
+            <option value="animeName">Anime Name</option>
+            <option value="songType">Song Type</option>
+            <option value="animeVintage">Anime Vintage</option>
+        </select>
+        <input id="cslgSearchInput" type="text" placeholder="Search songs..." style="width: 200px; margin-right: 10px;">
+        <label>
+            <input id="cslgShowIgnoredCheckbox" type="checkbox">
+            Show Banished Songs
+        </label>
+    </div>
+`);
 
 $("#cslTrainingModeButton").click(() => {
     validateTrainingStart();
@@ -678,13 +757,21 @@ $("#cslgMergeAllButton")
         trigger: "hover",
         placement: "bottom",
     });
-$("#cslgClearSongListButton")
-    .click(() => {
-        songList = [];
+
+    function clearSongList() {
+        const showIgnored = $("#cslgShowIgnoredCheckbox").prop("checked");
+        if (showIgnored) {
+            ignoredSongs = [];
+            saveIgnoredSongs();
+        } else {
+            songList = [];
+        }
         createSongListTable();
-    })
+    }
+
+    $("#cslgClearSongListButton").click(clearSongList)
     .popover({
-        content: "Clear song list",
+        content: () => $("#cslgShowIgnoredCheckbox").prop("checked") ? "Clear banished songs" : "Clear song list",
         trigger: "hover",
         placement: "bottom",
     });
@@ -794,19 +881,41 @@ $("#cslgListImportDownloadButton").click(() => {
 $("#cslgStartButton").click(() => {
     validateStart();
 });
+
+$("#cslgSearchCriteria, #cslgSearchInput").on("change input", function() {
+    currentSearchFilter = $("#cslgSearchInput").val().toLowerCase();
+    createSongListTable();
+});
+
+$("#cslgShowIgnoredCheckbox").on("change", createSongListTable);
+
 $("#cslgSongListTable")
-    .on("click", "i.fa-trash", (event) => {
-        let index = parseInt(event.target.parentElement.parentElement.querySelector("td.number").innerText) - 1;
+.on("click", "i.fa-ban", (event) => {
+    let index = parseInt(event.target.parentElement.parentElement.querySelector("td.number").innerText) - 1;
+    blockSong(index);
+})
+.on("click", "i.fa-check", (event) => {
+    let index = parseInt(event.target.parentElement.parentElement.querySelector("td.number").innerText) - 1;
+    unblockSong(index);
+})
+.on("click", "i.fa-trash", (event) => {
+    let index = parseInt(event.target.parentElement.parentElement.querySelector("td.number").innerText) - 1;
+    const showIgnored = $("#cslgShowIgnoredCheckbox").prop("checked");
+    if (showIgnored) {
+        ignoredSongs.splice(index, 1);
+        saveIgnoredSongs();
+    } else {
         songList.splice(index, 1);
-        createSongListTable();
-        createAnswerTable();
-    })
+    }
+    createSongListTable();
+})
     .on("mouseenter", "i.fa-trash", (event) => {
         event.target.parentElement.parentElement.classList.add("selected");
     })
     .on("mouseleave", "i.fa-trash", (event) => {
         event.target.parentElement.parentElement.classList.remove("selected");
     });
+
 $("#cslgSongListTable")
     .on("click", "i.fa-plus", (event) => {
         let index = parseInt(event.target.parentElement.parentElement.querySelector("td.number").innerText) - 1;
@@ -1313,31 +1422,19 @@ function penalizeAndAdjustSelection(selectedCandidates, reviewCandidates, maxSon
 
     penalizeDuplicateRomajiNames(regularSongs, remainingCandidates);
 
-    // If we removed any new songs during penalization, try to replace them with other new songs first
-    let newSongsNeeded = selectedCandidates.filter((c) => c.weight === 9999).length - newSongs.length;
-    let availableNewSongs = remainingCandidates.filter((c) => c.weight === 9999);
+    // If we removed any regular songs during penalization, try to replace them with other regular songs
+    let regularSongsNeeded = Math.min(Math.floor(maxSongs / 2), selectedCandidates.filter((c) => c.weight !== 9999).length) - regularSongs.length;
+    let availableRegularSongs = remainingCandidates.filter((c) => c.weight !== 9999);
 
-    while (newSongsNeeded > 0 && availableNewSongs.length > 0) {
-        let randomNewSong = availableNewSongs.splice(Math.floor(Math.random() * availableNewSongs.length), 1)[0];
-        newSongs.push(randomNewSong);
-        remainingCandidates = remainingCandidates.filter((c) => c !== randomNewSong);
-        newSongsNeeded--;
+    while (regularSongsNeeded > 0 && availableRegularSongs.length > 0) {
+        let randomRegularSong = weightedRandomSelection(availableRegularSongs, 1)[0];
+        regularSongs.push(randomRegularSong);
+        availableRegularSongs = availableRegularSongs.filter((c) => c !== randomRegularSong);
+        regularSongsNeeded--;
     }
 
     // Combine new songs and regular songs
     adjustedSelection = [...newSongs, ...regularSongs];
-
-    // Fill remaining slots with regular songs if needed
-    while (adjustedSelection.length < maxSongs && remainingCandidates.length > 0) {
-        let regularCandidates = remainingCandidates.filter((c) => c.weight !== 9999);
-        if (regularCandidates.length > 0) {
-            let selected = weightedRandomSelection(regularCandidates, 1)[0];
-            adjustedSelection.push(selected);
-            remainingCandidates = remainingCandidates.filter((c) => c !== selected);
-        } else {
-            break;
-        }
-    }
 
     return adjustedSelection.slice(0, maxSongs);
 }
@@ -1503,31 +1600,24 @@ function prepareSongForTraining(songKeys, maxSongs) {
     let regularSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight !== 9999);
 
     newSongs = shuffleArray(newSongs);
+    regularSongs = shuffleArray(regularSongs);
 
     console.log(`Found ${newSongs.length} new songs and ${regularSongs.length} regular songs`);
 
-    let selectedCandidates = [];
-    let newSongsToAdd = Math.min(maxNewSongs24Hours - newSongsAdded24Hours, maxSongs, newSongs.length);
+    // Calculate limits for new and regular songs
+    const maxNewSongsToAdd = Math.min(maxNewSongs24Hours - newSongsAdded24Hours, maxSongs);
+    const maxRegularSongsToAdd = maxSongs;
 
-    console.log(`Calculated newSongsToAdd: ${newSongsToAdd}`);
+    console.log(`Calculated maxNewSongsToAdd: ${maxNewSongsToAdd}, maxRegularSongsToAdd: ${maxRegularSongsToAdd}`);
 
-    if (newSongsToAdd > 0) {
-        selectedCandidates = newSongs.slice(0, newSongsToAdd);
-        // Instead of incrementing newSongsAdded24Hours, we add these to potentialNewSongs
-        selectedCandidates.forEach((song) => potentialNewSongs.add(`${song.songArtist}_${song.songName}`));
-        console.log(`Added ${selectedCandidates.length} potential new songs.`);
-    } else {
-        console.log("No new songs added in this session.");
-    }
+    let selectedNewSongs = newSongs.slice(0, maxNewSongsToAdd);
+    let selectedRegularSongs = regularSongs.slice(0, maxRegularSongsToAdd);
 
-    let remainingSlots = maxSongs - selectedCandidates.length;
-    console.log(`Remaining slots for regular songs: ${remainingSlots}`);
+    // Add selected new songs to potentialNewSongs
+    selectedNewSongs.forEach((song) => potentialNewSongs.add(`${song.songArtist}_${song.songName}`));
+    console.log(`Added ${selectedNewSongs.length} potential new songs.`);
 
-    let regularSelections = weightedRandomSelection(regularSongs, remainingSlots);
-    console.log(`Selected ${regularSelections.length} regular songs`);
-
-    selectedCandidates = selectedCandidates.concat(regularSelections);
-
+    let selectedCandidates = [...selectedNewSongs, ...selectedRegularSongs];
     console.log(`Total selected candidates: ${selectedCandidates.length}`);
 
     console.log("Starting penalizeAndAdjustSelection");
@@ -1557,6 +1647,7 @@ function resetUsedNewSongs() {
 
 // setup
 function setup() {
+    loadIgnoredSongs()
     new Listener("New Player", (payload) => {
         if (quiz.cslActive && quiz.inQuiz && quiz.isHost) {
             let player = Object.values(quiz.players).find((p) => p._name === payload.name);
@@ -3081,6 +3172,7 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
 function handleData(data) {
     songList = [];
     if (!data) return;
+    loadIgnoredSongs(); // Load the latest ignored songs
     // anisongdb structure
     if (Array.isArray(data) && data.length && data[0].animeJPName) {
         data = data.filter((song) => song.audio || song.MQ || song.HQ);
@@ -3255,73 +3347,85 @@ function handleData(data) {
     else if (Array.isArray(data) && data.length && data[0].animeRomajiName) {
         songList = data;
     }
+    // Filter out ignored songs
+    songList = songList.filter(song => !ignoredSongs.some(ignoredSong =>
+        ignoredSong.songName === song.songName &&
+        ignoredSong.songArtist === song.songArtist &&
+        ignoredSong.animeRomajiName === song.animeRomajiName
+    ));
+
     songList = songList.filter((song) => song.audio || song.video480 || song.video720);
 }
 
 // create song list table
 function createSongListTable() {
-    $("#cslgSongListCount").text("Songs: " + songList.length);
-    $("#cslgMergeCurrentCount").text(`Current song list: ${songList.length} song${songList.length === 1 ? "" : "s"}`);
+    const showIgnored = $("#cslgShowIgnoredCheckbox").prop("checked");
+    const displayList = showIgnored ? ignoredSongs : filterSongList();
+
+    $("#cslgSongListCount").text("Songs: " + displayList.length);
+    $("#cslgMergeCurrentCount").text(`Current song list: ${displayList.length} song${displayList.length === 1 ? "" : "s"}`);
     $("#cslgSongListWarning").text("");
     let $thead = $("#cslgSongListTable thead");
     let $tbody = $("#cslgSongListTable tbody");
     $thead.empty();
     $tbody.empty();
+
     if (songListTableSort[0] === 1) {
         //song name ascending
-        songList.sort((a, b) => (a.songName || "").localeCompare(b.songName || ""));
+        displayList.sort((a, b) => (a.songName || "").localeCompare(b.songName || ""));
     } else if (songListTableSort[0] === 2) {
         //song name descending
-        songList.sort((a, b) => (b.songName || "").localeCompare(a.songName || ""));
+        displayList.sort((a, b) => (b.songName || "").localeCompare(a.songName || ""));
     } else if (songListTableSort[1] === 1) {
         //artist ascending
-        songList.sort((a, b) => (a.songArtist || "").localeCompare(b.songArtist || ""));
+        displayList.sort((a, b) => (a.songArtist || "").localeCompare(b.songArtist || ""));
     } else if (songListTableSort[1] === 2) {
         //artist descending
-        songList.sort((a, b) => (b.songArtist || "").localeCompare(a.songArtist || ""));
+        displayList.sort((a, b) => (b.songArtist || "").localeCompare(a.songArtist || ""));
     } else if (songListTableSort[2] === 1) {
         //difficulty ascending
-        songList.sort((a, b) => a.songDifficulty - b.songDifficulty);
+        displayList.sort((a, b) => a.songDifficulty - b.songDifficulty);
     } else if (songListTableSort[2] === 2) {
         //difficulty descending
-        songList.sort((a, b) => b.songDifficulty - a.songDifficulty);
+        displayList.sort((a, b) => b.songDifficulty - a.songDifficulty);
     } else if (songListTableSort[3] === 1) {
         //anime ascending
-        options.useRomajiNames ? songList.sort((a, b) => (a.animeRomajiName || "").localeCompare(b.animeRomajiName || "")) : songList.sort((a, b) => (a.animeEnglishName || "").localeCompare(b.animeEnglishName || ""));
+        options.useRomajiNames ? displayList.sort((a, b) => (a.animeRomajiName || "").localeCompare(b.animeRomajiName || "")) : displayList.sort((a, b) => (a.animeEnglishName || "").localeCompare(b.animeEnglishName || ""));
     } else if (songListTableSort[3] === 2) {
         //anime descending
-        options.useRomajiNames ? songList.sort((a, b) => (b.animeRomajiName || "").localeCompare(a.animeRomajiName || "")) : songList.sort((a, b) => (b.animeEnglishName || "").localeCompare(a.animeEnglishName || ""));
+        options.useRomajiNames ? displayList.sort((a, b) => (b.animeRomajiName || "").localeCompare(a.animeRomajiName || "")) : displayList.sort((a, b) => (b.animeEnglishName || "").localeCompare(a.animeEnglishName || ""));
     } else if (songListTableSort[4] === 1) {
         //song type ascending
-        songList.sort((a, b) => songTypeSortValue(a.songType, a.songTypeNumber) - songTypeSortValue(b.songType, b.songTypeNumber));
+        displayList.sort((a, b) => songTypeSortValue(a.songType, a.songTypeNumber) - songTypeSortValue(b.songType, b.songTypeNumber));
     } else if (songListTableSort[4] === 2) {
         //song type descending
-        songList.sort((a, b) => songTypeSortValue(b.songType, b.songTypeNumber) - songTypeSortValue(a.songType, a.songTypeNumber));
+        displayList.sort((a, b) => songTypeSortValue(b.songType, b.songTypeNumber) - songTypeSortValue(a.songType, a.songTypeNumber));
     } else if (songListTableSort[5] === 1) {
         //vintage ascending
-        songList.sort((a, b) => vintageSortValue(a.animeVintage) - vintageSortValue(b.animeVintage));
+        displayList.sort((a, b) => vintageSortValue(a.animeVintage) - vintageSortValue(b.animeVintage));
     } else if (songListTableSort[5] === 2) {
         //vintage descending
-        songList.sort((a, b) => vintageSortValue(b.animeVintage) - vintageSortValue(a.animeVintage));
+        displayList.sort((a, b) => vintageSortValue(b.animeVintage) - vintageSortValue(a.animeVintage));
     } else if (songListTableSort[6] === 1) {
         //mp3 link ascending
-        songList.sort((a, b) => (a.audio || "").localeCompare(b.audio || ""));
+        displayList.sort((a, b) => (a.audio || "").localeCompare(b.audio || ""));
     } else if (songListTableSort[6] === 2) {
         //mp3 link descending
-        songList.sort((a, b) => (b.audio || "").localeCompare(a.audio || ""));
+        displayList.sort((a, b) => (b.audio || "").localeCompare(a.audio || ""));
     } else if (songListTableSort[7] === 1) {
         //480 link ascending
-        songList.sort((a, b) => (a.video480 || "").localeCompare(b.video480 || ""));
+        displayList.sort((a, b) => (a.video480 || "").localeCompare(b.video480 || ""));
     } else if (songListTableSort[7] === 2) {
         //480 link descending
-        songList.sort((a, b) => (b.video480 || "").localeCompare(a.video480 || ""));
+        displayList.sort((a, b) => (b.video480 || "").localeCompare(a.video480 || ""));
     } else if (songListTableSort[8] === 1) {
         //720 link ascending
-        songList.sort((a, b) => (a.video720 || "").localeCompare(b.video720 || ""));
+        displayList.sort((a, b) => (a.video720 || "").localeCompare(b.video720 || ""));
     } else if (songListTableSort[8] === 2) {
         //720 link descending
-        songList.sort((a, b) => (b.video720 || "").localeCompare(a.video720 || ""));
+        displayList.sort((a, b) => (b.video720 || "").localeCompare(a.video720 || ""));
     }
+
     if (songListTableMode === 0) {
         let $row = $("<tr></tr>");
         $row.append($(`<th class="number">#</th>`));
@@ -3345,7 +3449,7 @@ function createSongListTable() {
         );
         $row.append($(`<th class="action"></th>`));
         $thead.append($row);
-        songList.forEach((song, i) => {
+        displayList.forEach((song, i) => {
             let $row = $("<tr></tr>");
             $row.append(
                 $("<td></td>")
@@ -3359,7 +3463,13 @@ function createSongListTable() {
                     .addClass("difficulty")
                     .text(Number.isFinite(song.songDifficulty) ? Math.floor(song.songDifficulty) : "")
             );
-            $row.append($("<td></td>").addClass("action").append(`<i class="fa fa-plus clickAble" aria-hidden="true"></i> <i class="fa fa-trash clickAble" aria-hidden="true"></i>`));
+            $row.append($("<td></td>").addClass("action").append(`
+                ${showIgnored ? '' : '<i class="fa fa-plus clickAble" aria-hidden="true"></i>'}
+                <i class="fa fa-trash clickAble" aria-hidden="true"></i>
+                ${showIgnored
+                    ? '<i class="fa fa-check clickAble" aria-hidden="true"></i>'
+                    : '<i class="fa fa-ban clickAble" aria-hidden="true"></i>'}
+            `));
             $tbody.append($row);
         });
     } else if (songListTableMode === 1) {
@@ -3965,6 +4075,14 @@ function applyStyles() {
       width: 100%;
       table-layout: fixed;
     }
+
+    #cslgSongListTable .action i.fa-ban:hover {
+        color: #f0ad4e;
+    }
+    #cslgSongListTable .action i.fa-check:hover {
+        color: #5cb85c;
+    }
+
     #cslgSongListTable thead tr {
       font-weight: bold;
     }
@@ -3981,7 +4099,7 @@ function applyStyles() {
       width: 100px;
     }
     #cslgSongListTable .action {
-      width: 35px;
+      width: 50px;
     }
     #cslgSongListTable .action i.fa-plus:hover {
       color: #5cb85c;
@@ -4120,4 +4238,11 @@ function applyStyles() {
   `;
     style.appendChild(document.createTextNode(text));
     document.head.appendChild(style);
+    $("#customSongListStyle").append(`
+        #cslgSearchCriteria {
+            color: black;
+            padding: 3px;
+            margin-right: 10px;
+        }
+    `);
 }
