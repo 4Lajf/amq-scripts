@@ -119,16 +119,16 @@ function saveIgnoredSongs() {
     localStorage.setItem(`ignoredSongs_${currentProfile}`, JSON.stringify(ignoredSongs));
 }
 
-function blockSong(index) {
-    const blockedSong = songList.splice(index, 1)[0];
-    ignoredSongs.push(blockedSong);
+function blockSong(song) {
+    songList = songList.filter(s => s !== song);
+    ignoredSongs.push(song);
     saveIgnoredSongs();
     createSongListTable();
 }
 
-function unblockSong(index) {
-    const unblockedSong = ignoredSongs.splice(index, 1)[0];
-    songList.push(unblockedSong);
+function unblockSong(song) {
+    ignoredSongs = ignoredSongs.filter(s => s !== song);
+    songList.push(song);
     saveIgnoredSongs();
     createSongListTable();
 }
@@ -889,40 +889,59 @@ $("#cslgSearchCriteria, #cslgSearchInput").on("change input", function() {
 
 $("#cslgShowIgnoredCheckbox").on("change", createSongListTable);
 
-$("#cslgSongListTable")
-.on("click", "i.fa-ban", (event) => {
-    let index = parseInt(event.target.parentElement.parentElement.querySelector("td.number").innerText) - 1;
-    blockSong(index);
-})
-.on("click", "i.fa-check", (event) => {
-    let index = parseInt(event.target.parentElement.parentElement.querySelector("td.number").innerText) - 1;
-    unblockSong(index);
-})
-.on("click", "i.fa-trash", (event) => {
-    let index = parseInt(event.target.parentElement.parentElement.querySelector("td.number").innerText) - 1;
+$("#cslgSongListTable").on("click", "i.clickAble", function(event) {
+    const $row = $(this).closest('tr');
     const showIgnored = $("#cslgShowIgnoredCheckbox").prop("checked");
-    if (showIgnored) {
-        ignoredSongs.splice(index, 1);
-        saveIgnoredSongs();
-    } else {
-        songList.splice(index, 1);
+    const currentList = showIgnored ? ignoredSongs : filterSongList();
+    const index = $row.index();
+    const song = currentList[index];
+
+    if (!song) {
+        console.error("Song not found");
+        return;
     }
+
+    if ($(this).hasClass('fa-ban')) {
+        blockSong(song);
+    } else if ($(this).hasClass('fa-check')) {
+        unblockSong(song);
+    } else if ($(this).hasClass('fa-trash')) {
+        if (showIgnored) {
+            ignoredSongs = ignoredSongs.filter(s => s !== song);
+            saveIgnoredSongs();
+        } else {
+            songList = songList.filter(s => s !== song);
+        }
+    } else if ($(this).hasClass('fa-plus')) {
+        mergedSongList.push(song);
+        mergedSongList = Array.from(new Set(mergedSongList.map((x) => JSON.stringify(x)))).map((x) => JSON.parse(x));
+    }
+
     createSongListTable();
-})
+    createMergedSongListTable();
+});
+
+$("#cslgSongListTable")
     .on("mouseenter", "i.fa-trash", (event) => {
         event.target.parentElement.parentElement.classList.add("selected");
     })
     .on("mouseleave", "i.fa-trash", (event) => {
         event.target.parentElement.parentElement.classList.remove("selected");
-    });
+    })
+    .on("mouseenter", "i.fa-ban", (event) => {
+        event.target.parentElement.parentElement.classList.add("selected");
+    })
+    .on("mouseleave", "i.fa-ban", (event) => {
+        event.target.parentElement.parentElement.classList.remove("selected");
+    })
+    .on("mouseenter", "i.fa-check", (event) => {
+        event.target.parentElement.parentElement.classList.add("selected");
+    })
+    .on("mouseleave", "i.fa-check", (event) => {
+        event.target.parentElement.parentElement.classList.remove("selected");
+    })
 
 $("#cslgSongListTable")
-    .on("click", "i.fa-plus", (event) => {
-        let index = parseInt(event.target.parentElement.parentElement.querySelector("td.number").innerText) - 1;
-        mergedSongList.push(songList[index]);
-        mergedSongList = Array.from(new Set(mergedSongList.map((x) => JSON.stringify(x)))).map((x) => JSON.parse(x));
-        createMergedSongListTable();
-    })
     .on("mouseenter", "i.fa-plus", (event) => {
         event.target.parentElement.parentElement.classList.add("selected");
     })
