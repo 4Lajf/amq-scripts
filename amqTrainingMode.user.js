@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.74
+// @version      0.75
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -60,7 +60,7 @@ let maxNewSongs24Hours = 20;
 let newSongsAdded24Hours = 0;
 let lastResetTime = Date.now();
 let potentialNewSongs = new Set();
-const version = "0.74";
+const version = "0.75";
 const saveData = validateLocalStorage("customSongListGame");
 const catboxHostDict = { 1: "nl.catbox.video", 2: "ladist1.catbox.video", 3: "vhdist1.catbox.video" };
 let currentProfile;
@@ -245,7 +245,7 @@ function initializeSingleHandleSliders() {
     sliders.forEach((slider) => {
         const $slider = $(slider.sliderId);
         const $input = $(slider.inputId);
-        
+
         $slider.slider({
             min: slider.min,
             max: slider.max,
@@ -816,7 +816,7 @@ $("#gameContainer").append(
                                     </div>
                                 </div>
                                 </div>
-                                
+
                                 <div class="col-md-6">
                                 <div class="cslg-settings-section">
                                     <h3>Song Selection</h3>
@@ -885,7 +885,7 @@ $("#gameContainer").append(
                                 </div>
                                 </div>
                             </div>
-                            
+
                             <div class="row">
                                 <div class="col-md-6">
                                 <div class="cslg-settings-section">
@@ -900,7 +900,7 @@ $("#gameContainer").append(
                                     </div>
                                 </div>
                                 </div>
-                                
+
                                 <div class="col-md-6">
                                 <div class="cslg-settings-section">
                                     <h3>Training Mode Settings</h3>
@@ -2334,8 +2334,8 @@ function prepareSongForTraining(songKeys, maxSongs) {
     if (repeatMode) {
         console.log(`Applying Repeat Mode filtering...`);
         reviewCandidates = reviewCandidates.filter((candidate) => {
-            let passes = candidate.reviewState.efactor >= repeatModeRange[0] && 
-                         candidate.reviewState.efactor <= repeatModeRange[1] && 
+            let passes = candidate.reviewState.efactor >= repeatModeRange[0] &&
+                         candidate.reviewState.efactor <= repeatModeRange[1] &&
                          candidate.reviewState.weight !== 9999;
             if (passes) {
                 console.log(`Candidate passed: ${candidate.song.songName} (E-Factor: ${candidate.reviewState.efactor}, Weight: ${candidate.reviewState.weight})`);
@@ -2397,7 +2397,7 @@ function prepareSongForTraining(songKeys, maxSongs) {
     let finalNewSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight === 9999);
     let finalCorrectSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === true);
     let finalRegularSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight !== 9999 && candidate.reviewState.isLastTryCorrect === undefined);
-    
+
     console.log(`Final selection breakdown:`);
     console.log(`- Incorrect songs: ${finalIncorrectSongs.length}`);
     console.log(`- Potential new songs: ${finalNewSongs.length}`);
@@ -2405,7 +2405,7 @@ function prepareSongForTraining(songKeys, maxSongs) {
     console.log(`- Regular songs: ${finalRegularSongs.length}`);
 
     let finalSelection = shuffleArray(reviewCandidates).map((candidate) => candidate.song);
-    
+
     console.log(`Final selection songs:`);
     finalSelection.forEach((song, index) => {
         console.log(`${index + 1}. "${song.songName}" by ${song.songArtist} (Anime: ${song.animeRomajiName})`);
