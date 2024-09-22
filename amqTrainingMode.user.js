@@ -60,7 +60,7 @@ let maxNewSongs24Hours = 20;
 let newSongsAdded24Hours = 0;
 let lastResetTime = Date.now();
 let potentialNewSongs = new Set();
-const version = "0.69";
+const version = "0.74";
 const saveData = validateLocalStorage("customSongListGame");
 const catboxHostDict = { 1: "nl.catbox.video", 2: "ladist1.catbox.video", 3: "vhdist1.catbox.video" };
 let currentProfile;
