@@ -3177,22 +3177,37 @@ function endGuessPhase(songNumber) {
                             cslMessage("§CSL6" + base10to36(index % 36) + item);
                         });
                     }
+                    // Set a flag to prevent multiple calls to endReplayPhase
+                    let replayPhaseEnded = false;
                     // Set a time limit after which the replay phase will end automatically
                     const autoEndTime = 25000; // Example: 1 second for fastSkip, 2 seconds otherwise
 
-                    setTimeout(() => {
-                         clearInterval(skipInterval)
-                        endReplayPhase(songNumber); // Automatically end replay phase after the timeout
+                    // Timeout to automatically end replay phase
+                    const timeoutId = setTimeout(() => {
+                        if (!replayPhaseEnded) {  // Only call if replay phase hasn't ended yet
+                            replayPhaseEnded = true;
+                            endReplayPhase(songNumber);  // Automatically end replay phase
+                            clearInterval(skipInterval);
+                            clearTimeout(timeoutId);
+                        }
                     }, autoEndTime);
+
 
                     setTimeout(
                         () => {
-                            if (!quiz.cslActive || !quiz.inQuiz) return reset();
+                            if (!quiz.cslActive || !quiz.inQuiz){
+                                clearTimeout(timeoutId);           // Clear the timeout as well
+                                return reset();
+                            }
                             if (quiz.soloMode) {
                                 skipInterval = setInterval(() => {
                                     if (fastSkip || quiz.skipController._toggled) {
-                                        clearInterval(skipInterval);
-                                        endReplayPhase(songNumber);
+                                        if (!replayPhaseEnded){
+                                            clearInterval(skipInterval);
+                                            clearTimeout(timeoutId);      // Cancel the automatic timeout
+                                            replayPhaseEnded = true;
+                                            endReplayPhase(songNumber);
+                                        }
                                     }
                                 }, 100);
                             }
@@ -4162,7 +4177,7 @@ function handleData(data) {
                 songArtist: song.songArtist,
                 songName: song.songName,
                 songType: song.songType,
-                songTypeNumber: song.typeNumber,
+                typeNumber: song.typeNumber,
                 songDifficulty: song.songDifficulty,
                 animeType: song.animeType,
                 animeVintage: song.animeVintage,
@@ -4180,6 +4195,7 @@ function handleData(data) {
                 video720: song.HQ,
                 correctGuess: true,
                 incorrectGuess: true,
+                rating: song.rating,
             });
         }
         for (let song of finalSongList) {
