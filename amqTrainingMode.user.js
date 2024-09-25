@@ -47,6 +47,7 @@ let loadInterval = setInterval(() => {
 let previousAttemptData = null;
 let isSearchMode = true;
 let mySongList = [];
+let finalSongList = [];
 let correctSongsPerGame = 0;
 let originalWeight = null;
 let currentSongKey = null;
@@ -532,6 +533,9 @@ function filterSongList() {
         const searchCriteria = $("#cslgSearchCriteria").val();
         return songList.filter((song) => {
             const lowerCaseFilter = currentSearchFilter.toLowerCase();
+            console.log("song info :", song);
+            console.log("lowerCaseFilter:", lowerCaseFilter);
+            console.log("searchCriteria:", searchCriteria);
             switch (searchCriteria) {
                 case "songName":
                     return song.songName.toLowerCase().includes(lowerCaseFilter);
@@ -551,7 +555,7 @@ function filterSongList() {
                         song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
                         song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
                         songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter) ||
-                        song.animeVintage.toLowerCase().includes(lowerCaseFilter)
+                        song.animeVintage.toLowerCase().includes(lowerCaseFilter) 
                     );
             }
         });
@@ -1182,7 +1186,22 @@ function validateTrainingStart() {
     let special = $("#cslgSettingsSpecialCheckbox").prop("checked");
 
     let filteredSongs = mySongList.filter((song) => {
-        let passesTypeFilter = (ops && song.songType === 1) || (eds && song.songType === 2) || (ins && song.songType === 3);
+        // Type check for song.songType (can be either string or number)
+        let passesTypeFilter = false;
+        if (typeof song.songType === 'number') {
+            // Handle as a number (assuming 1 = Opening, 2 = Ending, 3 = Insert)
+            passesTypeFilter = (ops && song.songType === 1) ||
+                (eds && song.songType === 2) ||
+                (ins && song.songType === 3);
+        } else if (typeof song.songType === 'string') {
+            // Handle as a string (check if it contains "Opening", "Ending", or "Insert")
+            let songType = String(song.songType);  // Ensure it's a string
+            passesTypeFilter = (ops && songType.includes("Opening")) ||
+                (eds && songType.includes("Ending")) ||
+                (ins && songType.includes("Insert"));
+        } else {
+            console.log("Unknown songType format:", song.songType);
+        }
         let passesAnimeTypeFilter = (tv && song.animeType === "TV") || (movie && song.animeType === "Movie") || (ova && song.animeType === "OVA") || (ona && song.animeType === "ONA") || (special && song.animeType === "Special");
         return passesTypeFilter && passesAnimeTypeFilter && difficultyFilter(song, difficultyRange[0], difficultyRange[1]);
     });
@@ -1320,7 +1339,8 @@ $("#cslgFileUpload").on("change", function () {
             try {
                 mySongList = [];
                 handleData(JSON.parse(data));
-                mySongList = songList;
+                console.log("data: ", data);
+                mySongList = finalSongList;
                 songList = [];
                 if (mySongList.length === 0) {
                     messageDisplayer.displayMessage("0 song links found");
@@ -1528,6 +1548,7 @@ $("#cslgSongListTable").on("click", "i.clickAble", function (event) {
             songList = songList.filter(s => s !== song);
         } else {
             mySongList = mySongList.filter(s => s !== song);
+            console.log("My Song list: " , mySongList);
         }
     } else if ($(this).hasClass("fa-plus")) {
         if (isSearchMode) {
@@ -2216,7 +2237,7 @@ function adjustWeightOnUserInteraction(factor) {
         return;
     }
 
-    const currentSongData = songList[currentSongListIndex];
+    const currentSongData = mySongList[currentSongListIndex];
 
     if (!currentSongData) {
         console.error("Current song data not found");
@@ -2277,7 +2298,7 @@ function revertWeight() {
 
         const currentSongNumber = document.querySelector("#qpCurrentSongCount").textContent;
         const currentSongListIndex = songOrder[currentSongNumber];
-        const currentSongData = songList[currentSongListIndex];
+        const currentSongData = finalSongList[currentSongListIndex];
 
         gameChat.systemMessage(`Song weight reverted for "${currentSongData.songName}"`);
         console.log(`Song weight reverted for "${currentSongData.songName}". Old: ${oldWeight.toFixed(2)} | New: ${newWeight.toFixed(2)}`, reviewData[songKey]);
@@ -2386,6 +2407,7 @@ function prepareSongForTraining(songKeys, maxSongs) {
             potentialNewSongs.add(`${candidate.song.songArtist}_${candidate.song.songName}`);
             potentialNewSongsCount++;
         }
+        console.log("candidate", candidate);
     });
     console.log(`Added ${potentialNewSongsCount} potential new songs`);
 
@@ -2771,13 +2793,28 @@ function validateStart() {
     let special = $("#cslgSettingsSpecialCheckbox").prop("checked");
 
     let filteredSongs = mySongList.filter((song) => {
-        let passesTypeFilter = (ops && song.songType === 1) || (eds && song.songType === 2) || (ins && song.songType === 3);
+        // Type check for song.songType (can be either string or number)
+        let passesTypeFilter = false;
+        if (typeof song.songType === 'number') {
+            // Handle as a number (assuming 1 = Opening, 2 = Ending, 3 = Insert)
+            passesTypeFilter = (ops && song.songType === 1) ||
+                (eds && song.songType === 2) ||
+                (ins && song.songType === 3);
+        } else if (typeof song.songType === 'string') {
+            // Handle as a string (check if it contains "Opening", "Ending", or "Insert")
+            let songType = String(song.songType);  // Ensure it's a string
+            passesTypeFilter = (ops && songType.includes("Opening")) ||
+                (eds && songType.includes("Ending")) ||
+                (ins && songType.includes("Insert"));
+        } else {
+            console.log("Unknown songType format:", song.songType);
+        }
         let passesAnimeTypeFilter = (tv && song.animeType === "TV") || (movie && song.animeType === "Movie") || (ova && song.animeType === "OVA") || (ona && song.animeType === "ONA") || (special && song.animeType === "Special");
         return passesTypeFilter && passesAnimeTypeFilter && difficultyFilter(song, difficultyRange[0], difficultyRange[1]);
     });
 
     if (filteredSongs.length === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs match the specified criteria");
+        return messageDisplayer.displayMessage("Unable to start", "0 songs match the specified criteria");
     }
 
     if (songOrderType === "random") {
@@ -2808,13 +2845,21 @@ function validateStart() {
 function startQuiz() {
     if (!lobby.inLobby) return;
     if (lobby.soloMode) {
-        if (!songList.length) return;
+        if (mySongList.length){
+            finalSongList = mySongList;
+        }
+        else if (songList.length){
+            finalSongList = songList;
+        }
+        else{
+            return;
+        }
     } else {
         cslMultiplayer.host = lobby.hostName;
     }
     let song;
     if (lobby.isHost) {
-        song = songList[songOrder[1]];
+        song = finalSongList[songOrder[1]];
     }
     skipping = false;
     quiz.cslActive = true;
@@ -2971,7 +3016,7 @@ function playSong(songNumber) {
         if (songNumber < totalSongs) {
             if (quiz.soloMode) {
                 readySong(songNumber + 1);
-                let nextSong = songList[songOrder[songNumber + 1]];
+                let nextSong = finalSongList[songOrder[songNumber + 1]];
                 fireListener("quiz next video info", {
                     playLength: guessTime,
                     playbackSpeed: 1,
@@ -2993,7 +3038,7 @@ function playSong(songNumber) {
             } else {
                 readySong(songNumber + 1);
                 if (quiz.isHost) {
-                    let nextSong = songList[songOrder[songNumber + 1]];
+                    let nextSong = finalSongList[songOrder[songNumber + 1]];
                     let message = `${songNumber + 1}§${getStartPoint()}§${nextSong.audio || ""}§${nextSong.video480 || ""}§${nextSong.video720 || ""}`;
                     splitIntoChunks(btoa(encodeURIComponent(message)) + "$", 144).forEach((item, index) => {
                         cslMessage("§CSL3" + base10to36(index % 36) + item);
@@ -3009,7 +3054,8 @@ function endGuessPhase(songNumber) {
     if (!quiz.cslActive || !quiz.inQuiz) return reset();
     let song;
     if (quiz.isHost) {
-        song = songList[songOrder[songNumber]];
+        song = finalSongList[songOrder[songNumber]];
+        console.log("song found ", song);
     }
     fireListener("guess phase over");
     if (!quiz.soloMode && quiz.inQuiz && !quiz.isSpectator) {
@@ -3048,7 +3094,8 @@ function endGuessPhase(songNumber) {
             if (!quiz.soloMode && quiz.isHost) {
                 let message = `${song.animeRomajiName || ""}\n${song.animeEnglishName || ""}\n${(song.altAnimeNames || []).join("\t")}\n${(song.altAnimeNamesAnswers || []).join("\t")}\n${song.songArtist || ""}\n${song.songName || ""}\n${
                     song.songType || ""
-                }\n${song.songTypeNumber || ""}\n${song.songDifficulty || ""}\n${song.animeType || ""}\n${song.animeVintage || ""}\n${song.annId || ""}\n${song.malId || ""}\n${song.kitsuId || ""}\n${song.aniListId || ""}\n${
+                }\n${song.songTypeNumber || ""}\n${song.songDifficulty || ""}\n${song.animeType || ""}\n${song.animeVintage || ""}\n${song.annId || ""}\n${song.malId || ""}\n${song.kitsuId || ""}\n${song.aniListId ||
+                     ""}\n${
                     Array.isArray(song.animeTags) ? song.animeTags.join(",") : ""
                 }\n${Array.isArray(song.animeGenre) ? song.animeGenre.join(",") : ""}\n${song.audio || ""}\n${song.video480 || ""}\n${song.video720 || ""}`;
                 splitIntoChunks(btoa(encodeURIComponent(message)) + "$", 144).forEach((item, index) => {
@@ -3086,10 +3133,10 @@ function endGuessPhase(songNumber) {
                                     },
                                 },
                                 type: song.songType,
-                                typeNumber: song.songTypeNumber,
+                                typeNumber:song.typeNumber,
                                 annId: song.annId,
                                 highRisk: 0,
-                                animeScore: null,
+                                animeScore: song.rating,
                                 animeType: song.animeType,
                                 vintage: song.animeVintage,
                                 animeDifficulty: song.songDifficulty,
@@ -3101,7 +3148,7 @@ function endGuessPhase(songNumber) {
                                 dub: song.dub,
                                 siteIds: {
                                     annId: song.annId,
-                                    malId: song.malId,
+                                    malId: song.malIdt,
                                     kitsuId: song.kitsuId,
                                     aniListId: song.aniListId,
                                 },
@@ -3127,6 +3174,7 @@ function endGuessPhase(songNumber) {
                             });
                         }
                         fireListener("answer results", data);
+                        console.log("data song : ", data);
                     } else if (quiz.isHost) {
                         let list = [];
                         for (let id of Object.keys(correct)) {
@@ -3192,6 +3240,7 @@ function endReplayPhase(songNumber) {
                 fireListener("quiz end result", data);
             },
             fastSkip ? 2000 : 5000
+
         );
         setTimeout(
             () => {
@@ -3209,7 +3258,10 @@ function endReplayPhase(songNumber) {
 // fire all event listeners (including scripts)
 function fireListener(type, data) {
     try {
+        console.log(`Firing listener for event type: "${type}"`);
+        console.log("Data being passed:", data);
         for (let listener of socket.listners[type]) {
+            console.log("Listener fire method:", listener.fire.toString());
             listener.fire(data);
         }
     } catch (error) {
@@ -3530,7 +3582,7 @@ function createGroupSlotMap(players) {
 
 // check if the player's answer is correct
 function isCorrectAnswer(songNumber, answer) {
-    let song = songList[songOrder[songNumber]];
+    let song = finalSongList[songOrder[songNumber]];
     if (!answer) {
         reviewSong(song, false);
         return false;
@@ -3888,6 +3940,7 @@ function miscSetup() {
         songOptionsBackdrop.addClass("show");
     });
 
+
     function closeSongOptions() {
         songOptionsPopup.removeClass("show");
         songOptionsBackdrop.removeClass("show");
@@ -4058,7 +4111,22 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
         .then((res) => res.json())
         .then((json) => {
             handleData(json);
-            songList = songList.filter((song) => songTypeFilter(song, ops, eds, ins));
+            console.log("final song list : " , finalSongList);
+            songList = finalSongList.filter((song) => {
+            // Check and set the songType and typeNumber
+            let songType = song.songType;
+            if (songType.startsWith("Opening")) {
+                song.songType = 1;
+                song.typeNumber = parseInt(songType.replace(/\D/g, '')); // Extract the number
+            } else if (songType.startsWith("Ending")) {
+                song.songType = 2;
+                song.typeNumber = parseInt(songType.replace(/\D/g, ''));
+            } else if (songType === "Insert Song") {
+                song.songType = 3;
+                song.typeNumber = null; // No type number for Insert Song
+            }});
+            songList = finalSongList.filter((song) => songTypeFilter(song, ops, eds, ins));
+            console.log("song list : " , songList);
             setSongListTableSort();
             if (!Array.isArray(json)) {
                 $("#cslgSongListCount").text("Songs: 0");
@@ -4083,22 +4151,22 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
 }
 
 function handleData(data) {
-    songList = [];
+    finalSongList = [];
     if (!data) return;
     loadIgnoredSongs(); // Load the latest ignored songs
     // anisongdb structure
     if (Array.isArray(data) && data.length && data[0].animeJPName) {
         data = data.filter((song) => song.audio || song.MQ || song.HQ);
         for (let song of data) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.animeJPName,
                 animeEnglishName: song.animeENName,
                 altAnimeNames: [].concat(song.animeJPName, song.animeENName, song.animeAltName || []),
                 altAnimeNamesAnswers: [],
                 songArtist: song.songArtist,
                 songName: song.songName,
-                songType: Object({ O: 1, E: 2, I: 3 })[song.songType[0]],
-                songTypeNumber: song.songType[0] === "I" ? null : parseInt(song.songType.split(" ")[1]),
+                songType: song.songType,
+                songTypeNumber: song.typeNumber,
                 songDifficulty: song.songDifficulty,
                 animeType: song.animeType,
                 animeVintage: song.animeVintage,
@@ -4106,8 +4174,8 @@ function handleData(data) {
                 malId: song.linked_ids?.myanimelist,
                 kitsuId: song.linked_ids?.kitsu,
                 aniListId: song.linked_ids?.anilist,
-                animeTags: [],
-                animeGenre: [],
+                animeTags: song.animeTags,
+                animeGenre: song.animeGenre,
                 rebroadcast: null,
                 dub: null,
                 startPoint: null,
@@ -4118,9 +4186,9 @@ function handleData(data) {
                 incorrectGuess: true,
             });
         }
-        for (let song of songList) {
+        for (let song of finalSongList) {
             let otherAnswers = new Set();
-            for (let s of songList) {
+            for (let s of finalSongList) {
                 if (s.songName === song.songName && s.songArtist === song.songArtist) {
                     s.altAnimeNames.forEach((x) => otherAnswers.add(x));
                 }
@@ -4131,7 +4199,7 @@ function handleData(data) {
     // official amq song export structure
     else if (typeof data === "object" && data.roomName && data.startTime && data.songs) {
         for (let song of data.songs) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.songInfo.animeNames.romaji,
                 animeEnglishName: song.songInfo.animeNames.english,
                 altAnimeNames: song.songInfo.altAnimeNames || [song.songInfo.animeNames.romaji, song.songInfo.animeNames.english],
@@ -4163,7 +4231,7 @@ function handleData(data) {
     // joseph song export script structure
     else if (Array.isArray(data) && data.length && data[0].gameMode) {
         for (let song of data) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.anime.romaji,
                 animeEnglishName: song.anime.english,
                 altAnimeNames: song.altAnswers || [song.anime.romaji, song.anime.english],
@@ -4195,7 +4263,7 @@ function handleData(data) {
     // blissfulyoshi ranked data export structure
     else if (Array.isArray(data) && data.length && data[0].animeRomaji) {
         for (let song of data) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.animeRomaji,
                 animeEnglishName: song.animeEng,
                 altAnimeNames: [song.animeRomaji, song.animeEng],
@@ -4211,8 +4279,8 @@ function handleData(data) {
                 malId: song.malId,
                 kitsuId: song.kitsuId,
                 aniListId: song.aniListId,
-                animeTags: [],
-                animeGenre: [],
+                animeTags: song.animeTags,
+                animeGenre: song.animeGenres,
                 rebroadcast: null,
                 dub: null,
                 startPoint: null,
@@ -4227,7 +4295,7 @@ function handleData(data) {
     // kempanator answer stats script export structure
     else if (typeof data === "object" && data.songHistory && data.playerInfo) {
         for (let song of Object.values(data.songHistory)) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.animeRomajiName,
                 animeEnglishName: song.animeEnglishName,
                 altAnimeNames: song.altAnimeNames || [],
@@ -4258,12 +4326,12 @@ function handleData(data) {
     }
     // this script structure
     else if (Array.isArray(data) && data.length && data[0].animeRomajiName) {
-        songList = data;
+        finalSongList = data;
     }
     // Filter out ignored songs
-    songList = songList.filter((song) => !ignoredSongs.some((ignoredSong) => ignoredSong.songName === song.songName && ignoredSong.songArtist === song.songArtist && ignoredSong.animeRomajiName === song.animeRomajiName));
+    finalSongList = finalSongList.filter((song) => !ignoredSongs.some((ignoredSong) => ignoredSong.songName === song.songName && ignoredSong.songArtist === song.songArtist && ignoredSong.animeRomajiName === song.animeRomajiName));
 
-    songList = songList.filter((song) => song.audio || song.video480 || song.video720);
+    finalSongList = finalSongList.filter((song) => song.audio || song.video480 || song.video720);
 }
 
 // create song list table
@@ -4446,7 +4514,7 @@ function filterSongList(list) {
                 case "songArtist":
                     return song.songArtist.toLowerCase().includes(lowerCaseFilter);
                 case "animeName":
-                    return song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) || song.animeEnglishName.toLowerCase().includes(lowerCaseFilter);
+                    return song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) || song.animeRomajiName.toLowerCase().includes(lowerCaseFilter);
                 case "songType":
                     return songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter);
                 case "animeVintage":
@@ -4456,7 +4524,7 @@ function filterSongList(list) {
                     return (
                         song.songName.toLowerCase().includes(lowerCaseFilter) ||
                         song.songArtist.toLowerCase().includes(lowerCaseFilter) ||
-                        song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
+                        song.animeRomaji.toLowerCase().includes(lowerCaseFilter) ||
                         song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
                         songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter) ||
                         song.animeVintage.toLowerCase().includes(lowerCaseFilter)
@@ -4495,14 +4563,14 @@ function createMergedSongListTable() {
 function createAnswerTable() {
     let $tbody = $("#cslgAnswerTable tbody");
     $tbody.empty();
-    if (songList.length === 0) {
+    if (finalSongList.length === 0) {
         $("#cslgAnswerText").text("No list loaded");
     } else if (autocomplete.length === 0) {
         $("#cslgAnswerText").text("Fetch autocomplete first");
     } else {
         let animeList = new Set();
         let missingAnimeList = [];
-        for (let song of songList) {
+        for (let song of finalSongList) {
             let answers = [song.animeEnglishName, song.animeRomajiName].concat(song.altAnimeNames, song.altAnimeNamesAnswers);
             answers.forEach((x) => animeList.add(x));
         }
@@ -4614,6 +4682,9 @@ function songTypeText(type, typeNumber) {
 // input 3 links, return formatted catbox link object
 function createCatboxLinkObject(audio, video480, video720) {
     let links = {};
+    console.log("audio : ", audio);
+    console.log("video480 : ", video480);
+    console.log("video720 : ", video720);
     if (fileHostOverride) {
         if (audio) links["0"] = "https://" + catboxHostDict[fileHostOverride] + "/" + audio.split("/").slice(-1)[0];
         if (video480) links["480"] = "https://" + catboxHostDict[fileHostOverride] + "/" + video480.split("/").slice(-1)[0];
@@ -4784,7 +4855,11 @@ async function getMalIdsFromMyanimelist(username) {
                 $("#cslgListImportText").text(`MAL API Error: ${result.error}`);
             } else {
                 for (let anime of result.data) {
-                    malIds.push(anime.node.id);
+                    console.log("anime data", anime);
+                     const malIdEntry = {
+                         malId: anime.nodeId,
+                     };
+                    malIds.push(malIdEntry);
                 }
                 nextPage = result.paging.next;
             }
@@ -4820,7 +4895,13 @@ async function getMalIdsFromAnilist(username) {
         if (data) {
             for (let item of data.mediaList) {
                 if (item.media.idMal) {
-                    malIds.push(item.media.idMal);
+                     const malIdEntry = {
+                         malId: item.media.idMal,
+                         genres: item.media.genres,
+                         tags: item.media.tags.map(tag => tag.name), // Extracting tag names
+                         rating: (item.media.averageScore/10).toFixed(1)
+                     };
+                    malIds.push(malIdEntry);
                 }
             }
             if (data.pageInfo.hasNextPage) {
@@ -4850,6 +4931,11 @@ function getAnilistData(username, statuses, pageNumber) {
                     media {
                         id
                         idMal
+                        genres
+                        tags{
+                          name
+                        }
+                        averageScore
                     }
                 }
             }
@@ -4873,19 +4959,56 @@ async function getSongListFromMalIds(malIds) {
     if (malIds.length === 0) return;
     let url = "https://anisongdb.com/api/malIDs_request";
     let idsProcessed = 0;
+    console.log("malIds: ", malIds);
     for (let i = 0; i < malIds.length; i += 500) {
         let segment = malIds.slice(i, i + 500);
         idsProcessed += segment.length;
+        // Extract only the malId from each entry in the segment
+        let malIdSegment = segment.map(item => item.malId);
         let data = {
             method: "POST",
             headers: { Accept: "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify({ malIds: segment }),
+            body: JSON.stringify({ malIds: malIdSegment }),
         };
         await fetch(url, data)
             .then((res) => res.json())
             .then((json) => {
                 if (Array.isArray(json)) {
-                    importedSongList = importedSongList.concat(json);
+                     for (let anime of json) {
+                         // Assuming anime is structured correctly to find the right item
+                         const animeIndex = segment.findIndex(item => item.malId === anime.linked_ids.myanimelist);
+                         if (animeIndex !== -1) {
+                             let songType = anime.songType;
+                             // Check and set the songType and typeNumber
+                             if (songType.startsWith("Opening")) {
+                                 anime.songType = 1;
+                                 anime.typeNumber = parseInt(songType.replace(/\D/g, '')); // Extract the number
+                             } else if (songType.startsWith("Ending")) {
+                                 anime.songType = 2;
+                                 anime.typeNumber = parseInt(songType.replace(/\D/g, ''));
+                             } else if (songType === "Insert Song") {
+                                 anime.songType = 3;
+                                 anime.typeNumber = null; // No type number for Insert Song
+                             }
+                             anime.animeRomajiName = anime.animeJPName;
+                             anime.animeEnglishName = anime.animeENName;
+                             anime.video480 = anime.MQ;
+                             anime.video720 = anime.HQ;
+                             anime.altAnimeNames = [].concat(anime.animeJPName, anime.animeENName, anime.animeAltName || []);
+                             anime.altAnimeNamesAnswers = [];
+                             anime.annId = anime.annId;
+                             anime.malId = anime.linked_ids?.myanimelist;
+                             anime.kitsuId =  anime.linked_ids?.kitsu;
+                             anime.aniListId = anime.linked_ids?.anilist;
+                             // Enrich the anime data with genres and tags
+                             importedSongList.push({
+                                 ...anime, // Spread the existing anime data
+                                 animeGenre: segment[animeIndex].genres, // Use the genres from malIds
+                                 animeTags: segment[animeIndex].tags, // Use the tags from malIds
+                                 rating: segment[animeIndex].rating,
+                             });
+                         }
+                     }
                     $("#cslgListImportText").text(`Anime: ${idsProcessed} / ${malIds.length} | Songs: ${importedSongList.length}`);
                 } else {
                     $("#cslgListImportText").text("anisongdb error");
@@ -4912,7 +5035,9 @@ async function startImport() {
             let username = $("#cslgListImportUsernameInput").val().trim();
             if (username) {
                 let malIds = await getMalIdsFromMyanimelist(username);
+                console.log("mailIds : ", malIds);
                 await getSongListFromMalIds(malIds);
+
             } else {
                 $("#cslgListImportText").text("Input Myanimelist Username");
             }
