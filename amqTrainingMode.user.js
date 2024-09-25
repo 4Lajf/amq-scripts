@@ -533,9 +533,6 @@ function filterSongList() {
         const searchCriteria = $("#cslgSearchCriteria").val();
         return songList.filter((song) => {
             const lowerCaseFilter = currentSearchFilter.toLowerCase();
-            console.log("song info :", song);
-            console.log("lowerCaseFilter:", lowerCaseFilter);
-            console.log("searchCriteria:", searchCriteria);
             switch (searchCriteria) {
                 case "songName":
                     return song.songName.toLowerCase().includes(lowerCaseFilter);
@@ -1226,7 +1223,6 @@ function validateTrainingStart() {
     $("#cslgSettingsModal").modal("hide");
     console.log("song order: ", songOrder);
     if (lobby.soloMode) {
-        console.log(mySongList);
         startQuiz(filteredSongs);
     } else if (lobby.isHost) {
         cslMessage("§CSL0" + btoa(`${showSelection}§${currentSong}§${totalSongs}§${guessTime}§${extraGuessTime}§${fastSkip ? "1" : "0"}`));
@@ -1339,7 +1335,6 @@ $("#cslgFileUpload").on("change", function () {
             try {
                 mySongList = [];
                 handleData(JSON.parse(data));
-                console.log("data: ", data);
                 mySongList = finalSongList;
                 songList = [];
                 if (mySongList.length === 0) {
@@ -1548,7 +1543,6 @@ $("#cslgSongListTable").on("click", "i.clickAble", function (event) {
             songList = songList.filter(s => s !== song);
         } else {
             mySongList = mySongList.filter(s => s !== song);
-            console.log("My Song list: " , mySongList);
         }
     } else if ($(this).hasClass("fa-plus")) {
         if (isSearchMode) {
@@ -3174,7 +3168,6 @@ function endGuessPhase(songNumber) {
                             });
                         }
                         fireListener("answer results", data);
-                        console.log("data song : ", data);
                     } else if (quiz.isHost) {
                         let list = [];
                         for (let id of Object.keys(correct)) {
@@ -3184,12 +3177,20 @@ function endGuessPhase(songNumber) {
                             cslMessage("§CSL6" + base10to36(index % 36) + item);
                         });
                     }
+                    // Set a time limit after which the replay phase will end automatically
+                    const autoEndTime = 25000; // Example: 1 second for fastSkip, 2 seconds otherwise
+
+                    setTimeout(() => {
+                         clearInterval(skipInterval)
+                        endReplayPhase(songNumber); // Automatically end replay phase after the timeout
+                    }, autoEndTime);
+
                     setTimeout(
                         () => {
                             if (!quiz.cslActive || !quiz.inQuiz) return reset();
                             if (quiz.soloMode) {
                                 skipInterval = setInterval(() => {
-                                    if (quiz.skipController._toggled) {
+                                    if (fastSkip || quiz.skipController._toggled) {
                                         clearInterval(skipInterval);
                                         endReplayPhase(songNumber);
                                     }
@@ -3258,10 +3259,7 @@ function endReplayPhase(songNumber) {
 // fire all event listeners (including scripts)
 function fireListener(type, data) {
     try {
-        console.log(`Firing listener for event type: "${type}"`);
-        console.log("Data being passed:", data);
         for (let listener of socket.listners[type]) {
-            console.log("Listener fire method:", listener.fire.toString());
             listener.fire(data);
         }
     } catch (error) {
@@ -4111,7 +4109,6 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
         .then((res) => res.json())
         .then((json) => {
             handleData(json);
-            console.log("final song list : " , finalSongList);
             songList = finalSongList.filter((song) => {
             // Check and set the songType and typeNumber
             let songType = song.songType;
@@ -4126,7 +4123,6 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
                 song.typeNumber = null; // No type number for Insert Song
             }});
             songList = finalSongList.filter((song) => songTypeFilter(song, ops, eds, ins));
-            console.log("song list : " , songList);
             setSongListTableSort();
             if (!Array.isArray(json)) {
                 $("#cslgSongListCount").text("Songs: 0");
@@ -4682,9 +4678,6 @@ function songTypeText(type, typeNumber) {
 // input 3 links, return formatted catbox link object
 function createCatboxLinkObject(audio, video480, video720) {
     let links = {};
-    console.log("audio : ", audio);
-    console.log("video480 : ", video480);
-    console.log("video720 : ", video720);
     if (fileHostOverride) {
         if (audio) links["0"] = "https://" + catboxHostDict[fileHostOverride] + "/" + audio.split("/").slice(-1)[0];
         if (video480) links["480"] = "https://" + catboxHostDict[fileHostOverride] + "/" + video480.split("/").slice(-1)[0];
@@ -4855,7 +4848,6 @@ async function getMalIdsFromMyanimelist(username) {
                 $("#cslgListImportText").text(`MAL API Error: ${result.error}`);
             } else {
                 for (let anime of result.data) {
-                    console.log("anime data", anime);
                      const malIdEntry = {
                          malId: anime.nodeId,
                      };
@@ -5035,7 +5027,6 @@ async function startImport() {
             let username = $("#cslgListImportUsernameInput").val().trim();
             if (username) {
                 let malIds = await getMalIdsFromMyanimelist(username);
-                console.log("mailIds : ", malIds);
                 await getSongListFromMalIds(malIds);
 
             } else {
