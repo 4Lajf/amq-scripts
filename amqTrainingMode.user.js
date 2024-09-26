@@ -2362,11 +2362,16 @@ function prepareSongForTraining(songKeys, maxSongs) {
         console.log(`After shuffle and slice: ${reviewCandidates.length} candidates`);
     } else {
         console.log(`Normal mode selection...`);
-        let incorrectSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === false);
+        console.log(" review candidates : ", reviewCandidates);
+        // By default isLastTryCorrect is set to False to be sure that the song is not correct we have to check that it is not a new song also
+        let incorrectSongs = reviewCandidates.filter((candidate) =>  candidate.reviewState.isLastTryCorrect === false &&  candidate.reviewState.weight != 9999);
+        console.log(" incorrectSongs : ", incorrectSongs);
         let newSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight === 9999);
+        console.log(" newSongs : ", newSongs);
         let correctSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === true);
-        let regularSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight !== 9999 && candidate.reviewState.isLastTryCorrect === undefined);
-
+        console.log(" correctSongs : ", correctSongs);
+        let regularSongs = reviewCandidates.filter((candidate) =>  candidate.reviewState.weight != 9999);
+        console.log(" regularSongs : ", regularSongs);
         console.log(`Initial counts: ${incorrectSongs.length} incorrect, ${newSongs.length} new, ${correctSongs.length} correct, ${regularSongs.length} regular`);
 
         incorrectSongs = shuffleArray(incorrectSongs);
@@ -2374,45 +2379,38 @@ function prepareSongForTraining(songKeys, maxSongs) {
         correctSongs = shuffleArray(correctSongs);
         regularSongs = shuffleArray(regularSongs);
 
-        console.log(`Combining priority songs...`);
-        let prioritySongs = shuffleArray([...incorrectSongs.slice(0, incorrectSongsPerGame), ...newSongs, ...correctSongs.slice(0, correctSongsPerGame)]);
-        console.log(`Priority songs: ${prioritySongs.length}`);
+        let maxIncorrectSongsToAdd = incorrectSongsPerGame;
+        console.log(`Max incorrect songs to add: ${maxIncorrectSongsToAdd}`);
 
-        let maxPrioritySongsToAdd = Math.min(prioritySongs.length, maxSongs, incorrectSongsPerGame + correctSongsPerGame + (maxNewSongs24Hours - newSongsAdded24Hours));
-        console.log(`Max priority songs to add: ${maxPrioritySongsToAdd}`);
+        let selectedIncorrectSongs = incorrectSongs.slice(0, maxIncorrectSongsToAdd);
+        console.log(`Selected incorrect songs: ${selectedIncorrectSongs.length}`);
 
-        let selectedPrioritySongs = prioritySongs.slice(0, maxPrioritySongsToAdd);
-        console.log(`Selected priority songs: ${selectedPrioritySongs.length}`);
+        let maxCorrectSongsToAdd = correctSongsPerGame;
+        console.log(`Max correct songs to add: ${maxCorrectSongsToAdd}`);
 
-        let maxRegularSongsToAdd = maxSongs - selectedPrioritySongs.length;
-        console.log(`Max regular songs to add: ${maxRegularSongsToAdd}`);
+        let selectedCorrectSongs = correctSongs.slice(0, maxCorrectSongsToAdd);
+        console.log(`Selected incorrect songs: ${selectedCorrectSongs.length}`);
 
-        let selectedRegularSongs = regularSongs.slice(0, maxRegularSongsToAdd);
-        console.log(`Selected regular songs: ${selectedRegularSongs.length}`);
+        console.log(`Adding new songs...`);
+        let minLimitNewSong = Math.max(0,maxNewSongs24Hours - newSongsAdded24Hours);
+        let maxUserSettingNewSong = maxSongs - (incorrectSongsPerGame + correctSongsPerGame);
+        let maxNewSongsToAdd = Math.min(maxNewSongs24Hours, minLimitNewSong,maxUserSettingNewSong);
+        console.log(`Max new songs to add: ${maxNewSongsToAdd}`);
+        let selectedNewSongs = newSongs.slice(0, maxNewSongsToAdd);
+        console.log(`Selected new songs: ${selectedNewSongs.length}`);
 
-        reviewCandidates = [...selectedPrioritySongs, ...selectedRegularSongs];
+        reviewCandidates = [...selectedNewSongs, ...selectedCorrectSongs, ...selectedIncorrectSongs];
         console.log(`Total selected candidates: ${reviewCandidates.length}`);
     }
-
-    console.log(`Adding potential new songs...`);
-    let potentialNewSongsCount = 0;
-    reviewCandidates.forEach((candidate) => {
-        if (candidate.reviewState.weight === 9999) {
-            potentialNewSongs.add(`${candidate.song.songArtist}_${candidate.song.songName}`);
-            potentialNewSongsCount++;
-        }
-        console.log("candidate", candidate);
-    });
-    console.log(`Added ${potentialNewSongsCount} potential new songs`);
 
     if (reviewCandidates.length < maxSongs) {
         console.warn(`Warning: Only ${reviewCandidates.length} songs selected out of ${maxSongs} requested. There may not be enough songs in the specified categories or difficulty range.`);
     }
 
-    let finalIncorrectSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === false);
+    let finalIncorrectSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === false && candidate.reviewState.weight != 9999);
     let finalNewSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight === 9999);
     let finalCorrectSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === true);
-    let finalRegularSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight !== 9999 && candidate.reviewState.isLastTryCorrect === undefined);
+    let finalRegularSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight !== 9999);
 
     console.log(`Final selection breakdown:`);
     console.log(`- Incorrect songs: ${finalIncorrectSongs.length}`);
@@ -4075,6 +4073,9 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
         };
     } else if (mode === "artist") {
         url = "https://anisongdb.com/api/search_request";
+        console.log("query : ", query);
+        console.log("minGroupMembers : ", minGroupMembers);
+        console.log("maxOtherPeople : ", maxOtherPeople);
         json.artist_search_filter = {
             search: query,
             partial_match: partial,
@@ -4537,7 +4538,7 @@ function filterSongList(list) {
                     return (
                         song.songName.toLowerCase().includes(lowerCaseFilter) ||
                         song.songArtist.toLowerCase().includes(lowerCaseFilter) ||
-                        song.animeRomaji.toLowerCase().includes(lowerCaseFilter) ||
+                        song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
                         song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
                         songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter) ||
                         song.animeVintage.toLowerCase().includes(lowerCaseFilter)
