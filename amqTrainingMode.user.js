@@ -4139,6 +4139,7 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
             }});
             songList = finalSongList.filter((song) => songTypeFilter(song, ops, eds, ins));
             setSongListTableSort();
+            console.log("song list ", songList);
             if (!Array.isArray(json)) {
                 $("#cslgSongListCount").text("Songs: 0");
                 $("#cslgSongListTable tbody").empty();
@@ -4185,8 +4186,8 @@ function handleData(data) {
                 malId: song.linked_ids?.myanimelist,
                 kitsuId: song.linked_ids?.kitsu,
                 aniListId: song.linked_ids?.anilist,
-                animeTags: song.animeTags,
-                animeGenre: song.animeGenre,
+                animeTags: song.animeTags || [],
+                animeGenre: song.animeGenre || [],
                 rebroadcast: null,
                 dub: null,
                 startPoint: null,
