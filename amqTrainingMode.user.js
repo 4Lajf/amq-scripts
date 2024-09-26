@@ -60,7 +60,7 @@ let statsModal;
 let maxNewSongs24Hours = 20;
 let newSongsAdded24Hours = 0;
 let lastResetTime = Date.now();
-let potentialNewSongs = new Set();
+let selectedSetNewSongs = new Set();
 const version = "0.75";
 const saveData = validateLocalStorage("customSongListGame");
 const catboxHostDict = { 1: "nl.catbox.video", 2: "ladist1.catbox.video", 3: "vhdist1.catbox.video" };
@@ -1807,9 +1807,9 @@ function getReviewState(track) {
 }
 
 function updateNewSongsCount(songKey) {
-    if (potentialNewSongs.has(songKey)) {
+    if (selectedSetNewSongs.has(songKey)) {
         newSongsAdded24Hours++;
-        potentialNewSongs.delete(songKey);
+        selectedSetNewSongs.delete(songKey);
         console.log(`New song played: ${songKey}. Total new songs in 24 hours: ${newSongsAdded24Hours}`);
         saveNewSongsSettings();
     }
@@ -2394,10 +2394,19 @@ function prepareSongForTraining(songKeys, maxSongs) {
         console.log(`Adding new songs...`);
         let minLimitNewSong = Math.max(0,maxNewSongs24Hours - newSongsAdded24Hours);
         let maxUserSettingNewSong = maxSongs - (incorrectSongsPerGame + correctSongsPerGame);
-        let maxNewSongsToAdd = Math.min(maxNewSongs24Hours, minLimitNewSong,maxUserSettingNewSong);
+        let maxNewSongsToAdd = Math.min(minLimitNewSong,maxUserSettingNewSong);
         console.log(`Max new songs to add: ${maxNewSongsToAdd}`);
         let selectedNewSongs = newSongs.slice(0, maxNewSongsToAdd);
         console.log(`Selected new songs: ${selectedNewSongs.length}`);
+
+        // Initialize the set to store  new songs
+        selectedSetNewSongs = new Set();
+
+        // Iterate over selectedNewSongs and add to the set
+        selectedNewSongs.forEach((song) => {
+            // Assuming `song` has properties `songArtist` and `songName`
+            selectedSetNewSongs.add(`${song.songArtist}_${song.songName}`);
+        });
 
         reviewCandidates = [...selectedNewSongs, ...selectedCorrectSongs, ...selectedIncorrectSongs];
         console.log(`Total selected candidates: ${reviewCandidates.length}`);
