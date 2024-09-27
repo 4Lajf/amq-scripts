@@ -4012,7 +4012,7 @@ function openSettingsModal() {
 
 function updateModeDisplay() {
     // Update button text
-    $("#cslgToggleModeButton").text(isSearchMode ? "Song Search" : "My Songs");
+    $("#cslgToggleModeButton").text(isSearchMode ? "Song " : "My Songs");
 
     // Toggle body class for CSS targeting
     $("body").toggleClass("song-search-mode", isSearchMode);
@@ -5017,8 +5017,23 @@ async function getSongListFromMalIds(malIds) {
                              anime.altAnimeNamesAnswers = [];
                              anime.annId = anime.annId;
                              anime.malId = anime.linked_ids?.myanimelist;
-                             anime.kitsuId =  anime.linked_ids?.kitsu;
+                             anime.kitsuId = anime.linked_ids?.kitsu;
                              anime.aniListId = anime.linked_ids?.anilist;
+                             // Search if the song is in other animes in the list
+                             for (let otherAnime of json) {
+                                 if (otherAnime !== anime) { // Skip comparing the anime with itself
+                                     // Check if the names and artist match
+                                     if (
+                                         otherAnime.songName === anime.songName &&
+                                         otherAnime.songArtist === anime.songArtist
+                                     )
+                                     { if (!(otherAnime.animeJPName === anime.animeJPName && otherAnime.animeENName === anime.animeENName)){
+                                          anime.altAnimeNamesAnswers.push(otherAnime.animeENName);
+                                          anime.altAnimeNamesAnswers.push(otherAnime.animeJPName)
+                                        }
+                                     }
+                                 }
+                             }
                              // Enrich the anime data with genres and tags
                              importedSongList.push({
                                  ...anime, // Spread the existing anime data
