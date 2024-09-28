@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         AMQ Song Artist Mode
 // @namespace    http://tampermonkey.net/
-// @version      2.0.0
+// @version      2.0.1
 // @description  Makes you able to play song/artist with other people who have this script installed. Includes dropdown (with auto-update) and scoretable.
 // @author       4Lajf (forked from Zolhungaj)
-// @match        https://animemusicquiz.com/*
+// @match        https://*.animemusicquiz.com/*
 // @grant        none
 // @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqBetterSongArtist.user.js
 // @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqBetterSongArtist.user.js
