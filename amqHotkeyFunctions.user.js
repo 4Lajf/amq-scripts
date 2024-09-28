@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Hotkey Functions
 // @namespace    https://github.com/nyamu-amq
-// @version      0.14
+// @version      0.15
 // @description  Slightly altered Hotkey Functions plugin to nicely work with multiple input boxes on Song Artist mode
 // @description  enable hotkey functions
 // @description  ESC: remove zombie tooltips
@@ -20,7 +20,7 @@
 // @description  Ctrl + Up: start game if you are host and all players are ready
 // @description  Ctrl + Down: start vote for returning lobby if game started and you are host
 // @author       nyamu
-// @match        https://animemusicquiz.com/*
+// @match        https://*.animemusicquiz.com/*
 // @grant        none
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 
