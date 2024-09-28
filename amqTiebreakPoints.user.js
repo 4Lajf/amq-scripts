@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         AMQ Style Points
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Awards additional tiebreak points (on the right side of your score in leaderboard) if you are the fastest one to get the answer right. This script is meant to serve as a way to tiebreak places.
 // @author       4Lajf
-// @match        https://animemusicquiz.com/*
+// @match        https://*.animemusicquiz.com/*
 // @grant        none
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqTiebreakPoints.user.js
