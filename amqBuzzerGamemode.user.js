@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         AMQ Buzzer Gamemode
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Click "Ctrl" to mute song, whoever mutes their song earliest will get the most points. At the end of the quiz whoever was the fastest in recognizing songs wins.
 // @author       4Lajf (forked from BobTheSheriff)
-// @match        https://animemusicquiz.com/*
+// @match        https://*.animemusicquiz.com/*
 // @grant        none
 // @require      https://raw.githubusercontent.com/TheJoseph98/AMQ-Scripts/master/common/amqScriptInfo.js
 // @downloadURL  https://github.com/4Lajf/amq-scripts/blob/main/amqBuzzerGamemode.user.js
