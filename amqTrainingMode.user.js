@@ -3,7 +3,7 @@
 // @namespace    https://github.com/4Lajf
 // @version      0.76
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
-// @match        https://animemusicquiz.com/*
+// @match        https://*.animemusicquiz.com/*
 // @author       4Lajf & kempanator
 // @grant        GM_xmlhttpRequest
 // @connect      myanimelist.net
