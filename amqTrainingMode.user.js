@@ -47,6 +47,7 @@ let loadInterval = setInterval(() => {
 let previousAttemptData = null;
 let isSearchMode = true;
 let mySongList = [];
+let finalSongList = [];
 let correctSongsPerGame = 0;
 let originalWeight = null;
 let currentSongKey = null;
@@ -59,7 +60,7 @@ let statsModal;
 let maxNewSongs24Hours = 20;
 let newSongsAdded24Hours = 0;
 let lastResetTime = Date.now();
-let potentialNewSongs = new Set();
+let selectedSetNewSongs = new Set();
 const version = "0.75";
 const saveData = validateLocalStorage("customSongListGame");
 const catboxHostDict = { 1: "nl.catbox.video", 2: "ladist1.catbox.video", 3: "vhdist1.catbox.video" };
@@ -551,7 +552,7 @@ function filterSongList() {
                         song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
                         song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
                         songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter) ||
-                        song.animeVintage.toLowerCase().includes(lowerCaseFilter)
+                        song.animeVintage.toLowerCase().includes(lowerCaseFilter) 
                     );
             }
         });
@@ -1182,7 +1183,22 @@ function validateTrainingStart() {
     let special = $("#cslgSettingsSpecialCheckbox").prop("checked");
 
     let filteredSongs = mySongList.filter((song) => {
-        let passesTypeFilter = (ops && song.songType === 1) || (eds && song.songType === 2) || (ins && song.songType === 3);
+        // Type check for song.songType (can be either string or number)
+        let passesTypeFilter = false;
+        if (typeof song.songType === 'number') {
+            // Handle as a number (assuming 1 = Opening, 2 = Ending, 3 = Insert)
+            passesTypeFilter = (ops && song.songType === 1) ||
+                (eds && song.songType === 2) ||
+                (ins && song.songType === 3);
+        } else if (typeof song.songType === 'string') {
+            // Handle as a string (check if it contains "Opening", "Ending", or "Insert")
+            let songType = String(song.songType);  // Ensure it's a string
+            passesTypeFilter = (ops && songType.includes("Opening")) ||
+                (eds && songType.includes("Ending")) ||
+                (ins && songType.includes("Insert"));
+        } else {
+            console.log("Unknown songType format:", song.songType);
+        }
         let passesAnimeTypeFilter = (tv && song.animeType === "TV") || (movie && song.animeType === "Movie") || (ova && song.animeType === "OVA") || (ona && song.animeType === "ONA") || (special && song.animeType === "Special");
         return passesTypeFilter && passesAnimeTypeFilter && difficultyFilter(song, difficultyRange[0], difficultyRange[1]);
     });
@@ -1207,7 +1223,6 @@ function validateTrainingStart() {
     $("#cslgSettingsModal").modal("hide");
     console.log("song order: ", songOrder);
     if (lobby.soloMode) {
-        console.log(mySongList);
         startQuiz(filteredSongs);
     } else if (lobby.isHost) {
         cslMessage("§CSL0" + btoa(`${showSelection}§${currentSong}§${totalSongs}§${guessTime}§${extraGuessTime}§${fastSkip ? "1" : "0"}`));
@@ -1320,7 +1335,7 @@ $("#cslgFileUpload").on("change", function () {
             try {
                 mySongList = [];
                 handleData(JSON.parse(data));
-                mySongList = songList;
+                mySongList = finalSongList;
                 songList = [];
                 if (mySongList.length === 0) {
                     messageDisplayer.displayMessage("0 song links found");
@@ -1792,9 +1807,9 @@ function getReviewState(track) {
 }
 
 function updateNewSongsCount(songKey) {
-    if (potentialNewSongs.has(songKey)) {
+    if (selectedSetNewSongs.has(songKey)) {
         newSongsAdded24Hours++;
-        potentialNewSongs.delete(songKey);
+        selectedSetNewSongs.delete(songKey);
         console.log(`New song played: ${songKey}. Total new songs in 24 hours: ${newSongsAdded24Hours}`);
         saveNewSongsSettings();
     }
@@ -2216,7 +2231,7 @@ function adjustWeightOnUserInteraction(factor) {
         return;
     }
 
-    const currentSongData = songList[currentSongListIndex];
+    const currentSongData = mySongList[currentSongListIndex];
 
     if (!currentSongData) {
         console.error("Current song data not found");
@@ -2277,7 +2292,7 @@ function revertWeight() {
 
         const currentSongNumber = document.querySelector("#qpCurrentSongCount").textContent;
         const currentSongListIndex = songOrder[currentSongNumber];
-        const currentSongData = songList[currentSongListIndex];
+        const currentSongData = finalSongList[currentSongListIndex];
 
         gameChat.systemMessage(`Song weight reverted for "${currentSongData.songName}"`);
         console.log(`Song weight reverted for "${currentSongData.songName}". Old: ${oldWeight.toFixed(2)} | New: ${newWeight.toFixed(2)}`, reviewData[songKey]);
@@ -2347,11 +2362,16 @@ function prepareSongForTraining(songKeys, maxSongs) {
         console.log(`After shuffle and slice: ${reviewCandidates.length} candidates`);
     } else {
         console.log(`Normal mode selection...`);
-        let incorrectSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === false);
+        console.log(" review candidates : ", reviewCandidates);
+        // By default isLastTryCorrect is set to False to be sure that the song is not correct we have to check that it is not a new song also
+        let incorrectSongs = reviewCandidates.filter((candidate) =>  candidate.reviewState.isLastTryCorrect === false &&  candidate.reviewState.weight != 9999);
+        console.log(" incorrectSongs : ", incorrectSongs);
         let newSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight === 9999);
+        console.log(" newSongs : ", newSongs);
         let correctSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === true);
-        let regularSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight !== 9999 && candidate.reviewState.isLastTryCorrect === undefined);
-
+        console.log(" correctSongs : ", correctSongs);
+        let regularSongs = reviewCandidates.filter((candidate) =>  candidate.reviewState.weight != 9999);
+        console.log(" regularSongs : ", regularSongs);
         console.log(`Initial counts: ${incorrectSongs.length} incorrect, ${newSongs.length} new, ${correctSongs.length} correct, ${regularSongs.length} regular`);
 
         incorrectSongs = shuffleArray(incorrectSongs);
@@ -2359,44 +2379,47 @@ function prepareSongForTraining(songKeys, maxSongs) {
         correctSongs = shuffleArray(correctSongs);
         regularSongs = shuffleArray(regularSongs);
 
-        console.log(`Combining priority songs...`);
-        let prioritySongs = shuffleArray([...incorrectSongs.slice(0, incorrectSongsPerGame), ...newSongs, ...correctSongs.slice(0, correctSongsPerGame)]);
-        console.log(`Priority songs: ${prioritySongs.length}`);
+        let maxIncorrectSongsToAdd = incorrectSongsPerGame;
+        console.log(`Max incorrect songs to add: ${maxIncorrectSongsToAdd}`);
 
-        let maxPrioritySongsToAdd = Math.min(prioritySongs.length, maxSongs, incorrectSongsPerGame + correctSongsPerGame + (maxNewSongs24Hours - newSongsAdded24Hours));
-        console.log(`Max priority songs to add: ${maxPrioritySongsToAdd}`);
+        let selectedIncorrectSongs = incorrectSongs.slice(0, maxIncorrectSongsToAdd);
+        console.log(`Selected incorrect songs: ${selectedIncorrectSongs.length}`);
 
-        let selectedPrioritySongs = prioritySongs.slice(0, maxPrioritySongsToAdd);
-        console.log(`Selected priority songs: ${selectedPrioritySongs.length}`);
+        let maxCorrectSongsToAdd = correctSongsPerGame;
+        console.log(`Max correct songs to add: ${maxCorrectSongsToAdd}`);
 
-        let maxRegularSongsToAdd = maxSongs - selectedPrioritySongs.length;
-        console.log(`Max regular songs to add: ${maxRegularSongsToAdd}`);
+        let selectedCorrectSongs = correctSongs.slice(0, maxCorrectSongsToAdd);
+        console.log(`Selected incorrect songs: ${selectedCorrectSongs.length}`);
 
-        let selectedRegularSongs = regularSongs.slice(0, maxRegularSongsToAdd);
-        console.log(`Selected regular songs: ${selectedRegularSongs.length}`);
+        console.log(`Adding new songs...`);
+        let minLimitNewSong = Math.max(0,maxNewSongs24Hours - newSongsAdded24Hours);
+        let maxUserSettingNewSong = maxSongs - (incorrectSongsPerGame + correctSongsPerGame);
+        let maxNewSongsToAdd = Math.min(minLimitNewSong,maxUserSettingNewSong);
+        console.log(`Max new songs to add: ${maxNewSongsToAdd}`);
+        let selectedNewSongs = newSongs.slice(0, maxNewSongsToAdd);
+        console.log(`Selected new songs: ${selectedNewSongs.length}`);
 
-        reviewCandidates = [...selectedPrioritySongs, ...selectedRegularSongs];
+        // Initialize the set to store  new songs
+        selectedSetNewSongs = new Set();
+
+        // Iterate over selectedNewSongs and add to the set
+        selectedNewSongs.forEach((song) => {
+            // Assuming `song` has properties `songArtist` and `songName`
+            selectedSetNewSongs.add(`${song.songArtist}_${song.songName}`);
+        });
+
+        reviewCandidates = [...selectedNewSongs, ...selectedCorrectSongs, ...selectedIncorrectSongs];
         console.log(`Total selected candidates: ${reviewCandidates.length}`);
     }
-
-    console.log(`Adding potential new songs...`);
-    let potentialNewSongsCount = 0;
-    reviewCandidates.forEach((candidate) => {
-        if (candidate.reviewState.weight === 9999) {
-            potentialNewSongs.add(`${candidate.song.songArtist}_${candidate.song.songName}`);
-            potentialNewSongsCount++;
-        }
-    });
-    console.log(`Added ${potentialNewSongsCount} potential new songs`);
 
     if (reviewCandidates.length < maxSongs) {
         console.warn(`Warning: Only ${reviewCandidates.length} songs selected out of ${maxSongs} requested. There may not be enough songs in the specified categories or difficulty range.`);
     }
 
-    let finalIncorrectSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === false);
+    let finalIncorrectSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === false && candidate.reviewState.weight != 9999);
     let finalNewSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight === 9999);
     let finalCorrectSongs = reviewCandidates.filter((candidate) => candidate.reviewState.isLastTryCorrect === true);
-    let finalRegularSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight !== 9999 && candidate.reviewState.isLastTryCorrect === undefined);
+    let finalRegularSongs = reviewCandidates.filter((candidate) => candidate.reviewState.weight !== 9999);
 
     console.log(`Final selection breakdown:`);
     console.log(`- Incorrect songs: ${finalIncorrectSongs.length}`);
@@ -2771,13 +2794,28 @@ function validateStart() {
     let special = $("#cslgSettingsSpecialCheckbox").prop("checked");
 
     let filteredSongs = mySongList.filter((song) => {
-        let passesTypeFilter = (ops && song.songType === 1) || (eds && song.songType === 2) || (ins && song.songType === 3);
+        // Type check for song.songType (can be either string or number)
+        let passesTypeFilter = false;
+        if (typeof song.songType === 'number') {
+            // Handle as a number (assuming 1 = Opening, 2 = Ending, 3 = Insert)
+            passesTypeFilter = (ops && song.songType === 1) ||
+                (eds && song.songType === 2) ||
+                (ins && song.songType === 3);
+        } else if (typeof song.songType === 'string') {
+            // Handle as a string (check if it contains "Opening", "Ending", or "Insert")
+            let songType = String(song.songType);  // Ensure it's a string
+            passesTypeFilter = (ops && songType.includes("Opening")) ||
+                (eds && songType.includes("Ending")) ||
+                (ins && songType.includes("Insert"));
+        } else {
+            console.log("Unknown songType format:", song.songType);
+        }
         let passesAnimeTypeFilter = (tv && song.animeType === "TV") || (movie && song.animeType === "Movie") || (ova && song.animeType === "OVA") || (ona && song.animeType === "ONA") || (special && song.animeType === "Special");
         return passesTypeFilter && passesAnimeTypeFilter && difficultyFilter(song, difficultyRange[0], difficultyRange[1]);
     });
 
     if (filteredSongs.length === 0) {
-        return messageDisplayer.displayMessage("Unable to start", "no songs match the specified criteria");
+        return messageDisplayer.displayMessage("Unable to start", "0 songs match the specified criteria");
     }
 
     if (songOrderType === "random") {
@@ -2808,13 +2846,21 @@ function validateStart() {
 function startQuiz() {
     if (!lobby.inLobby) return;
     if (lobby.soloMode) {
-        if (!songList.length) return;
+        if (mySongList.length){
+            finalSongList = mySongList;
+        }
+        else if (songList.length){
+            finalSongList = songList;
+        }
+        else{
+            return;
+        }
     } else {
         cslMultiplayer.host = lobby.hostName;
     }
     let song;
     if (lobby.isHost) {
-        song = songList[songOrder[1]];
+        song = finalSongList[songOrder[1]];
     }
     skipping = false;
     quiz.cslActive = true;
@@ -2971,7 +3017,7 @@ function playSong(songNumber) {
         if (songNumber < totalSongs) {
             if (quiz.soloMode) {
                 readySong(songNumber + 1);
-                let nextSong = songList[songOrder[songNumber + 1]];
+                let nextSong = finalSongList[songOrder[songNumber + 1]];
                 fireListener("quiz next video info", {
                     playLength: guessTime,
                     playbackSpeed: 1,
@@ -2993,7 +3039,7 @@ function playSong(songNumber) {
             } else {
                 readySong(songNumber + 1);
                 if (quiz.isHost) {
-                    let nextSong = songList[songOrder[songNumber + 1]];
+                    let nextSong = finalSongList[songOrder[songNumber + 1]];
                     let message = `${songNumber + 1}§${getStartPoint()}§${nextSong.audio || ""}§${nextSong.video480 || ""}§${nextSong.video720 || ""}`;
                     splitIntoChunks(btoa(encodeURIComponent(message)) + "$", 144).forEach((item, index) => {
                         cslMessage("§CSL3" + base10to36(index % 36) + item);
@@ -3009,7 +3055,8 @@ function endGuessPhase(songNumber) {
     if (!quiz.cslActive || !quiz.inQuiz) return reset();
     let song;
     if (quiz.isHost) {
-        song = songList[songOrder[songNumber]];
+        song = finalSongList[songOrder[songNumber]];
+        console.log("song found ", song);
     }
     fireListener("guess phase over");
     if (!quiz.soloMode && quiz.inQuiz && !quiz.isSpectator) {
@@ -3048,7 +3095,8 @@ function endGuessPhase(songNumber) {
             if (!quiz.soloMode && quiz.isHost) {
                 let message = `${song.animeRomajiName || ""}\n${song.animeEnglishName || ""}\n${(song.altAnimeNames || []).join("\t")}\n${(song.altAnimeNamesAnswers || []).join("\t")}\n${song.songArtist || ""}\n${song.songName || ""}\n${
                     song.songType || ""
-                }\n${song.songTypeNumber || ""}\n${song.songDifficulty || ""}\n${song.animeType || ""}\n${song.animeVintage || ""}\n${song.annId || ""}\n${song.malId || ""}\n${song.kitsuId || ""}\n${song.aniListId || ""}\n${
+                }\n${song.songTypeNumber || ""}\n${song.songDifficulty || ""}\n${song.animeType || ""}\n${song.animeVintage || ""}\n${song.annId || ""}\n${song.malId || ""}\n${song.kitsuId || ""}\n${song.aniListId ||
+                     ""}\n${
                     Array.isArray(song.animeTags) ? song.animeTags.join(",") : ""
                 }\n${Array.isArray(song.animeGenre) ? song.animeGenre.join(",") : ""}\n${song.audio || ""}\n${song.video480 || ""}\n${song.video720 || ""}`;
                 splitIntoChunks(btoa(encodeURIComponent(message)) + "$", 144).forEach((item, index) => {
@@ -3086,10 +3134,10 @@ function endGuessPhase(songNumber) {
                                     },
                                 },
                                 type: song.songType,
-                                typeNumber: song.songTypeNumber,
+                                typeNumber:song.typeNumber,
                                 annId: song.annId,
                                 highRisk: 0,
-                                animeScore: null,
+                                animeScore: song.rating,
                                 animeType: song.animeType,
                                 vintage: song.animeVintage,
                                 animeDifficulty: song.songDifficulty,
@@ -3101,7 +3149,7 @@ function endGuessPhase(songNumber) {
                                 dub: song.dub,
                                 siteIds: {
                                     annId: song.annId,
-                                    malId: song.malId,
+                                    malId: song.malIdt,
                                     kitsuId: song.kitsuId,
                                     aniListId: song.aniListId,
                                 },
@@ -3136,14 +3184,37 @@ function endGuessPhase(songNumber) {
                             cslMessage("§CSL6" + base10to36(index % 36) + item);
                         });
                     }
+                    // Set a flag to prevent multiple calls to endReplayPhase
+                    let replayPhaseEnded = false;
+                    // Set a time limit after which the replay phase will end automatically
+                    const autoEndTime = 25000; // Example: 1 second for fastSkip, 2 seconds otherwise
+
+                    // Timeout to automatically end replay phase
+                    const timeoutId = setTimeout(() => {
+                        if (!replayPhaseEnded) {  // Only call if replay phase hasn't ended yet
+                            replayPhaseEnded = true;
+                            endReplayPhase(songNumber);  // Automatically end replay phase
+                            clearInterval(skipInterval);
+                            clearTimeout(timeoutId);
+                        }
+                    }, autoEndTime);
+
+
                     setTimeout(
                         () => {
-                            if (!quiz.cslActive || !quiz.inQuiz) return reset();
+                            if (!quiz.cslActive || !quiz.inQuiz){
+                                clearTimeout(timeoutId);           // Clear the timeout as well
+                                return reset();
+                            }
                             if (quiz.soloMode) {
                                 skipInterval = setInterval(() => {
-                                    if (quiz.skipController._toggled) {
-                                        clearInterval(skipInterval);
-                                        endReplayPhase(songNumber);
+                                    if (fastSkip || quiz.skipController._toggled) {
+                                        if (!replayPhaseEnded){
+                                            clearInterval(skipInterval);
+                                            clearTimeout(timeoutId);      // Cancel the automatic timeout
+                                            replayPhaseEnded = true;
+                                            endReplayPhase(songNumber);
+                                        }
                                     }
                                 }, 100);
                             }
@@ -3192,6 +3263,7 @@ function endReplayPhase(songNumber) {
                 fireListener("quiz end result", data);
             },
             fastSkip ? 2000 : 5000
+
         );
         setTimeout(
             () => {
@@ -3530,7 +3602,7 @@ function createGroupSlotMap(players) {
 
 // check if the player's answer is correct
 function isCorrectAnswer(songNumber, answer) {
-    let song = songList[songOrder[songNumber]];
+    let song = finalSongList[songOrder[songNumber]];
     if (!answer) {
         reviewSong(song, false);
         return false;
@@ -3888,6 +3960,7 @@ function miscSetup() {
         songOptionsBackdrop.addClass("show");
     });
 
+
     function closeSongOptions() {
         songOptionsPopup.removeClass("show");
         songOptionsBackdrop.removeClass("show");
@@ -3939,7 +4012,7 @@ function openSettingsModal() {
 
 function updateModeDisplay() {
     // Update button text
-    $("#cslgToggleModeButton").text(isSearchMode ? "Song Search" : "My Songs");
+    $("#cslgToggleModeButton").text(isSearchMode ? "Song " : "My Songs");
 
     // Toggle body class for CSS targeting
     $("body").toggleClass("song-search-mode", isSearchMode);
@@ -4009,6 +4082,9 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
         };
     } else if (mode === "artist") {
         url = "https://anisongdb.com/api/search_request";
+        console.log("query : ", query);
+        console.log("minGroupMembers : ", minGroupMembers);
+        console.log("maxOtherPeople : ", maxOtherPeople);
         json.artist_search_filter = {
             search: query,
             partial_match: partial,
@@ -4058,8 +4134,22 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
         .then((res) => res.json())
         .then((json) => {
             handleData(json);
-            songList = songList.filter((song) => songTypeFilter(song, ops, eds, ins));
+            songList = finalSongList.filter((song) => {
+            // Check and set the songType and typeNumber
+            let songType = song.songType;
+            if (songType.startsWith("Opening")) {
+                song.songType = 1;
+                song.typeNumber = parseInt(songType.replace(/\D/g, '')); // Extract the number
+            } else if (songType.startsWith("Ending")) {
+                song.songType = 2;
+                song.typeNumber = parseInt(songType.replace(/\D/g, ''));
+            } else if (songType === "Insert Song") {
+                song.songType = 3;
+                song.typeNumber = null; // No type number for Insert Song
+            }});
+            songList = finalSongList.filter((song) => songTypeFilter(song, ops, eds, ins));
             setSongListTableSort();
+            console.log("song list ", songList);
             if (!Array.isArray(json)) {
                 $("#cslgSongListCount").text("Songs: 0");
                 $("#cslgSongListTable tbody").empty();
@@ -4083,22 +4173,22 @@ function getAnisongdbData(mode, query, ops, eds, ins, partial, ignoreDuplicates,
 }
 
 function handleData(data) {
-    songList = [];
+    finalSongList = [];
     if (!data) return;
     loadIgnoredSongs(); // Load the latest ignored songs
     // anisongdb structure
     if (Array.isArray(data) && data.length && data[0].animeJPName) {
         data = data.filter((song) => song.audio || song.MQ || song.HQ);
         for (let song of data) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.animeJPName,
                 animeEnglishName: song.animeENName,
                 altAnimeNames: [].concat(song.animeJPName, song.animeENName, song.animeAltName || []),
                 altAnimeNamesAnswers: [],
                 songArtist: song.songArtist,
                 songName: song.songName,
-                songType: Object({ O: 1, E: 2, I: 3 })[song.songType[0]],
-                songTypeNumber: song.songType[0] === "I" ? null : parseInt(song.songType.split(" ")[1]),
+                songType: song.songType,
+                typeNumber: song.typeNumber,
                 songDifficulty: song.songDifficulty,
                 animeType: song.animeType,
                 animeVintage: song.animeVintage,
@@ -4106,8 +4196,8 @@ function handleData(data) {
                 malId: song.linked_ids?.myanimelist,
                 kitsuId: song.linked_ids?.kitsu,
                 aniListId: song.linked_ids?.anilist,
-                animeTags: [],
-                animeGenre: [],
+                animeTags: song.animeTags || [],
+                animeGenre: song.animeGenre || [],
                 rebroadcast: null,
                 dub: null,
                 startPoint: null,
@@ -4116,11 +4206,12 @@ function handleData(data) {
                 video720: song.HQ,
                 correctGuess: true,
                 incorrectGuess: true,
+                rating: song.rating,
             });
         }
-        for (let song of songList) {
+        for (let song of finalSongList) {
             let otherAnswers = new Set();
-            for (let s of songList) {
+            for (let s of finalSongList) {
                 if (s.songName === song.songName && s.songArtist === song.songArtist) {
                     s.altAnimeNames.forEach((x) => otherAnswers.add(x));
                 }
@@ -4131,7 +4222,7 @@ function handleData(data) {
     // official amq song export structure
     else if (typeof data === "object" && data.roomName && data.startTime && data.songs) {
         for (let song of data.songs) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.songInfo.animeNames.romaji,
                 animeEnglishName: song.songInfo.animeNames.english,
                 altAnimeNames: song.songInfo.altAnimeNames || [song.songInfo.animeNames.romaji, song.songInfo.animeNames.english],
@@ -4163,7 +4254,7 @@ function handleData(data) {
     // joseph song export script structure
     else if (Array.isArray(data) && data.length && data[0].gameMode) {
         for (let song of data) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.anime.romaji,
                 animeEnglishName: song.anime.english,
                 altAnimeNames: song.altAnswers || [song.anime.romaji, song.anime.english],
@@ -4195,7 +4286,7 @@ function handleData(data) {
     // blissfulyoshi ranked data export structure
     else if (Array.isArray(data) && data.length && data[0].animeRomaji) {
         for (let song of data) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.animeRomaji,
                 animeEnglishName: song.animeEng,
                 altAnimeNames: [song.animeRomaji, song.animeEng],
@@ -4211,8 +4302,8 @@ function handleData(data) {
                 malId: song.malId,
                 kitsuId: song.kitsuId,
                 aniListId: song.aniListId,
-                animeTags: [],
-                animeGenre: [],
+                animeTags: song.animeTags,
+                animeGenre: song.animeGenres,
                 rebroadcast: null,
                 dub: null,
                 startPoint: null,
@@ -4227,7 +4318,7 @@ function handleData(data) {
     // kempanator answer stats script export structure
     else if (typeof data === "object" && data.songHistory && data.playerInfo) {
         for (let song of Object.values(data.songHistory)) {
-            songList.push({
+            finalSongList.push({
                 animeRomajiName: song.animeRomajiName,
                 animeEnglishName: song.animeEnglishName,
                 altAnimeNames: song.altAnimeNames || [],
@@ -4258,12 +4349,12 @@ function handleData(data) {
     }
     // this script structure
     else if (Array.isArray(data) && data.length && data[0].animeRomajiName) {
-        songList = data;
+        finalSongList = data;
     }
     // Filter out ignored songs
-    songList = songList.filter((song) => !ignoredSongs.some((ignoredSong) => ignoredSong.songName === song.songName && ignoredSong.songArtist === song.songArtist && ignoredSong.animeRomajiName === song.animeRomajiName));
+    finalSongList = finalSongList.filter((song) => !ignoredSongs.some((ignoredSong) => ignoredSong.songName === song.songName && ignoredSong.songArtist === song.songArtist && ignoredSong.animeRomajiName === song.animeRomajiName));
 
-    songList = songList.filter((song) => song.audio || song.video480 || song.video720);
+    finalSongList = finalSongList.filter((song) => song.audio || song.video480 || song.video720);
 }
 
 // create song list table
@@ -4446,7 +4537,7 @@ function filterSongList(list) {
                 case "songArtist":
                     return song.songArtist.toLowerCase().includes(lowerCaseFilter);
                 case "animeName":
-                    return song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) || song.animeEnglishName.toLowerCase().includes(lowerCaseFilter);
+                    return song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) || song.animeRomajiName.toLowerCase().includes(lowerCaseFilter);
                 case "songType":
                     return songTypeText(song.songType, song.songTypeNumber).toLowerCase().includes(lowerCaseFilter);
                 case "animeVintage":
@@ -4495,14 +4586,14 @@ function createMergedSongListTable() {
 function createAnswerTable() {
     let $tbody = $("#cslgAnswerTable tbody");
     $tbody.empty();
-    if (songList.length === 0) {
+    if (finalSongList.length === 0) {
         $("#cslgAnswerText").text("No list loaded");
     } else if (autocomplete.length === 0) {
         $("#cslgAnswerText").text("Fetch autocomplete first");
     } else {
         let animeList = new Set();
         let missingAnimeList = [];
-        for (let song of songList) {
+        for (let song of finalSongList) {
             let answers = [song.animeEnglishName, song.animeRomajiName].concat(song.altAnimeNames, song.altAnimeNamesAnswers);
             answers.forEach((x) => animeList.add(x));
         }
@@ -4784,7 +4875,10 @@ async function getMalIdsFromMyanimelist(username) {
                 $("#cslgListImportText").text(`MAL API Error: ${result.error}`);
             } else {
                 for (let anime of result.data) {
-                    malIds.push(anime.node.id);
+                     const malIdEntry = {
+                         malId: anime.nodeId,
+                     };
+                    malIds.push(malIdEntry);
                 }
                 nextPage = result.paging.next;
             }
@@ -4820,7 +4914,13 @@ async function getMalIdsFromAnilist(username) {
         if (data) {
             for (let item of data.mediaList) {
                 if (item.media.idMal) {
-                    malIds.push(item.media.idMal);
+                     const malIdEntry = {
+                         malId: item.media.idMal,
+                         genres: item.media.genres,
+                         tags: item.media.tags.map(tag => tag.name), // Extracting tag names
+                         rating: (item.media.averageScore/10).toFixed(1)
+                     };
+                    malIds.push(malIdEntry);
                 }
             }
             if (data.pageInfo.hasNextPage) {
@@ -4850,6 +4950,11 @@ function getAnilistData(username, statuses, pageNumber) {
                     media {
                         id
                         idMal
+                        genres
+                        tags{
+                          name
+                        }
+                        averageScore
                     }
                 }
             }
@@ -4873,19 +4978,71 @@ async function getSongListFromMalIds(malIds) {
     if (malIds.length === 0) return;
     let url = "https://anisongdb.com/api/malIDs_request";
     let idsProcessed = 0;
+    console.log("malIds: ", malIds);
     for (let i = 0; i < malIds.length; i += 500) {
         let segment = malIds.slice(i, i + 500);
         idsProcessed += segment.length;
+        // Extract only the malId from each entry in the segment
+        let malIdSegment = segment.map(item => item.malId);
         let data = {
             method: "POST",
             headers: { Accept: "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify({ malIds: segment }),
+            body: JSON.stringify({ malIds: malIdSegment }),
         };
         await fetch(url, data)
             .then((res) => res.json())
             .then((json) => {
                 if (Array.isArray(json)) {
-                    importedSongList = importedSongList.concat(json);
+                     for (let anime of json) {
+                         // Assuming anime is structured correctly to find the right item
+                         const animeIndex = segment.findIndex(item => item.malId === anime.linked_ids.myanimelist);
+                         if (animeIndex !== -1) {
+                             let songType = anime.songType;
+                             // Check and set the songType and typeNumber
+                             if (songType.startsWith("Opening")) {
+                                 anime.songType = 1;
+                                 anime.typeNumber = parseInt(songType.replace(/\D/g, '')); // Extract the number
+                             } else if (songType.startsWith("Ending")) {
+                                 anime.songType = 2;
+                                 anime.typeNumber = parseInt(songType.replace(/\D/g, ''));
+                             } else if (songType === "Insert Song") {
+                                 anime.songType = 3;
+                                 anime.typeNumber = null; // No type number for Insert Song
+                             }
+                             anime.animeRomajiName = anime.animeJPName;
+                             anime.animeEnglishName = anime.animeENName;
+                             anime.video480 = anime.MQ;
+                             anime.video720 = anime.HQ;
+                             anime.altAnimeNames = [].concat(anime.animeJPName, anime.animeENName, anime.animeAltName || []);
+                             anime.altAnimeNamesAnswers = [];
+                             anime.annId = anime.annId;
+                             anime.malId = anime.linked_ids?.myanimelist;
+                             anime.kitsuId = anime.linked_ids?.kitsu;
+                             anime.aniListId = anime.linked_ids?.anilist;
+                             // Search if the song is in other animes in the list
+                             for (let otherAnime of json) {
+                                 if (otherAnime !== anime) { // Skip comparing the anime with itself
+                                     // Check if the names and artist match
+                                     if (
+                                         otherAnime.songName === anime.songName &&
+                                         otherAnime.songArtist === anime.songArtist
+                                     )
+                                     { if (!(otherAnime.animeJPName === anime.animeJPName && otherAnime.animeENName === anime.animeENName)){
+                                          anime.altAnimeNamesAnswers.push(otherAnime.animeENName);
+                                          anime.altAnimeNamesAnswers.push(otherAnime.animeJPName)
+                                        }
+                                     }
+                                 }
+                             }
+                             // Enrich the anime data with genres and tags
+                             importedSongList.push({
+                                 ...anime, // Spread the existing anime data
+                                 animeGenre: segment[animeIndex].genres, // Use the genres from malIds
+                                 animeTags: segment[animeIndex].tags, // Use the tags from malIds
+                                 rating: segment[animeIndex].rating,
+                             });
+                         }
+                     }
                     $("#cslgListImportText").text(`Anime: ${idsProcessed} / ${malIds.length} | Songs: ${importedSongList.length}`);
                 } else {
                     $("#cslgListImportText").text("anisongdb error");
@@ -4913,6 +5070,7 @@ async function startImport() {
             if (username) {
                 let malIds = await getMalIdsFromMyanimelist(username);
                 await getSongListFromMalIds(malIds);
+
             } else {
                 $("#cslgListImportText").text("Input Myanimelist Username");
             }
