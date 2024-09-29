@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         AMQ Player Answer Time Difference
 // @namespace    http://tampermonkey.net/
-// @version      1.6.6
+// @version      1.6.7
 // @description  Makes you able to see how quickly people answered and the difference between the first player and everyone else, sends the result on chat at the end of a round and sends some stats at the end of the game
 // @author       4Lajf (forked from Zolhungaj)
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=animemusicquiz.com
-// @match        https://animemusicquiz.com/*
+// @match        https://*.animemusicquiz.com/*
 // @grant        none
 // @downloadURL  https://github.com/4Lajf/amq-scripts/raw/main/amqAnswerTimeDifference.user.js
 // @updateURL    https://github.com/4Lajf/amq-scripts/raw/main/amqAnswerTimeDifference.user.js
