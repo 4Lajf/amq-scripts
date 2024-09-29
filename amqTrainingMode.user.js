@@ -36,7 +36,12 @@ Some considerations:
 */
 
 "use strict";
+
+import { SongTypes } from "./types.js";
+
+//@ts-expect-error
 if (typeof Listener === "undefined") return;
+
 let loadInterval = setInterval(() => {
   if ($("#loadingScreen").hasClass("hidden")) {
     clearInterval(loadInterval);
@@ -44,18 +49,33 @@ let loadInterval = setInterval(() => {
   }
 }, 500);
 
+/** @type {any} */
 let previousAttemptData = null;
+
 let isSearchMode = true;
+
+/** @type {import('./types.js').Song[]} */
 let mySongList = [];
+
+/** @type {import('./types.js').Song[]} */
 let finalSongList = [];
 let correctSongsPerGame = 0;
+
+/** @type {number | null} */
 let originalWeight = null;
+
+/** @type {string | null} */
 let currentSongKey = null;
 let incorrectSongsPerGame = 0;
 let trainingLinkadded = false;
+
+/** @type {import('./types.js').Song[]} */
 let ignoredSongs = [];
+
 let currentSearchFilter = "";
 let buttonContainerAdded = false;
+
+/** @type {any} */
 let statsModal;
 let maxNewSongs24Hours = 20;
 let newSongsAdded24Hours = 0;
@@ -68,8 +88,13 @@ const catboxHostDict = {
   2: "ladist1.catbox.video",
   3: "vhdist1.catbox.video",
 };
+
+/** @type {string} */
 let currentProfile;
+
+/** @type {string[]} */
 let profiles;
+
 let isTraining = false;
 let CSLButtonCSS = saveData.CSLButtonCSS || "calc(25% - 250px)";
 let showCSLMessages = saveData.showCSLMessages ?? false;
@@ -88,29 +113,59 @@ let currentAnswers = {};
 let score = {};
 let songListTableMode = 0; //0: song + artist, 1: anime + song type + vintage, 2: catbox links
 let songListTableSort = [0, 0, 0, 0, 0, 0, 0, 0, 0]; //song, artist, difficulty, anime, type, vintage, mp3, 480, 720 (0: off, 1: ascending, 2: descending)
+
+/** @type {import('./types.js').Song[]} */
 let songList = [];
+
+/** @type {Record<string, number>} */
 let songOrder = {}; //{song#: index#, ...}
+
+/** @type {import('./types.js').Song[]} */
 let mergedSongList = [];
+
+/** @type {import('./types.js').Song[]} */
 let importedSongList = [];
+
 let songOrderType = "random";
 let startPointRange = [0, 100];
 let difficultyRange = [0, 100];
 let previousSongFinished = false;
+
+/** @type {number} */
 let skipInterval;
+
+/** @type {number} */
 let nextVideoReadyInterval;
+
+/** @type {number} */
 let answerTimer;
+
+/** @type {number} */
 let extraGuessTimer;
+
+/** @type {number} */
 let endGuessTimer;
 let fileHostOverride = 0;
+
+/** @type {string[]} */
 let autocomplete = []; //store lowercase version for faster compare speed
+
+/** @type {any} */
 let autocompleteInput;
+
 let cslMultiplayer = { host: "", songInfo: {}, voteSkip: {} };
 let cslState = 0; //0: none, 1: guessing phase, 2: answer phase
 let songLinkReceived = {};
 let skipping = false;
 let answerChunks = {}; //store player answer chunks, ids are keys
+
+/** @type {any} */
 let resultChunk;
+
+/** @type {any} */
 let songInfoChunk;
+
+/** @type {any} */
 let nextSongChunk;
 let importRunning = false;
 
@@ -180,22 +235,26 @@ function initializeTwoWaySliders() {
       range: true,
       tooltip: "hide",
     })
-    .on("change", function (e) {
-      startPointRange = e.value.newValue;
-      $("#cslgSettingsStartPointMin").val(e.value.newValue[0]);
-      $("#cslgSettingsStartPointMax").val(e.value.newValue[1]);
-    });
+    .on(
+      //@ts-ignore
+      "change",
+      function (/** @type {import('./types.js').SliderRangeChangeEvent} */ e) {
+        startPointRange = e.value.newValue;
+        $("#cslgSettingsStartPointMin").val(e.value.newValue[0]);
+        $("#cslgSettingsStartPointMax").val(e.value.newValue[1]);
+      }
+    );
 
   $("#cslgSettingsStartPointMin, #cslgSettingsStartPointMax").on(
     "change",
     function () {
       let minVal = Math.max(
         0,
-        parseInt($("#cslgSettingsStartPointMin").val()) || 0
+        parseInt(String($("#cslgSettingsStartPointMin").val())) || 0
       );
       let maxVal = Math.max(
         0,
-        parseInt($("#cslgSettingsStartPointMax").val()) || 0
+        parseInt(String($("#cslgSettingsStartPointMax").val())) || 0
       );
 
       if (minVal > maxVal) {
@@ -218,22 +277,26 @@ function initializeTwoWaySliders() {
       range: true,
       tooltip: "hide",
     })
-    .on("change", function (e) {
-      difficultyRange = e.value.newValue;
-      $("#cslgSettingsDifficultyMin").val(e.value.newValue[0]);
-      $("#cslgSettingsDifficultyMax").val(e.value.newValue[1]);
-    });
+    .on(
+      //@ts-ignore
+      "change",
+      function (/** @type {import('./types.js').SliderRangeChangeEvent} */ e) {
+        difficultyRange = e.value.newValue;
+        $("#cslgSettingsDifficultyMin").val(e.value.newValue[0]);
+        $("#cslgSettingsDifficultyMax").val(e.value.newValue[1]);
+      }
+    );
 
   $("#cslgSettingsDifficultyMin, #cslgSettingsDifficultyMax").on(
     "change",
     function () {
       let minVal = Math.max(
         0,
-        parseInt($("#cslgSettingsDifficultyMin").val()) || 0
+        parseInt(String($("#cslgSettingsDifficultyMin").val())) || 0
       );
       let maxVal = Math.max(
         0,
-        parseInt($("#cslgSettingsDifficultyMax").val()) || 0
+        parseInt(String($("#cslgSettingsDifficultyMax").val())) || 0
       );
 
       if (minVal > maxVal) {
@@ -257,22 +320,32 @@ function initializeTwoWaySliders() {
       range: true,
       tooltip: "hide",
     })
-    .on("change", function (e) {
-      $("#cslgSettingsRepeatModeMin").val(e.value.newValue[0].toFixed(2));
-      $("#cslgSettingsRepeatModeMax").val(e.value.newValue[1].toFixed(2));
-      // Update the repeat mode range in your settings
-    });
+    .on(
+      //@ts-ignore
+      "change",
+      function (/** @type {import('./types.js').SliderRangeChangeEvent} */ e) {
+        $("#cslgSettingsRepeatModeMin").val(e.value.newValue[0].toFixed(2));
+        $("#cslgSettingsRepeatModeMax").val(e.value.newValue[1].toFixed(2));
+        // Update the repeat mode range in your settings
+      }
+    );
 
   $("#cslgSettingsRepeatModeMin, #cslgSettingsRepeatModeMax").on(
     "change",
     function () {
       let minVal = Math.max(
         1,
-        Math.min(5, parseFloat($("#cslgSettingsRepeatModeMin").val()) || 1)
+        Math.min(
+          5,
+          parseFloat(String($("#cslgSettingsRepeatModeMin").val())) || 1
+        )
       );
       let maxVal = Math.max(
         1,
-        Math.min(5, parseFloat($("#cslgSettingsRepeatModeMax").val()) || 5)
+        Math.min(
+          5,
+          parseFloat(String($("#cslgSettingsRepeatModeMax").val())) || 5
+        )
       );
 
       if (minVal > maxVal) {
@@ -348,20 +421,24 @@ function initializeSingleHandleSliders() {
       .slider({
         min: slider.min,
         max: slider.max,
-        value: $input.val() || slider.defaultValue,
+        value: parseInt(String($input.val())) || slider.defaultValue,
         tooltip: "hide",
       })
       .on("slide", function (e) {
-        $input.val(e.value);
+        $input.val(/** @type {number} */ (e.value));
         saveSettings();
       })
-      .on("change", function (e) {
-        $input.val(e.value.newValue);
-        saveSettings();
-      });
+      .on(
+        //@ts-ignore
+        "change",
+        function (/** @type {import('./types.js').SliderChangeEvent} */ e) {
+          $input.val(e.value.newValue);
+          saveSettings();
+        }
+      );
 
     $input.on("change", function () {
-      let value = parseInt($(this).val());
+      let value = parseInt(String($(this).val()));
       if (slider.allowHigherInput) {
         value = Math.max(slider.min, value);
       } else {
@@ -379,9 +456,15 @@ function initializeSingleHandleSliders() {
   });
 }
 
+/**
+ * @param {string} sliderId
+ * @param {string} inputId
+ * @returns {number}
+ */
 function getSliderValue(sliderId, inputId) {
-  const sliderValue = $(sliderId).slider("getValue");
-  const inputValue = parseInt($(inputId).val());
+  /** @type {number} */
+  const sliderValue = /** @type {any} */ ($(sliderId).slider("getValue"));
+  const inputValue = parseInt(String($(inputId).val()));
   return Math.max(sliderValue, inputValue);
 }
 
@@ -398,11 +481,15 @@ function initializeSliders() {
       value: 1,
       tooltip: "hide",
     })
-    .on("change", function (e) {
-      songOrderType = ["random", "ascending", "descending"][
-        e.value.newValue - 1
-      ];
-    });
+    .on(
+      //@ts-ignore
+      "change",
+      function (/** @type {import('./types.js').SliderChangeEvent} */ e) {
+        songOrderType = ["random", "ascending", "descending"][
+          e.value.newValue - 1
+        ];
+      }
+    );
 
   // Override URL (slider with specific data points)
   $("#cslgHostOverride")
@@ -416,9 +503,13 @@ function initializeSliders() {
       value: 0,
       tooltip: "hide",
     })
-    .on("change", function (e) {
-      fileHostOverride = e.value.newValue;
-    });
+    .on(
+      //@ts-ignore
+      "change",
+      function (/** @type {import('./types.js').SliderChangeEvent} */ e) {
+        fileHostOverride = e.value.newValue;
+      }
+    );
 
   setTimeout(function () {
     $("#cslgSongOrder, #cslgHostOverride").slider("refresh");
@@ -559,12 +650,18 @@ function saveSettings() {
     "#cslgSettingsCorrectSongsInput"
   );
   fastSkip = $("#cslgSettingsFastSkip").prop("checked");
-  startPointRange = $("#cslgSettingsStartPoint").slider("getValue");
-  difficultyRange = $("#cslgSettingsDifficulty").slider("getValue");
+  startPointRange = /** @type {any} */ (
+    $("#cslgSettingsStartPoint").slider("getValue")
+  );
+  difficultyRange = /** @type {any} */ (
+    $("#cslgSettingsDifficulty").slider("getValue")
+  );
   songOrderType = ["random", "ascending", "descending"][
-    $("#cslgSongOrder").slider("getValue") - 1
+    /** @type {any} */ ($("#cslgSongOrder").slider("getValue")) - 1
   ];
-  fileHostOverride = $("#cslgHostOverride").slider("getValue");
+  fileHostOverride = /** @type {any} */ (
+    $("#cslgHostOverride").slider("getValue")
+  );
   saveNewSongsSettings();
 }
 
@@ -581,7 +678,7 @@ function loadNewSongsSettings() {
 }
 
 function createTrainingInfoPopup() {
-  const popupHtml = `
+  const popupHtml = /*html*/ `
         <div id="trainingInfoPopup" class="modal fade">
             <div class="modal-dialog">
                 <div class="modal-content">
@@ -643,6 +740,9 @@ function saveIgnoredSongs() {
   );
 }
 
+/**
+ * @param {import('./types.js').Song} song
+ */
 function blockSong(song) {
   if (isSearchMode) {
     songList = songList.filter((s) => s !== song);
@@ -654,6 +754,9 @@ function blockSong(song) {
   updateSongListDisplay();
 }
 
+/**
+ * @param {import('./types.js').Song} song
+ */
 function unblockSong(song) {
   ignoredSongs = ignoredSongs.filter((s) => s !== song);
   if (isSearchMode) {
@@ -685,7 +788,7 @@ function filterSongList() {
             .toLowerCase()
             .includes(lowerCaseFilter);
         case "animeVintage":
-          return song.animeVintage.toLowerCase().includes(lowerCaseFilter);
+          return song.animeVintage?.toLowerCase().includes(lowerCaseFilter);
         case "all":
         default:
           return (
@@ -696,7 +799,7 @@ function filterSongList() {
             songTypeText(song.songType, song.songTypeNumber)
               .toLowerCase()
               .includes(lowerCaseFilter) ||
-            song.animeVintage.toLowerCase().includes(lowerCaseFilter)
+            song.animeVintage?.toLowerCase().includes(lowerCaseFilter)
           );
       }
     });
@@ -704,6 +807,13 @@ function filterSongList() {
   return songList;
 }
 
+/**
+ * Shuffle the elements of an array in place.
+ *
+ * @template T
+ * @param {T[]} array
+ * @returns {T[]}
+ */
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -735,7 +845,11 @@ function loadProfiles() {
   saveProfiles();
 }
 
-// Function to select a profile
+/**
+ * Function to select a profile
+ *
+ * @param {string} profileName
+ */
 function selectProfile(profileName) {
   if (profiles.includes(profileName)) {
     currentProfile = profileName;
@@ -748,7 +862,11 @@ function selectProfile(profileName) {
   }
 }
 
-// Function to add a new profile
+/**
+ * Function to add a new profile
+ *
+ * @param {string} profileName
+ */
 function addProfile(profileName) {
   if (!profiles.includes(profileName)) {
     profiles.push(profileName);
@@ -760,7 +878,11 @@ function addProfile(profileName) {
   }
 }
 
-// Function to delete a profile
+/**
+ * Function to delete a profile
+ *
+ * @param {string} profileName
+ */
 function deleteProfile(profileName) {
   profiles = profiles.filter((p) => p !== profileName);
   localStorage.removeItem(`spacedRepetitionData_${profileName}`);
@@ -783,7 +905,7 @@ function updateProfileSelect() {
 }
 
 $("#gameContainer").append(
-  $(`
+  $(/*html*/ `
     <div class="modal fade tab-modal" id="cslgSettingsModal" tabindex="-1" role="dialog">
         <div class="modal-dialog" role="document" style="width: 800px">
             <div class="modal-content">
@@ -1224,7 +1346,7 @@ $("#cslgSettingsMaxNewSongs").val(maxNewSongs24Hours);
 
 // Load profile button
 $("#cslgLoadProfileButton").click(() => {
-  const selectedProfile = $("#cslgProfileSelect").val();
+  const selectedProfile = String($("#cslgProfileSelect").val());
   if (selectedProfile) {
     selectProfile(selectedProfile);
     alert(`Loaded profile: ${selectedProfile}`);
@@ -1242,7 +1364,7 @@ $("#cslgAddProfileButton").click(() => {
 
 // Delete profile button
 $("#cslgDeleteProfileButton").click(() => {
-  const selectedProfile = $("#cslgProfileSelect").val();
+  const selectedProfile = String($("#cslgProfileSelect").val());
   if (
     confirm(`Are you sure you want to delete the profile "${selectedProfile}"?`)
   ) {
@@ -1338,7 +1460,9 @@ function validateTrainingStart() {
       "invalid extra guess time"
     );
   }
-  startPointRange = $("#cslgSettingsStartPoint").slider("getValue");
+  startPointRange = /** @type {any} */ (
+    $("#cslgSettingsStartPoint").slider("getValue")
+  );
   if (
     startPointRange[0] < 0 ||
     startPointRange[0] > 100 ||
@@ -1351,7 +1475,9 @@ function validateTrainingStart() {
       "song start sample must be a range 0-100"
     );
   }
-  difficultyRange = $("#cslgSettingsDifficulty").slider("getValue");
+  difficultyRange = /** @type {any} */ (
+    $("#cslgSettingsDifficulty").slider("getValue")
+  );
   if (
     difficultyRange[0] < 0 ||
     difficultyRange[0] > 100 ||
@@ -1467,7 +1593,7 @@ function validateTrainingStart() {
   $("#cslgSettingsModal").modal("hide");
   console.log("song order: ", songOrder);
   if (lobby.soloMode) {
-    startQuiz(filteredSongs);
+    startQuiz();
   } else if (lobby.isHost) {
     cslMessage(
       "§CSL0" +
@@ -1481,7 +1607,7 @@ function validateTrainingStart() {
 }
 
 $("#cslgAddAllButton")
-  .click(() => {
+  .on("click", () => {
     if (isSearchMode) {
       // Add all search results to My Songs
       const newSongs = songList.filter(
@@ -1515,7 +1641,7 @@ $("#cslgAddAllButton")
   });
 
 // Update the popover content when switching modes
-$("#cslgToggleModeButton").click(function () {
+$("#cslgToggleModeButton").on("click", function () {
   isSearchMode = !isSearchMode;
   updateModeDisplay();
 
@@ -1533,7 +1659,7 @@ $("#cslgToggleModeButton").click(function () {
   updateSongListDisplay();
 });
 
-$("#cslTrainingModeButton").click(() => {
+$("#cslTrainingModeButton").on("click", () => {
   validateTrainingStart();
 });
 
@@ -1700,7 +1826,7 @@ $("#cslgTransferSongListButton")
     placement: "bottom",
   });
 $("#cslgTableModeButton")
-  .click(() => {
+  .on("click", () => {
     songListTableMode = (songListTableMode + 1) % 3;
     createSongListTable();
   })
@@ -1710,22 +1836,22 @@ $("#cslgTableModeButton")
     placement: "bottom",
   });
 $("#cslgSongOrderSelect").on("change", function () {
-  songOrderType = this.value;
+  songOrderType = String($(this).val());
 });
 $("#cslgHostOverrideSelect").on("change", function () {
-  fileHostOverride = parseInt(this.value);
+  fileHostOverride = parseInt(String($(this).val()));
 });
-$("#cslgMergeButton").click(() => {
+$("#cslgMergeButton").on("click", () => {
   mergedSongList = Array.from(
     new Set(mergedSongList.concat(songList).map((x) => JSON.stringify(x)))
   ).map((x) => JSON.parse(x));
   createMergedSongListTable();
 });
-$("#cslgMergeClearButton").click(() => {
+$("#cslgMergeClearButton").on("click", () => {
   mergedSongList = [];
   createMergedSongListTable();
 });
-$("#cslgMergeDownloadButton").click(() => {
+$("#cslgMergeDownloadButton").on("click", () => {
   if (mergedSongList.length) {
     let data =
       "data:text/json;charset=utf-8," +
@@ -1814,7 +1940,7 @@ $("#cslgStartButton").click(() => {
 });
 
 $("#cslgSearchCriteria, #cslgSearchInput").on("change input", function () {
-  currentSearchFilter = $("#cslgSearchInput").val().toLowerCase();
+  currentSearchFilter = String($("#cslgSearchInput").val()).toLowerCase();
   createSongListTable();
 });
 
@@ -1911,8 +2037,8 @@ $("#cslgSongListTable")
     event.target.parentElement.parentElement.classList.remove("selected");
   });
 $("#cslgAnswerButtonAdd").click(() => {
-  let oldName = $("#cslgOldAnswerInput").val().trim();
-  let newName = $("#cslgNewAnswerInput").val().trim();
+  let oldName = String($("#cslgOldAnswerInput").val()).trim();
+  let newName = String($("#cslgNewAnswerInput").val()).trim();
   if (oldName) {
     newName
       ? (replacedAnswers[oldName] = newName)
@@ -2557,7 +2683,7 @@ function addWeightAdjustmentButtons() {
   if (!quiz.cslActive || !isTraining || buttonContainerAdded) return;
 
   // Create the container for weight adjustment buttons
-  const $weightAdjustmentContainer = $(`
+  const $weightAdjustmentContainer = $(/*html*/ `
 		<div id="qpWeightAdjustmentContainer" class="container-fluid">
 			<div class="row">
 				<div class="col-xs-12">
@@ -2613,7 +2739,7 @@ function addWeightAdjustmentButtons() {
   $("<style>")
     .prop("type", "text/css")
     .html(
-      `
+      /*css*/ `
       #qpWeightAdjustmentContainer {
           background-color: rgba(0, 0, 0, 0.3);
           border-radius: 5px;
@@ -2682,12 +2808,14 @@ function addWeightAdjustmentButtons() {
     .appendTo("head");
 }
 
+/**
+ * @param {number} factor
+ */
 function adjustWeightOnUserInteraction(factor) {
   if (!quiz.cslActive || !isTraining) return;
 
-  const currentSongNumber = document.querySelector(
-    "#qpCurrentSongCount"
-  ).textContent;
+  const currentSongNumber =
+    document.querySelector("#qpCurrentSongCount")?.textContent ?? "0";
   const currentSongListIndex = songOrder[currentSongNumber];
 
   if (currentSongListIndex === undefined) {
@@ -2763,9 +2891,8 @@ function revertWeight() {
 
     saveReviewData(reviewData);
 
-    const currentSongNumber = document.querySelector(
-      "#qpCurrentSongCount"
-    ).textContent;
+    const currentSongNumber =
+      document.querySelector("#qpCurrentSongCount")?.textContent ?? "0";
     const currentSongListIndex = songOrder[currentSongNumber];
     const currentSongData = finalSongList[currentSongListIndex];
 
@@ -2794,6 +2921,11 @@ function resetNewSongsCount() {
   saveNewSongsSettings();
 }
 
+/**
+ * @param {import('./types.js').Song[]} songKeys
+ * @param {number} maxSongs
+ * @returns
+ */
 function prepareSongForTraining(songKeys, maxSongs) {
   console.log(`=== prepareSongForTraining START ===`);
   console.log(`Input: ${songKeys.length} tracks, maxSongs: ${maxSongs}`);
@@ -2978,14 +3110,6 @@ function prepareSongForTraining(songKeys, maxSongs) {
   return finalSelection;
 }
 
-function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array;
-}
-
 function resetUsedNewSongs() {
   usedNewSongs.clear();
 }
@@ -3146,16 +3270,16 @@ function setup() {
       parseMessage(message.message, message.sender);
     }
   }).bindListener();
-  new Listener("Game Starting", (payload) => {
+  new Listener("Game Starting", () => {
     clearTimeEvents();
   }).bindListener();
-  new Listener("Join Game", (payload) => {
+  new Listener("Join Game", () => {
     reset();
   }).bindListener();
-  new Listener("Spectate Game", (payload) => {
+  new Listener("Spectate Game", () => {
     reset();
   }).bindListener();
-  new Listener("Host Game", (payload) => {
+  new Listener("Host Game", () => {
     reset();
     $("#cslgSettingsModal").modal("hide");
   }).bindListener();
@@ -3273,6 +3397,7 @@ function setup() {
   };
 
   const oldVideoReady = quiz.videoReady;
+
   quiz.videoReady = function (songId) {
     if (quiz.cslActive && this.inQuiz) {
       nextVideoReady = true;
@@ -3499,7 +3624,7 @@ function validateStart() {
   $("#cslgSettingsModal").modal("hide");
   console.log("song order: ", songOrder);
   if (lobby.soloMode) {
-    startQuiz(filteredSongs);
+    startQuiz();
   } else if (lobby.isHost) {
     cslMessage(
       "§CSL0" +
@@ -3734,9 +3859,15 @@ function playSong(songNumber) {
   }, 100);
 }
 
-// end guess phase and display answer
+/**
+ * end guess phase and display answer
+ *
+ * @param {number} songNumber
+ */
 function endGuessPhase(songNumber) {
   if (!quiz.cslActive || !quiz.inQuiz) return reset();
+
+  /** @type {import('./types.js').Song} */
   let song;
   if (quiz.isHost) {
     song = finalSongList[songOrder[songNumber]];
@@ -4377,7 +4508,14 @@ function getStartPoint() {
   );
 }
 
-// return true if song type is allowed
+/**
+ * Return true if song type is allowed
+ *
+ * @param {import('./types.js').Song} song
+ * @param {boolean} ops
+ * @param {boolean} eds
+ * @param {boolean} ins
+ */
 function songTypeFilter(song, ops, eds, ins) {
   let type = song.songType;
   if (ops && type === 1) return true;
@@ -4386,7 +4524,16 @@ function songTypeFilter(song, ops, eds, ins) {
   return false;
 }
 
-// return true if anime type is allowed
+/**
+ * Return true if anime type is allowed
+ *
+ * @param {import('./types.js').Song} song
+ * @param {boolean} tv
+ * @param {boolean} movie
+ * @param {boolean} ova
+ * @param {boolean} ona
+ * @param {boolean} special
+ */
 function animeTypeFilter(song, tv, movie, ova, ona, special) {
   if (song.animeType) {
     let type = song.animeType.toLowerCase();
@@ -4401,16 +4548,28 @@ function animeTypeFilter(song, tv, movie, ova, ona, special) {
   }
 }
 
-// return true if the song difficulty is in allowed range
+/**
+ * Return true if the song difficulty is in allowed range
+ *
+ * @param {import('./types.js').Song} song
+ * @param {number} low
+ * @param {number} high
+ */
 function difficultyFilter(song, low, high) {
   if (low === 0 && high === 100) return true;
-  let dif = parseFloat(song.songDifficulty);
+  let dif = song.songDifficulty ?? NaN;
   if (isNaN(dif)) return false;
   if (dif >= low && dif <= high) return true;
   return false;
 }
 
-// return true if guess type is allowed
+/**
+ * Return true if guess type is allowed
+ *
+ * @param {import('./types.js').Song} song
+ * @param {boolean} correctGuesses
+ * @param {boolean} incorrectGuesses
+ */
 function guessTypeFilter(song, correctGuesses, incorrectGuesses) {
   if (correctGuesses && song.correctGuess) return true;
   if (incorrectGuesses && song.incorrectGuess) return true;
@@ -4502,7 +4661,7 @@ function openStatsModal() {
 
 function createStatsModal() {
   console.log("Creating Stats Modal");
-  statsModal = $(`
+  statsModal = $(/*html*/ `
     <div class="modal fade" id="statsModal" tabindex="-1" role="dialog">
       <div class="modal-dialog" role="document">
         <div class="modal-content">
@@ -4524,10 +4683,9 @@ function createStatsModal() {
 
 function updateStatsContent() {
   console.log("Updating Stats Content");
-  const reviewData =
-    JSON.parse(
-      localStorage.getItem(`spacedRepetitionData_${currentProfile}`)
-    ) || {};
+  const reviewData = JSON.parse(
+    localStorage.getItem(`spacedRepetitionData_${currentProfile}`) ?? "{}"
+  );
   const $modalBody = $("#statsModal .modal-body");
   $modalBody.empty();
 
@@ -4565,7 +4723,7 @@ function updateStatsContent() {
     else efactorRanges["3.0+"]++;
   });
 
-  $modalBody.append(`
+  $modalBody.append(/*html*/ `
       <div class="stats-section">
         <h3>Overall Statistics</h3>
         <p>Total Songs: ${totalSongs}</p>
@@ -4575,7 +4733,7 @@ function updateStatsContent() {
       </div>
     `);
 
-  $modalBody.append(`
+  $modalBody.append(/*html*/ `
       <div class="stats-section">
         <h3>Difficulty Distribution</h3>
         <h5>Higher means better recognized</h5>
@@ -4586,7 +4744,7 @@ function updateStatsContent() {
           </tr>
           ${Object.entries(efactorRanges)
             .map(
-              ([range, count]) => `
+              ([range, count]) => /*html*/ `
             <tr>
               <td>${range}</td>
               <td>${count}</td>
@@ -4598,7 +4756,7 @@ function updateStatsContent() {
       </div>
     `);
 
-  $modalBody.append(`
+  $modalBody.append(/*html*/ `
     <div class="stats-section">
       <h3>Most Difficult Songs</h3>
       <table class="stats-table">
@@ -4610,7 +4768,7 @@ function updateStatsContent() {
         </tr>
         ${difficultSongs
           .map(
-            ([song, data]) => `
+            ([song, data]) => /*html*/ `
           <tr>
             <td>${song}</td>
             <td>${data.failureCount}</td>
@@ -4624,7 +4782,7 @@ function updateStatsContent() {
     </div>
   `);
 
-  $modalBody.append(`
+  $modalBody.append(/*html*/ `
     <div class="stats-section">
       <h3>Recently Reviewed Songs</h3>
       <table class="stats-table">
@@ -4635,7 +4793,7 @@ function updateStatsContent() {
         </tr>
         ${recentSongs
           .map(
-            ([song, data]) => `
+            ([song, data]) => /*html*/ `
           <tr>
             <td>${song}</td>
             <td>${new Date(data.lastReviewDate).toLocaleString()}</td>
@@ -4674,7 +4832,7 @@ function initializePopovers() {
     trigger: "hover",
     placement: "auto",
     html: true,
-    content: `
+    content: /*html*/ `
             <p>When enabled, only songs played earlier with difficulty in the specified range will be selected.</p>
             <p>Max New Songs, Incorrect Songs per Game, and Correct Songs per Game settings are ignored in this mode.</p>
             <p>Difficulty range: 1.0 (most difficult) to 5.0 (easiest)</p>
@@ -4683,9 +4841,10 @@ function initializePopovers() {
 }
 
 function setupRepeatMode() {
-  $("#cslgSettingsRepeatMode").change(function () {
-    $("#cslgSettingsRepeatModeRange").prop("disabled", !this.checked);
-    if (this.checked) {
+  $("#cslgSettingsRepeatMode").on("change", function () {
+    const checked = $(this).prop("checked");
+    $("#cslgSettingsRepeatModeRange").prop("disabled", !checked);
+    if (checked) {
       $(
         "#cslgSettingsMaxNewSongs, #cslgSettingsIncorrectSongs, #cslgSettingsCorrectSongs"
       ).prop("disabled", true);
@@ -4697,7 +4856,7 @@ function setupRepeatMode() {
   });
 
   $("#cslgSettingsRepeatModeRange").on("input", function () {
-    let range = $(this).val().split("-");
+    let range = String($(this).val()).split("-");
     if (
       range.length === 2 &&
       !isNaN(parseFloat(range[0])) &&
@@ -4835,8 +4994,8 @@ function updateModeDisplay() {
 
 // when you click the go button
 function anisongdbDataSearch() {
-  let mode = $("#cslgAnisongdbModeSelect").val().toLowerCase();
-  let query = $("#cslgAnisongdbQueryInput").val();
+  let mode = String($("#cslgAnisongdbModeSelect").val()).toLowerCase();
+  let query = String($("#cslgAnisongdbQueryInput").val());
   let ops = $("#cslgAnisongdbOPCheckbox").prop("checked");
   let eds = $("#cslgAnisongdbEDCheckbox").prop("checked");
   let ins = $("#cslgAnisongdbINCheckbox").prop("checked");
@@ -4845,8 +5004,12 @@ function anisongdbDataSearch() {
     "checked"
   );
   let arrangement = $("#cslgAnisongdbArrangementCheckbox").prop("checked");
-  let maxOtherPeople = parseInt($("#cslgAnisongdbMaxOtherPeopleInput").val());
-  let minGroupMembers = parseInt($("#cslgAnisongdbMinGroupMembersInput").val());
+  let maxOtherPeople = parseInt(
+    String($("#cslgAnisongdbMaxOtherPeopleInput").val())
+  );
+  let minGroupMembers = parseInt(
+    String($("#cslgAnisongdbMinGroupMembersInput").val())
+  );
   if (query && !isNaN(maxOtherPeople) && !isNaN(minGroupMembers)) {
     getAnisongdbData(
       mode,
@@ -4863,6 +5026,20 @@ function anisongdbDataSearch() {
   }
 }
 
+/**
+ * Fetch a list of songs from AnisongDB
+ *
+ * @param {string} mode Type of selector to use
+ * @param {string} query
+ * @param {boolean} ops
+ * @param {boolean} eds
+ * @param {boolean} ins
+ * @param {boolean} partial
+ * @param {boolean} ignoreDuplicates
+ * @param {boolean} arrangement
+ * @param {number} maxOtherPeople
+ * @param {number} minGroupMembers
+ */
 // send anisongdb request
 function getAnisongdbData(
   mode,
@@ -4878,7 +5055,20 @@ function getAnisongdbData(
 ) {
   $("#cslgSongListCount").text("Loading...");
   $("#cslgSongListTable tbody").empty();
-  let url, data;
+
+  /** @type {string} */
+  let url = "https://anisongdb.com/api/search_request";
+
+  /** @type {RequestInit} */
+  const payload = {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+  };
+
+  /** @type {import('./types/anisong.js').AnisongSongQueryArguments} */
   let json = {
     and_logic: false,
     ignore_duplicate: ignoreDuplicates,
@@ -4886,14 +5076,13 @@ function getAnisongdbData(
     ending_filter: eds,
     insert_filter: ins,
   };
+
   if (mode === "anime") {
-    url = "https://anisongdb.com/api/search_request";
     json.anime_search_filter = {
       search: query,
       partial_match: partial,
     };
   } else if (mode === "artist") {
-    url = "https://anisongdb.com/api/search_request";
     console.log("query : ", query);
     console.log("minGroupMembers : ", minGroupMembers);
     console.log("maxOtherPeople : ", maxOtherPeople);
@@ -4904,13 +5093,11 @@ function getAnisongdbData(
       max_other_artist: maxOtherPeople,
     };
   } else if (mode === "song") {
-    url = "https://anisongdb.com/api/search_request";
     json.song_name_search_filter = {
       search: query,
       partial_match: partial,
     };
   } else if (mode === "composer") {
-    url = "https://anisongdb.com/api/search_request";
     json.composer_search_filter = {
       search: query,
       partial_match: partial,
@@ -4919,6 +5106,7 @@ function getAnisongdbData(
   } else if (mode === "season") {
     query = query.trim();
     query = query.charAt(0).toUpperCase() + query.slice(1).toLowerCase();
+    payload.method = "GET"; // Use a GET request
     url = `https://anisongdb.com/api/filter_season?${new URLSearchParams({
       season: query,
     })}`;
@@ -4931,43 +5119,21 @@ function getAnisongdbData(
       .split(/[, ]+/)
       .map((n) => parseInt(n))
       .filter((n) => !isNaN(n));
-  }
-  if (mode === "season") {
-    data = {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-    };
   } else {
-    data = {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(json),
-    };
+    console.error("Invalid mode");
+    return;
   }
-  fetch(url, data)
+
+  if (mode !== "season") {
+    payload["body"] = JSON.stringify(json);
+  }
+
+  console.log(url, payload);
+
+  fetch(url, payload)
     .then((res) => res.json())
     .then((json) => {
       handleData(json);
-      songList = finalSongList.filter((song) => {
-        // Check and set the songType and typeNumber
-        let songType = song.songType;
-        if (songType.startsWith("Opening")) {
-          song.songType = 1;
-          song.typeNumber = parseInt(songType.replace(/\D/g, "")); // Extract the number
-        } else if (songType.startsWith("Ending")) {
-          song.songType = 2;
-          song.typeNumber = parseInt(songType.replace(/\D/g, ""));
-        } else if (songType === "Insert Song") {
-          song.songType = 3;
-          song.typeNumber = null; // No type number for Insert Song
-        }
-      });
       songList = finalSongList.filter((song) =>
         songTypeFilter(song, ops, eds, ins)
       );
@@ -5001,45 +5167,100 @@ function getAnisongdbData(
     });
 }
 
+/**
+ * Check if data comes from AnisongDB
+ *
+ * @param {any} data
+ * @returns {data is import('./types/anisong.js').AnisongEntry[]}
+ */
+const isAnisongDBData = (data) =>
+  Array.isArray(data) && data.length && data[0].animeJPName;
+
+/**
+ * Check if data comes from the official AMQ song export
+ *
+ * @param {any} data
+ * @returns {data is import("./types/amqexport.js").AMQExport}
+ */
+const isAMQData = (data) =>
+  typeof data === "object" && data.roomName && data.startTime && data.songs;
+
+/**
+ * Parse a song type string (e.g. "Opening 2") to an object with type and number. (Insert songs have no number).
+ *
+ * @param {string} songType
+ * @returns {{ songType: SongTypes, typeNumber: number | null }}
+ */
+const parseSongType = (songType) => {
+  if (songType.startsWith("Opening")) {
+    return {
+      songType: 1,
+      typeNumber: parseInt(songType.replace(/\D/g, "")),
+    };
+  } else if (songType.startsWith("Ending")) {
+    return {
+      songType: 2,
+      typeNumber: parseInt(songType.replace(/\D/g, "")),
+    };
+  } else if (songType === "Insert Song") {
+    return {
+      songType: 3,
+      typeNumber: null,
+    };
+  }
+
+  // Default to Insert Song
+  return {
+    songType: 3,
+    typeNumber: null,
+  };
+};
+
+/**
+ * Load data from several sources, and save it to "finalSongList".
+ *
+ * @param {any} data
+ * @returns {void}
+ */
 function handleData(data) {
   finalSongList = [];
   if (!data) return;
   loadIgnoredSongs(); // Load the latest ignored songs
+  console.log("Got data", { data });
   // anisongdb structure
-  if (Array.isArray(data) && data.length && data[0].animeJPName) {
-    data = data.filter((song) => song.audio || song.MQ || song.HQ);
-    for (let song of data) {
+  if (isAnisongDBData(data)) {
+    const songs = data.filter((song) => song.audio || song.MQ || song.HQ);
+    for (let song of songs) {
       finalSongList.push({
         animeRomajiName: song.animeJPName,
         animeEnglishName: song.animeENName,
-        altAnimeNames: [].concat(
+        altAnimeNames: [
           song.animeJPName,
           song.animeENName,
-          song.animeAltName || []
-        ),
+          ...(song.animeAltName || []),
+        ].filter(Boolean),
         altAnimeNamesAnswers: [],
         songArtist: song.songArtist,
         songName: song.songName,
-        songType: song.songType,
-        typeNumber: song.typeNumber,
-        songDifficulty: song.songDifficulty,
-        animeType: song.animeType,
-        animeVintage: song.animeVintage,
+        ...parseSongType(song.songType),
+        songDifficulty: song.songDifficulty ?? null,
+        animeType: song.animeType ?? null,
+        animeVintage: song.animeVintage ?? null,
         annId: song.annId,
         malId: song.linked_ids?.myanimelist,
         kitsuId: song.linked_ids?.kitsu,
         aniListId: song.linked_ids?.anilist,
-        animeTags: song.animeTags || [],
-        animeGenre: song.animeGenre || [],
+        animeTags: [],
+        animeGenre: [],
         rebroadcast: null,
         dub: null,
         startPoint: null,
-        audio: song.audio,
-        video480: song.MQ,
-        video720: song.HQ,
+        audio: song.audio ?? null,
+        video480: song.MQ ?? null,
+        video720: song.HQ ?? null,
         correctGuess: true,
         incorrectGuess: true,
-        rating: song.rating,
+        rating: null,
       });
     }
     for (let song of finalSongList) {
@@ -5055,12 +5276,7 @@ function handleData(data) {
     }
   }
   // official amq song export structure
-  else if (
-    typeof data === "object" &&
-    data.roomName &&
-    data.startTime &&
-    data.songs
-  ) {
+  else if (isAMQData(data)) {
     for (let song of data.songs) {
       finalSongList.push({
         animeRomajiName: song.songInfo.animeNames.romaji,
@@ -5073,7 +5289,7 @@ function handleData(data) {
         songArtist: song.songInfo.artist,
         songName: song.songInfo.songName,
         songType: song.songInfo.type,
-        songTypeNumber: song.songInfo.typeNumber,
+        typeNumber: song.songInfo.typeNumber,
         songDifficulty: song.songInfo.animeDifficulty,
         animeType: song.songInfo.animeType,
         animeVintage: song.songInfo.vintage,
@@ -5083,16 +5299,17 @@ function handleData(data) {
         aniListId: song.songInfo.siteIds.aniListId,
         animeTags: song.songInfo.animeTags,
         animeGenre: song.songInfo.animeGenre,
-        rebroadcast: song.songInfo.rebroadcast || null,
-        dub: song.songInfo.dub || null,
-        startPoint: song.startPoint,
+        rebroadcast: null,
+        dub: null,
+        startPoint: song.songInfo.startPoint,
         audio: String(song.videoUrl).endsWith(".mp3") ? song.videoUrl : null,
         video480: null,
         video720: String(song.videoUrl).endsWith(".webm")
           ? song.videoUrl
           : null,
-        correctGuess: song.correctGuess,
-        incorrectGuess: song.wrongGuess,
+        correctGuess: !song.songInfo.wrongGuess,
+        incorrectGuess: song.songInfo.wrongGuess,
+        rating: null,
       });
     }
   }
@@ -5110,7 +5327,7 @@ function handleData(data) {
         songArtist: song.artist,
         songName: song.name,
         songType: Object({ O: 1, E: 2, I: 3 })[song.type[0]],
-        songTypeNumber:
+        typeNumber:
           song.type[0] === "I" ? null : parseInt(song.type.split(" ")[1]),
         songDifficulty: parseFloat(song.difficulty),
         animeType: song.animeType,
@@ -5131,6 +5348,7 @@ function handleData(data) {
           song.urls?.catbox?.[720] ?? song.urls?.openingsmoe?.[720] ?? null,
         correctGuess: song.correct,
         incorrectGuess: !song.correct,
+        rating: null,
       });
     }
   }
@@ -5145,7 +5363,7 @@ function handleData(data) {
         songArtist: song.artist,
         songName: song.songName,
         songType: Object({ O: 1, E: 2, I: 3 })[song.type[0]],
-        songTypeNumber:
+        typeNumber:
           song.type[0] === "I" ? null : parseInt(song.type.split(" ")[1]),
         songDifficulty: song.songDifficulty,
         animeType: null,
@@ -5164,6 +5382,7 @@ function handleData(data) {
         video720: song.LinkVideo,
         correctGuess: true,
         incorrectGuess: true,
+        rating: null,
       });
     }
   }
@@ -5178,7 +5397,7 @@ function handleData(data) {
         songArtist: song.songArtist,
         songName: song.songName,
         songType: song.songType,
-        songTypeNumber: song.songTypeNumber,
+        typeNumber: song.songTypeNumber,
         songDifficulty: song.songDifficulty,
         animeType: song.animeType,
         animeVintage: song.animeVintage,
@@ -5196,6 +5415,7 @@ function handleData(data) {
         video720: song.video720,
         correctGuess: true,
         incorrectGuess: true,
+        rating: null,
       });
     }
   }
@@ -5219,8 +5439,12 @@ function handleData(data) {
   );
 }
 
-// create song list table
-function createSongListTable(displayList) {
+/**
+ * Create song list table
+ *
+ * @param {import("./types.js").Song[]} displayList
+ */
+function createSongListTable(displayList = []) {
   const showIgnored = $("#cslgShowIgnoredButton").hasClass("active");
 
   if (showIgnored) {
@@ -5261,9 +5485,13 @@ function createSongListTable(displayList) {
       (b.songArtist || "").localeCompare(a.songArtist || "")
     );
   } else if (songListTableSort[2] === 1) {
-    displayList.sort((a, b) => a.songDifficulty - b.songDifficulty);
+    displayList.sort(
+      (a, b) => (a.songDifficulty ?? 0) - (b.songDifficulty ?? 0)
+    );
   } else if (songListTableSort[2] === 2) {
-    displayList.sort((a, b) => b.songDifficulty - a.songDifficulty);
+    displayList.sort(
+      (a, b) => (b.songDifficulty ?? 0) - (a.songDifficulty ?? 0)
+    );
   } else if (songListTableSort[3] === 1) {
     displayList.sort((a, b) =>
       (options.useRomajiNames
@@ -5285,14 +5513,14 @@ function createSongListTable(displayList) {
   } else if (songListTableSort[4] === 1) {
     displayList.sort(
       (a, b) =>
-        songTypeSortValue(a.songType, a.songTypeNumber) -
-        songTypeSortValue(b.songType, b.songTypeNumber)
+        songTypeSortValue(a.songType, a.typeNumber) -
+        songTypeSortValue(b.songType, b.typeNumber)
     );
   } else if (songListTableSort[4] === 2) {
     displayList.sort(
       (a, b) =>
-        songTypeSortValue(b.songType, b.songTypeNumber) -
-        songTypeSortValue(a.songType, a.songTypeNumber)
+        songTypeSortValue(b.songType, b.typeNumber) -
+        songTypeSortValue(a.songType, a.typeNumber)
     );
   } else if (songListTableSort[5] === 1) {
     displayList.sort(
@@ -5310,40 +5538,45 @@ function createSongListTable(displayList) {
     let $row = $("<tr></tr>");
     $row.append($(`<th class="number">#</th>`));
     $row.append(
-      $(`<th class="song clickAble">Song</th>`).click(() => {
+      $(/*html*/ `<th class="song clickAble">Song</th>`).on("click", () => {
         setSongListTableSort(0);
         createSongListTable(displayList);
       })
     );
     $row.append(
-      $(`<th class="artist clickAble">Artist</th>`).click(() => {
+      $(/*html*/ `<th class="artist clickAble">Artist</th>`).on("click", () => {
         setSongListTableSort(1);
         createSongListTable(displayList);
       })
     );
     $row.append(
-      $(`<th class="difficulty clickAble">Dif</th>`).click(() => {
-        setSongListTableSort(2);
-        createSongListTable(displayList);
-      })
+      $(/*html*/ `<th class="difficulty clickAble">Dif</th>`).on(
+        "click",
+        () => {
+          setSongListTableSort(2);
+          createSongListTable(displayList);
+        }
+      )
     );
-    $row.append($(`<th class="action"></th>`));
+    $row.append($(/*html*/ `<th class="action"></th>`));
     $thead.append($row);
     displayList.forEach((song, i) => {
-      let $row = $("<tr></tr>");
+      let $row = $(/*html*/ `<tr></tr>`);
       $row.append(
-        $("<td></td>")
+        $(/*html*/ `<td></td>`)
           .addClass("number")
           .text(i + 1)
       );
-      $row.append($("<td></td>").addClass("song").text(song.songName));
-      $row.append($("<td></td>").addClass("artist").text(song.songArtist));
+      $row.append($(/*html*/ `<td></td>`).addClass("song").text(song.songName));
       $row.append(
-        $("<td></td>")
+        $(/*html*/ `<td></td>`).addClass("artist").text(song.songArtist)
+      );
+      $row.append(
+        $(/*html*/ `<td></td>`)
           .addClass("difficulty")
           .text(
             Number.isFinite(song.songDifficulty)
-              ? Math.floor(song.songDifficulty)
+              ? Math.floor(song.songDifficulty ?? 0)
               : ""
           )
       );
@@ -5406,9 +5639,13 @@ function createSongListTable(displayList) {
       $row.append(
         $("<td></td>")
           .addClass("songType")
-          .text(songTypeText(song.songType, song.songTypeNumber))
+          .text(songTypeText(song.songType, song.typeNumber))
       );
-      $row.append($("<td></td>").addClass("vintage").text(song.animeVintage));
+      $row.append(
+        $("<td></td>")
+          .addClass("vintage")
+          .text(song.animeVintage ?? "")
+      );
       $row.append(
         $("<td></td>").addClass("action").append(`
                     ${
@@ -5470,6 +5707,9 @@ function createSongListTable(displayList) {
   }
 }
 
+/**
+ * @param {import("./types.js").Song[]} list
+ */
 function filterSongList(list) {
   if (currentSearchFilter) {
     const searchCriteria = $("#cslgSearchCriteria").val();
@@ -5486,11 +5726,11 @@ function filterSongList(list) {
             song.animeRomajiName.toLowerCase().includes(lowerCaseFilter)
           );
         case "songType":
-          return songTypeText(song.songType, song.songTypeNumber)
+          return songTypeText(song.songType, song.typeNumber)
             .toLowerCase()
             .includes(lowerCaseFilter);
         case "animeVintage":
-          return song.animeVintage.toLowerCase().includes(lowerCaseFilter);
+          return song.animeVintage?.toLowerCase().includes(lowerCaseFilter);
         case "all":
         default:
           return (
@@ -5498,10 +5738,10 @@ function filterSongList(list) {
             song.songArtist.toLowerCase().includes(lowerCaseFilter) ||
             song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
             song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
-            songTypeText(song.songType, song.songTypeNumber)
+            songTypeText(song.songType, song.typeNumber)
               .toLowerCase()
               .includes(lowerCaseFilter) ||
-            song.animeVintage.toLowerCase().includes(lowerCaseFilter)
+            song.animeVintage?.toLowerCase().includes(lowerCaseFilter)
           );
       }
     });
@@ -5536,13 +5776,13 @@ function createMergedSongListTable() {
     $row.append(
       $("<td></td>")
         .addClass("songType")
-        .text(songTypeText(song.songType, song.songTypeNumber))
+        .text(songTypeText(song.songType, song.typeNumber))
     );
     $row.append(
       $("<td></td>")
         .addClass("action")
         .append(
-          `<i class="fa fa-chevron-up clickAble" aria-hidden="true"></i><i class="fa fa-chevron-down clickAble" aria-hidden="true"></i> <i class="fa fa-trash clickAble" aria-hidden="true"></i>`
+          /*html*/ `<i class="fa fa-chevron-up clickAble" aria-hidden="true"></i><i class="fa fa-chevron-down clickAble" aria-hidden="true"></i> <i class="fa fa-trash clickAble" aria-hidden="true"></i>`
         )
     );
     $tbody.append($row);
@@ -5778,7 +6018,12 @@ function preventCodeInjection(text) {
   return text;
 }
 
-// split a string into chunks
+/**
+ * Split a string into chunks
+ *
+ * @param {string} str
+ * @param {number} chunkSize
+ */
 function splitIntoChunks(str, chunkSize) {
   let chunks = [];
   for (let i = 0; i < str.length; i += chunkSize) {
@@ -5787,9 +6032,14 @@ function splitIntoChunks(str, chunkSize) {
   return chunks;
 }
 
-// convert base 10 number to base 36
+/**
+ * Convert base 10 number to base 36
+ *
+ * @param {number} number
+ * @returns {string}
+ */
 function base10to36(number) {
-  if (number === 0) return 0;
+  if (number === 0) return "0";
   let digits = "0123456789abcdefghijklmnopqrstuvwxyz";
   let result = "";
   while (number > 0) {
@@ -5800,7 +6050,12 @@ function base10to36(number) {
   return result;
 }
 
-// convert base 36 number to base 10
+/**
+ * Convert base 36 number to base 10
+ *
+ * @param {string} number
+ * @returns {number | null}
+ */
 function base36to10(number) {
   number = String(number);
   let digits = "0123456789abcdefghijklmnopqrstuvwxyz";
@@ -5816,13 +6071,22 @@ function base36to10(number) {
 // manage data for split messages
 class Chunk {
   constructor() {
+    /** @type {Record<number, string>} */
     this.chunkMap = {};
     this.isComplete = false;
   }
+
+  /**
+   * @param {string} text
+   */
   append(text) {
     let regex = /^§CSL\w(\w)/.exec(text);
     if (regex) {
       let index = base36to10(regex[1]);
+      if (index === null) {
+        console.log("CSL ERROR: bad chunk index\n" + text);
+        return;
+      }
       if (text.endsWith("$")) {
         this.chunkMap[index] = text.slice(6, -1);
         this.isComplete = true;
@@ -5850,7 +6114,11 @@ class Chunk {
   }
 }
 
-// input myanimelist username, return list of mal ids
+/**
+ * Input myanimelist username, return list of mal ids
+ *
+ * @param {string} username Myanimelist username
+ */
 async function getMalIdsFromMyanimelist(username) {
   let malIds = [];
   let statuses = [];
@@ -5871,7 +6139,10 @@ async function getMalIdsFromMyanimelist(username) {
   }
   for (let status of statuses) {
     $("#cslgListImportText").text(`Retrieving Myanimelist: ${status}`);
+
+    /** @type {string} */
     let nextPage = `https://api.myanimelist.net/v2/users/${username}/animelist?offset=0&limit=1000&nsfw=true&status=${status}`;
+
     while (nextPage) {
       let result = await new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -5887,8 +6158,8 @@ async function getMalIdsFromMyanimelist(username) {
         });
       });
       if (result.error) {
-        nextPage = false;
         $("#cslgListImportText").text(`MAL API Error: ${result.error}`);
+        break;
       } else {
         for (let anime of result.data) {
           const malIdEntry = {
@@ -5903,11 +6174,19 @@ async function getMalIdsFromMyanimelist(username) {
   return malIds;
 }
 
-// input anilist username, return list of mal ids
+/**
+ * Input anilist username, return list of mal ids
+ *
+ * @param {string} username Anilist username
+ * @returns {Promise<{ malId: number }[]>}
+ */
 async function getMalIdsFromAnilist(username) {
   let pageNumber = 1;
   let malIds = [];
+
+  /** @type {import('./types/anilist.js').AnilistStatus[]} */
   let statuses = [];
+
   if ($("#cslgListImportWatchingCheckbox").prop("checked")) {
     statuses.push("CURRENT");
   }
@@ -5949,12 +6228,20 @@ async function getMalIdsFromAnilist(username) {
       hasNextPage = false;
     }
   }
+
   return malIds;
 }
 
-// input username, status, and page number
+/**
+ * Fetch data from Anilist API
+ *
+ * @param {string} username Anilist username
+ * @param {import('./types/anilist.js').AnilistStatus[]} statuses
+ * @param {number} pageNumber
+ * @returns {Promise<import('./types/anilist.js').AnilistQueryResults["Page"] | void>}
+ */
 function getAnilistData(username, statuses, pageNumber) {
-  let query = `
+  let query = /* GraphQL */ `
         query {
             Page (page: ${pageNumber}, perPage: 50) {
                 pageInfo {
@@ -5967,7 +6254,7 @@ function getAnilistData(username, statuses, pageNumber) {
                         id
                         idMal
                         genres
-                        tags{
+                        tags {
                           name
                         }
                         averageScore
@@ -5981,9 +6268,18 @@ function getAnilistData(username, statuses, pageNumber) {
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ query: query }),
   };
+
+  fetch("https://graphql.anilist.co", data).then((res) =>
+    console.log(res.json())
+  );
+
   return fetch("https://graphql.anilist.co", data)
     .then((res) => res.json())
-    .then((json) => json?.data?.Page)
+    .then(
+      (
+        /** @type {{ data: import('./types/anilist.js').AnilistQueryResults} }*/ json
+      ) => json?.data?.Page
+    )
     .catch((error) => console.log(error));
 }
 
@@ -6101,7 +6397,7 @@ async function startImport() {
   $("#cslgListImportActionContainer").hide();
   if ($("#cslgListImportSelect").val() === "myanimelist") {
     if (malClientId) {
-      let username = $("#cslgListImportUsernameInput").val().trim();
+      let username = String($("#cslgListImportUsernameInput").val()).trim();
       if (username) {
         let malIds = await getMalIdsFromMyanimelist(username);
         await getSongListFromMalIds(malIds);
@@ -6112,7 +6408,7 @@ async function startImport() {
       $("#cslgListImportText").text("Missing MAL Client ID");
     }
   } else if ($("#cslgListImportSelect").val() === "anilist") {
-    let username = $("#cslgListImportUsernameInput").val().trim();
+    let username = String($("#cslgListImportUsernameInput").val()).trim();
     if (username) {
       let malIds = await getMalIdsFromAnilist(username);
       await getSongListFromMalIds(malIds);
@@ -6140,11 +6436,11 @@ async function startImport() {
       .on("click", function () {
         if (!importedSongList.length) return;
         let listType = $("#cslgListImportSelect").val();
-        let username = $("#cslgListImportUsernameInput").val().trim();
+        let username = String($("#cslgListImportUsernameInput").val()).trim();
         let date = new Date();
         let dateFormatted = `${date.getFullYear()}-${String(
           date.getMonth() + 1
-        ).padStart(2, 0)}-${String(date.getDate()).padStart(2, 0)}`;
+        ).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
         let data =
           "data:text/json;charset=utf-8," +
           encodeURIComponent(JSON.stringify(importedSongList));
@@ -6163,10 +6459,14 @@ async function startImport() {
   importRunning = false;
 }
 
-// validate json data in local storage
+/**
+ * Validate json data in local storage
+ *
+ * @param {string} item The item to validate
+ */
 function validateLocalStorage(item) {
   try {
-    return JSON.parse(localStorage.getItem(item)) || {};
+    return JSON.parse(localStorage.getItem(item) ?? "{}");
   } catch {
     return {};
   }
@@ -6181,7 +6481,7 @@ function applyStyles() {
   let style = document.createElement("style");
   style.type = "text/css";
   style.id = "customSongListStyle";
-  let text = `
+  let text = /*css*/ `
 
     input.number-to-text::-webkit-outer-spin-button,
     input.number-to-text::-webkit-inner-spin-button {

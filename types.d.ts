@@ -1,8 +1,16 @@
 export {};
 
+import type { GMXmlHttpRequestOptions } from "./types/userscript";
+
 declare class Quiz {
+  isHost: boolean;
   inQuiz: boolean;
   isSpectator?: boolean;
+  soloMode: boolean;
+  ownGamePlayerId?: number;
+  videoReady: (songId: number) => void;
+  leave: () => void;
+  startReturnLobbyVote: () => void;
 
   /**
    * The input object for the quiz answer
@@ -177,13 +185,18 @@ export class ListenerClass {
     command: "Spectate Game",
     callback: (data: SpectateGamePayload) => void
   );
+  constructor(command: "get all song names", callback: () => void);
+  constructor(command: "update all song names", callback: () => void);
+  constructor(command: "Host Game", callback: (payload: any) => void);
+  constructor(command: "Join Game", callback: (payload: any) => void);
+
   fire: (payload: any) => void;
   bindListener: () => void;
   unbindListener: () => void;
 }
 
 export type AMQSocket = {
-  sendCommand: (params: { type: string; command: string; data: any }) => void;
+  sendCommand: (params: { type: string; command: string; data?: any }) => void;
 };
 
 export type HotKey = {
@@ -206,7 +219,7 @@ export type Song = {
   songArtist: string;
   songName: string;
   songType: SongTypes;
-  songTypeNumber: number | null;
+  typeNumber: number | null;
   songDifficulty: number | null;
   animeType: string | null;
   animeVintage: string | null;
@@ -224,6 +237,7 @@ export type Song = {
   video720: string | null;
   correctGuess: boolean;
   incorrectGuess: boolean;
+  rating: number | null;
 };
 
 export type MessageDisplayer = {
@@ -259,6 +273,26 @@ export type RankedState = {
 
 export type HostModal = {};
 
+// https://www.npmjs.com/package/bootstrap-slider#events
+export type SliderRangeChangeEvent = {
+  value: {
+    oldValue: [number, number];
+    newValue: [number, number];
+  };
+};
+
+export type SliderChangeEvent = {
+  value: {
+    oldValue: number;
+    newValue: number;
+  };
+};
+
+export type AMQOptions = {
+  autoVoteSkipGuess: number;
+  useRomajiNames: number;
+};
+
 declare global {
   var gameChat: GameChat;
   var quiz: Quiz;
@@ -269,6 +303,8 @@ declare global {
   var selfName: string;
   var ranked: RankedState;
   var hostModal: HostModal;
+  var options: AMQOptions;
+  var GM_xmlhttpRequest: (details: GMXmlHttpRequestOptions) => void;
 }
 
 declare class GameChat {
