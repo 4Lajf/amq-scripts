@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "moduleDetection": "force",
+    "target": "ES2021",
+    "strictNullChecks": true,
+    "noImplicitAny": true
+  },
+  "exclude": ["node_modules", "**/node_modules/*"]
+}
