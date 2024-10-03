@@ -2,6 +2,9 @@ export {};
 
 import type { GMXmlHttpRequestOptions } from "./types/userscript";
 
+/**
+ * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/game/quiz/quiz.js
+ */
 declare class Quiz {
   isHost: boolean;
   inQuiz: boolean;
@@ -19,8 +22,11 @@ declare class Quiz {
 
   gameMode: Gamemode;
 
+  /** @see https://socket.animemusicquiz.com/scripts/pages/gamePage/game/quiz/quizSkipController.js */
   skipController: {
     voteSkip: () => void;
+    sendSkipVote: () => void;
+    autoVoteTimeout: number | undefined;
   };
 
   /**
@@ -34,6 +40,12 @@ declare class Quiz {
    * Flag set by CSL
    */
   cslActive?: boolean;
+
+  /** @see https://socket.animemusicquiz.com/scripts/pages/gamePage/game/quiz/pauseButton.js */
+  pauseButton: {
+    $button: JQuery<HTMLButtonElement>;
+    pauseOn: boolean;
+  };
 }
 
 declare class QuizAnswerInput {
@@ -73,7 +85,7 @@ export type Player = {
 declare class Lobby {
   inLobby: boolean;
   settings: {
-    gamemode: Gamemode;
+    gameMode: Gamemode;
   };
   hostName: string;
   players: Record<number, Player>;
@@ -83,6 +95,8 @@ declare class Lobby {
   numberOfPlayers: number;
   numberOfPlayersReady: number;
   isHost: boolean;
+  changeToSpectator: (playerName: string) => void;
+  leave: (args: any) => void;
 }
 
 export type Gamemode = "Ranked" | "Multiplayer" | "Solo";
@@ -135,6 +149,70 @@ export type SpectateGamePayload = {
   inLobby: boolean;
 };
 
+export type NewPlayerPayload = {
+  level: number;
+  ready: boolean;
+  name: string;
+  teamNumber?: number;
+  gamePlayerId: number;
+  avatar: any;
+  inGame: boolean;
+};
+
+export type NewSpectatorPayload = {
+  name: string;
+  gamePlayerId: number | null;
+};
+
+export type SpectatorChangedToPlayerPayload = {
+  name: string;
+  gamePlayerId: number;
+  level: number;
+  avatar: any;
+  ready: boolean;
+  inGame: boolean;
+  teamNumber?: number;
+};
+
+type PlayerIdentifier = {
+  name: string;
+  gamePlayerId?: number;
+};
+
+export type PlayerChangedToSpectatorPayload = {
+  spectatorDescription: PlayerIdentifier;
+  playerDescription: PlayerIdentifier;
+  isHost: boolean;
+};
+
+export type PlayerLeftPayload = {
+  kicked: boolean;
+  disconnect: boolean;
+  newHost?: string;
+  player: PlayerIdentifier;
+};
+
+export type SpectatorLeftPayload = {
+  kicked: boolean;
+  newHost?: string;
+  spectator: string;
+};
+
+export type GameClosedPayload = {
+  reason: string;
+};
+
+export type AnimeNames = {
+  english: string;
+  romaji: string;
+};
+
+export type VideoMap = {
+  0: string;
+  480?: string;
+  720: string;
+};
+
 export type SongInfo = {
   songName: string;
   artist: string;
@@ -161,6 +239,7 @@ export type SongInfo = {
   artistInfo: Artist | Group;
 };
 
+// @see https://github.com/Zolhungaj/AMQ-API/tree/main/src/main/java/tech/zolhungaj/amqapi for the payload types reference
 export class ListenerClass {
   constructor(
     command: "game chat update",
@@ -189,6 +268,35 @@ export class ListenerClass {
   constructor(command: "update all song names", callback: () => void);
   constructor(command: "Host Game", callback: (payload: any) => void);
   constructor(command: "Join Game", callback: (payload: any) => void);
+  constructor(
+    command: "New Player",
+    callback: (payload: NewPlayerPayload) => void
+  );
+  constructor(
+    command: "New Spectator",
+    callback: (payload: NewSpectatorPayload) => void
+  );
+  constructor(
+    command: "Spectator Change To Player",
+    callback: (payload: SpectatorChangedToPlayerPayload) => void
+  );
+  constructor(
+    command: "Player Change To Spectator",
+    callback: (payload: PlayerChangedToSpectatorPayload) => void
+  );
+  constructor(command: "Host Promotion", callback: (payload: any) => void);
+  constructor(
+    command: "Player Left",
+    callback: (payload: PlayerLeftPayload) => void
+  );
+  constructor(
+    command: "Spectator Left",
+    callback: (payload: SpectatorLeftPayload) => void
+  );
+  constructor(
+    command: "game closed",
+    callback: (payload: GameClosedPayload) => void
+  );
 
   fire: (payload: any) => void;
   bindListener: () => void;
@@ -271,8 +379,6 @@ export type RankedState = {
   RANKED_STATE_IDS: typeof RankedStateID;
 };
 
-export type HostModal = {};
-
 // https://www.npmjs.com/package/bootstrap-slider#events
 export type SliderRangeChangeEvent = {
   value: {
@@ -293,6 +399,78 @@ export type AMQOptions = {
   useRomajiNames: number;
 };
 
+export type HotKey = {
+  altKey: boolean;
+  ctrlKey: boolean;
+  key: string;
+};
+
+export type HotKeySettings = {
+  start?: HotKey;
+  stop?: HotKey;
+  startTraining?: HotKey;
+  stopTraining?: HotKey;
+  cslgWindow?: HotKey;
+};
+
+export type CSLSettings = {
+  CSLButtonCSS?: string;
+  debug?: boolean;
+  hotkeys?: HotKeySettings;
+  showCSLMessages?: boolean;
+  replacedAnswers?: any;
+  malClientId?: string;
+  hotKeys: HotKeySettings;
+};
+
+export type ReviewDataItem = {
+  date: number;
+  efactor: number;
+  successCount: number;
+  successStreak: number;
+  failureCount: number;
+  failureStreak: number;
+  isLastTryCorrect: boolean;
+  weight: number;
+  lastFiveTries: boolean[];
+  manualWeightAdjustment: number;
+  lastReviewDate?: number;
+};
+
+// Key is song
+export type ReviewData = Record<string, ReviewDataItem>;
+/**
+ * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/game/quiz/amqAwesomeplete.js
+ */
+export class AmqAwesomepleteClass {
+  constructor(
+    input: HTMLInputElement,
+    o: { list: string[] },
+    scrollable: boolean
+  );
+}
+
+/**
+ * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/shared/viewChanger.js
+ */
+export class ViewChanger {
+  changeView: (view: string) => void;
+}
+
+/**
+ * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/gameSettings/hostModal.js
+ */
+export class HostModal {
+  displayHostSolo: () => void;
+}
+
+/**
+ * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/roomBrowser/roomBrowser.js
+ */
+export class RoomBrowser {
+  host: () => void;
+}
+
 declare global {
   var gameChat: GameChat;
   var quiz: Quiz;
@@ -305,8 +483,23 @@ declare global {
   var hostModal: HostModal;
   var options: AMQOptions;
   var GM_xmlhttpRequest: (details: GMXmlHttpRequestOptions) => void;
+  var AmqAwesomeplete: typeof AmqAwesomepleteClass;
+  var viewChanger: ViewChanger;
+  var roomBrowser: RoomBrowser;
+  var hostModal: HostModal;
+  var AMQ_addScriptData: (data: {
+    name?: string;
+    author?: string;
+    version?: string;
+    link?: string;
+    description?: string;
+  }) => void;
 }
 
+/**
+ * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/game/chat/gameChat.js
+ */
 declare class GameChat {
   systemMessage: (message: string) => void;
+  $chatMessageContainer: JQuery<HTMLDivElement>;
 }

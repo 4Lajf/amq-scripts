@@ -37,8 +37,6 @@ Some considerations:
 
 "use strict";
 
-import { SongTypes } from "./types.js";
-
 //@ts-expect-error
 if (typeof Listener === "undefined") return;
 
@@ -49,7 +47,7 @@ let loadInterval = setInterval(() => {
   }
 }, 500);
 
-/** @type {any} */
+/** @type {null | ({ songKey: string } & import('./types.js').ReviewDataItem)} */
 let previousAttemptData = null;
 
 let isSearchMode = true;
@@ -109,7 +107,15 @@ let guessTime = 20;
 let extraGuessTime = 0;
 let currentSong = 0;
 let totalSongs = 0;
+
+/**
+ * @type {Record<number, string>} GamePlayerId -> Answer
+ */
 let currentAnswers = {};
+
+/**
+ * @type {Record<number, number>} GamePlayerId -> Score
+ */
 let score = {};
 let songListTableMode = 0; //0: song + artist, 1: anime + song type + vintage, 2: catbox links
 let songListTableSort = [0, 0, 0, 0, 0, 0, 0, 0, 0]; //song, artist, difficulty, anime, type, vintage, mp3, 480, 720 (0: off, 1: ascending, 2: descending)
@@ -145,6 +151,8 @@ let extraGuessTimer;
 
 /** @type {number} */
 let endGuessTimer;
+
+/** @type {keyof catboxHostDict | 0} */
 let fileHostOverride = 0;
 
 /** @type {string[]} */
@@ -159,14 +167,15 @@ let songLinkReceived = {};
 let skipping = false;
 let answerChunks = {}; //store player answer chunks, ids are keys
 
-/** @type {any} */
+/** @type {Chunk} */
 let resultChunk;
 
-/** @type {any} */
+/** @type {Chunk} */
 let songInfoChunk;
 
-/** @type {any} */
+/** @type {Chunk} */
 let nextSongChunk;
+
 let importRunning = false;
 
 hotKeys.start = saveData.hotKeys?.start ?? {
@@ -194,7 +203,6 @@ hotKeys.cslgWindow = saveData.hotKeys?.cslgWindow ?? {
   ctrlKey: false,
   key: "",
 };
-//hotKeys.mergeAll = saveData.hotKeys?.mergeAll ?? {altKey: false, ctrlKey: false, key: ""};
 
 function handleRepeatModeToggle() {
   $("#cslgSettingsRepeatMode").change(function () {
@@ -784,7 +792,7 @@ function filterSongList() {
             song.animeEnglishName.toLowerCase().includes(lowerCaseFilter)
           );
         case "songType":
-          return songTypeText(song.songType, song.songTypeNumber)
+          return songTypeText(song.songType, song.typeNumber)
             .toLowerCase()
             .includes(lowerCaseFilter);
         case "animeVintage":
@@ -796,7 +804,7 @@ function filterSongList() {
             song.songArtist.toLowerCase().includes(lowerCaseFilter) ||
             song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
             song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
-            songTypeText(song.songType, song.songTypeNumber)
+            songTypeText(song.songType, song.typeNumber)
               .toLowerCase()
               .includes(lowerCaseFilter) ||
             song.animeVintage?.toLowerCase().includes(lowerCaseFilter)
@@ -1493,7 +1501,10 @@ function validateTrainingStart() {
 
   let repeatMode = $("#cslgSettingsRepeatModeSwitch").prop("checked");
   if (repeatMode) {
-    let range = $("#cslgSettingsRepeatMode").slider("getValue");
+    /** @type {[number, number]} */
+    let range = /** @type {any} */ (
+      $("#cslgSettingsRepeatMode").slider("getValue")
+    );
     if (range[0] >= range[1]) {
       return messageDisplayer.displayMessage(
         "Unable to start",
@@ -1670,88 +1681,95 @@ $("#cslgSettingsModal").on("shown.bs.modal", function () {
 $("#lobbyPage .topMenuBar").append(
   `<div id="lnStatsButton" class="clickAble topMenuButton topMenuMediumButton"><h3>Stats</h3></div>`
 );
-$("#lnStatsButton").click(() => {
+$("#lnStatsButton").on("click", () => {
   console.log("Stats Button Clicked");
   openStatsModal();
 });
 $("#lobbyPage .topMenuBar").append(
   `<div id="lnCustomSongListButton" class="clickAble topMenuButton topMenuMediumButton"><h3>CSL</h3></div>`
 );
-$("#lnCustomSongListButton").click(() => {
+$("#lnCustomSongListButton").on("click", () => {
   console.log("CSL Button Clicked");
   openSettingsModal();
 });
-$("#cslgSongListTab").click(() => {
+$("#cslgSongListTab").on("click", () => {
   tabReset();
   $("#cslgSongListTab").addClass("selected");
   $("#cslgSongListContainer").show();
 });
-$("#cslgQuizSettingsTab").click(() => {
+$("#cslgQuizSettingsTab").on("click", () => {
   tabReset();
   $("#cslgQuizSettingsTab").addClass("selected");
   $("#cslgQuizSettingsContainer").show();
 });
-$("#cslgAnswerTab").click(() => {
+$("#cslgAnswerTab").on("click", () => {
   tabReset();
   $("#cslgAnswerTab").addClass("selected");
   $("#cslgAnswerContainer").show();
 });
-$("#cslgMergeTab").click(() => {
+$("#cslgMergeTab").on("click", () => {
   tabReset();
   $("#cslgMergeTab").addClass("selected");
   $("#cslgMergeContainer").show();
 });
-$("#cslgHotkeyTab").click(() => {
+$("#cslgHotkeyTab").on("click", () => {
   tabReset();
   $("#cslgHotkeyTab").addClass("selected");
   $("#cslgHotkeyContainer").show();
 });
-$("#cslgListImportTab").click(() => {
+$("#cslgListImportTab").on("click", () => {
   tabReset();
   $("#cslgListImportTab").addClass("selected");
   $("#cslgListImportContainer").show();
 });
-$("#cslgInfoTab").click(() => {
+$("#cslgInfoTab").on("click", () => {
   tabReset();
   $("#cslgInfoTab").addClass("selected");
   $("#cslgInfoContainer").show();
 });
-$("#cslgAnisongdbSearchButtonGo").click(() => {
+$("#cslgAnisongdbSearchButtonGo").on("click", () => {
   anisongdbDataSearch();
 });
-$("#cslgAnisongdbQueryInput").keypress((event) => {
+$("#cslgAnisongdbQueryInput").on("keypress", (event) => {
   if (event.which === 13) {
     anisongdbDataSearch();
   }
 });
-$("#cslgFileUpload").on("change", function () {
-  if (this.files.length) {
-    this.files[0].text().then((data) => {
-      try {
-        mySongList = [];
-        handleData(JSON.parse(data));
-        mySongList = finalSongList;
-        songList = [];
-        if (mySongList.length === 0) {
-          messageDisplayer.displayMessage("0 song links found");
+
+$("#cslgFileUpload").on(
+  "change",
+  /**
+   * @this {HTMLInputElement & { files: FileList }}
+   */
+  function () {
+    if (this.files.length) {
+      this.files[0].text().then((data) => {
+        try {
+          mySongList = [];
+          handleData(JSON.parse(data));
+          mySongList = finalSongList;
+          songList = [];
+          if (mySongList.length === 0) {
+            messageDisplayer.displayMessage("0 song links found");
+          }
+        } catch (error) {
+          mySongList = [];
+          $(this).val("");
+          console.error(error);
+          messageDisplayer.displayMessage("Upload Error");
         }
-      } catch (error) {
-        mySongList = [];
-        $(this).val("");
-        console.error(error);
-        messageDisplayer.displayMessage("Upload Error");
-      }
-      setSongListTableSort();
-      isSearchMode = false;
-      $("#cslgToggleModeButton").text("My Songs");
-      updateSongListDisplay();
-      createAnswerTable();
-    });
+        setSongListTableSort();
+        isSearchMode = false;
+        $("#cslgToggleModeButton").text("My Songs");
+        updateSongListDisplay();
+        createAnswerTable();
+      });
+    }
   }
-});
+);
 
 $("#cslgMergeAllButton")
-  .click(() => {
+  .on("click", () => {
     mergedSongList = Array.from(
       new Set(mergedSongList.concat(songList).map((x) => JSON.stringify(x)))
     ).map((x) => JSON.parse(x));
@@ -1776,13 +1794,13 @@ function clearSongList() {
   updateSongListDisplay();
 }
 
-$("#cslgShowIgnoredButton").click(function () {
+$("#cslgShowIgnoredButton").on("click", function () {
   let isShowing = $(this).text() === "Hide Banished Songs";
   $(this).text(isShowing ? "Show Banished Songs" : "Hide Banished Songs");
 });
 
 $("#cslgClearSongListButton")
-  .click(clearSongList)
+  .on("click", clearSongList)
   .popover({
     content: () =>
       $("#cslgShowIgnoredCheckbox").prop("checked")
@@ -1792,7 +1810,7 @@ $("#cslgClearSongListButton")
     placement: "bottom",
   });
 $("#cslgTransferSongListButton")
-  .click(() => {
+  .on("click", () => {
     if (isSearchMode) {
       // Transfer merged songs to search results
       songList = Array.from(mergedSongList);
@@ -1869,7 +1887,7 @@ $("#cslgMergeDownloadButton").on("click", () => {
     );
   }
 });
-$("#cslgAutocompleteButton").click(() => {
+$("#cslgAutocompleteButton").on("click", () => {
   if (lobby.soloMode) {
     $("#cslgSettingsModal").modal("hide");
     socket.sendCommand({ type: "lobby", command: "start game" });
@@ -1917,11 +1935,11 @@ $("#cslgListImportMoveButton").click(() => {
 $("#cslgListImportDownloadButton").click(() => {
   if (!importedSongList.length) return;
   let listType = $("#cslgListImportSelect").val();
-  let username = $("#cslgListImportUsernameInput").val().trim();
+  let username = String($("#cslgListImportUsernameInput").val()).trim();
   let date = new Date();
   let dateFormatted = `${date.getFullYear()}-${String(
     date.getMonth() + 1
-  ).padStart(2, 0)}-${String(date.getDate()).padStart(2, 0)}`;
+  ).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   let data =
     "data:text/json;charset=utf-8," +
     encodeURIComponent(JSON.stringify(importedSongList));
@@ -1935,7 +1953,7 @@ $("#cslgListImportDownloadButton").click(() => {
   element.click();
   element.remove();
 });
-$("#cslgStartButton").click(() => {
+$("#cslgStartButton").on("click", () => {
   validateStart();
 });
 
@@ -1944,7 +1962,7 @@ $("#cslgSearchCriteria, #cslgSearchInput").on("change input", function () {
   createSongListTable();
 });
 
-$("#cslgShowIgnoredButton").click(function () {
+$("#cslgShowIgnoredButton").on("click", function () {
   $(this).toggleClass("active");
   let isShowing = $(this).hasClass("active");
   $(this).text(isShowing ? "Hide Banished Songs" : "Show Banished Songs");
@@ -2120,21 +2138,27 @@ $("#cslgMergedSongListTable")
   });
 $("#cslgSongListModeSelect")
   .val("Anisongdb")
-  .on("change", function () {
-    songList = [];
-    $("#cslgSongListTable tbody").empty();
-    $("#cslgMergeCurrentCount").text("Current song list: 0 songs");
-    $("#cslgSongListCount").text("Songs: 0");
-    if (this.value === "Anisongdb") {
-      $("#cslgFileUploadRow").hide();
-      $("#cslgAnisongdbSearchRow").show();
-      $("#cslgFileUploadRow input").val("");
-    } else if (this.value === "Load File") {
-      $("#cslgAnisongdbSearchRow").hide();
-      $("#cslgFileUploadRow").show();
-      $("#cslgAnisongdbQueryInput").val("");
+  .on(
+    "change",
+    /**
+     * @this {HTMLSelectElement}
+     */
+    function () {
+      songList = [];
+      $("#cslgSongListTable tbody").empty();
+      $("#cslgMergeCurrentCount").text("Current song list: 0 songs");
+      $("#cslgSongListCount").text("Songs: 0");
+      if (this.value === "Anisongdb") {
+        $("#cslgFileUploadRow").hide();
+        $("#cslgAnisongdbSearchRow").show();
+        $("#cslgFileUploadRow input").val("");
+      } else if (this.value === "Load File") {
+        $("#cslgAnisongdbSearchRow").hide();
+        $("#cslgFileUploadRow").show();
+        $("#cslgAnisongdbQueryInput").val("");
+      }
     }
-  });
+  );
 $("#cslgAnisongdbModeSelect").val("Artist");
 /*$("#cslgAnisongdbModeSelect").val("Artist").on("change", function() {
     if (this.value === "Composer") {
@@ -2170,14 +2194,14 @@ $("#cslgSettingsMaxNewSongs").val("25");
 $("#cslgSettingsFastSkip").prop("checked", false);
 $("#cslgFileUploadRow").hide();
 $("#cslgCSLButtonCSSInput").val(CSLButtonCSS);
-$("#cslgResetCSSButton").click(() => {
+$("#cslgResetCSSButton").on("click", () => {
   CSLButtonCSS = "calc(25% - 250px)";
   $("#cslgCSLButtonCSSInput").val(CSLButtonCSS);
 });
-$("#cslgApplyCSSButton").click(() => {
+$("#cslgApplyCSSButton").on("click", () => {
   let val = $("#cslgCSLButtonCSSInput").val();
   if (val) {
-    CSLButtonCSS = val;
+    CSLButtonCSS = String(val);
     saveSettings();
     applyStyles();
   } else {
@@ -2186,25 +2210,32 @@ $("#cslgApplyCSSButton").click(() => {
 });
 $("#cslgShowCSLMessagesCheckbox")
   .prop("checked", showCSLMessages)
-  .click(() => {
+  .on("click", () => {
     showCSLMessages = !showCSLMessages;
   });
-$("#cslgPromptAllAutocompleteButton").click(() => {
+$("#cslgPromptAllAutocompleteButton").on("click", () => {
   cslMessage("§CSL21");
 });
-$("#cslgPromptAllVersionButton").click(() => {
+$("#cslgPromptAllVersionButton").on("click", () => {
   cslMessage("§CSL22");
 });
 $("#cslgMalClientIdInput")
   .val(malClientId)
-  .on("change", function () {
-    malClientId = this.value;
-    saveSettings();
-  });
+  .on(
+    "change",
+    /** @this {HTMLInputElement}  */
+    function () {
+      malClientId = this.value;
+      saveSettings();
+    }
+  );
 tabReset();
 $("#cslgSongListTab").addClass("selected");
 $("#cslgSongListContainer").show();
 
+/**
+ * @param {import('./types.js').ReviewData} reviewData
+ */
 function saveReviewData(reviewData) {
   localStorage.setItem(
     `spacedRepetitionData_${currentProfile}`,
@@ -2212,6 +2243,9 @@ function saveReviewData(reviewData) {
   );
 }
 
+/**
+ * @returns {import('./types.js').ReviewData}
+ */
 function loadReviewData() {
   const data = localStorage.getItem(`spacedRepetitionData_${currentProfile}`);
   return data ? JSON.parse(data) : {};
@@ -2230,6 +2264,11 @@ function saveNewSongsSettings() {
   );
 }
 
+/**
+ * @param {number} oldEFactor
+ * @param {number} qualityOfResponse
+ * @returns
+ */
 function updateEFactor(oldEFactor, qualityOfResponse) {
   // Ensure that the quality of response is between 0 and 5
   qualityOfResponse = Math.max(0, Math.min(qualityOfResponse, 5));
@@ -2253,6 +2292,9 @@ function updateEFactor(oldEFactor, qualityOfResponse) {
   return newEFactor;
 }
 
+/**
+ * @param {import('./types.js').Song} track
+ */
 function getReviewState(track) {
   const reviewData = loadReviewData();
   const songKey = `${track.songArtist}_${track.songName}`;
@@ -2287,6 +2329,9 @@ function getReviewState(track) {
   };
 }
 
+/**
+ * @param {string} songKey
+ */
 function updateNewSongsCount(songKey) {
   if (selectedSetNewSongs.has(songKey)) {
     newSongsAdded24Hours++;
@@ -2298,7 +2343,12 @@ function updateNewSongsCount(songKey) {
   }
 }
 
-// Update the reviewSong function
+/**
+ * Update the reviewSong function
+ *
+ * @param {import('./types.js').Song} song
+ * @param {boolean} success
+ */
 function reviewSong(song, success) {
   console.log(song);
   if (!isTraining) return;
@@ -2350,11 +2400,7 @@ function reviewSong(song, success) {
   }
 
   // Calculate and store the new weight
-  lastReview.weight = calculateWeight({
-    reviewState: lastReview,
-  });
-
-  console.log(reviewData);
+  (lastReview.weight = calculateWeight(lastReview)), console.log(reviewData);
   saveReviewData(reviewData);
 
   // Update new songs count after the song has been reviewed
@@ -2363,8 +2409,11 @@ function reviewSong(song, success) {
 
 let appearanceCounter = {};
 
-function calculateWeight(track, reviewData) {
-  if (!isTraining) return;
+/**
+ * @param {import('./types.js').ReviewDataItem} reviewData
+ * @returns
+ */
+function calculateWeight(reviewData) {
   const OVERDUE_FACTOR_PERCENTAGE = 0.1;
   const LAST_PERFORMANCE_PERCENTAGE = 0.15;
   const EFACTOR_IMPACT_PERCENTAGE = 0.5;
@@ -2373,33 +2422,36 @@ function calculateWeight(track, reviewData) {
   const FAILURE_STREAK_INFLUENCE = 0.3;
 
   const currentDate = Date.now();
-  let reviewState;
-  if (track) {
-    reviewState = track.reviewState;
-  } else {
-    reviewState = reviewData;
-  }
-  const reviewDate = reviewState.date;
-  const efactor = reviewState.efactor;
-  const successCount = reviewState.successCount;
-  const failureCount = reviewState.failureCount;
-  const successStreak = reviewState.successStreak;
-  const failureStreak = reviewState.failureStreak;
+
+  const reviewDate = reviewData.date;
+  const efactor = reviewData.efactor;
+  const successStreak = reviewData.successStreak;
+  const failureStreak = reviewData.failureStreak;
 
   // Focus on last 5 tries
-  const last5Tries = reviewState.lastFiveTries || [];
+  const last5Tries = reviewData.lastFiveTries || [];
   const attemptCount = last5Tries.length;
   const recentCorrectRatio =
     attemptCount > 0
       ? last5Tries.filter((attempt) => attempt).length / attemptCount
       : 0;
 
+  /**
+   * @param {number} successStreak
+   * @param {number} influence
+   * @param {number} cap
+   */
   function calculateSuccessStreakImpact(successStreak, influence, cap) {
     let multiplier = Math.pow(2, successStreak);
     multiplier = Math.min(multiplier, cap);
     return multiplier * influence;
   }
 
+  /**
+   * @param {number} failureStreak
+   * @param {number} influence
+   * @param {number} cap
+   */
   function calculateFailureStreakImpact(failureStreak, influence, cap) {
     let multiplier = Math.pow(2, failureStreak);
     multiplier = Math.min(multiplier, cap);
@@ -2431,7 +2483,7 @@ function calculateWeight(track, reviewData) {
   );
   overdueFactor /= 10;
 
-  const lastPerformance = reviewState.isLastTryCorrect ? 1 : 0;
+  const lastPerformance = reviewData.isLastTryCorrect ? 1 : 0;
 
   const efactorImpact = (5 - efactor) / 4;
 
@@ -2452,7 +2504,7 @@ function calculateWeight(track, reviewData) {
   weight *= 100;
   weight += 100;
 
-  weight *= reviewState.manualWeightAdjustment;
+  weight *= reviewData.manualWeightAdjustment;
 
   console.log(`
     Ideal review date: ${new Date(idealReviewDate).toISOString()}
@@ -2465,219 +2517,219 @@ function calculateWeight(track, reviewData) {
     RecentCorrectRatio: ${recentCorrectRatio}
     AttemptCount: ${attemptCount}
     ScaleFactor: ${scaleFactor}
-    ManualWeightAdjustment: ${reviewState.manualWeightAdjustment}
+    ManualWeightAdjustment: ${reviewData.manualWeightAdjustment}
     FINAL WEIGHT: ${weight / 100}`);
 
   return weight;
 }
 
-function weightedRandomSelection(reviewCandidates, maxSongs) {
-  const centerWeight = 175;
+// function weightedRandomSelection(reviewCandidates, maxSongs) {
+//   const centerWeight = 175;
 
-  const candidatesArray = reviewCandidates.map((candidate) => {
-    return {
-      ...candidate,
-      adjustedWeight: adjustWeight(candidate.reviewState.weight),
-    };
-  });
+//   const candidatesArray = reviewCandidates.map((candidate) => {
+//     return {
+//       ...candidate,
+//       adjustedWeight: adjustWeight(candidate.reviewState.weight),
+//     };
+//   });
 
-  function adjustWeight(weight) {
-    const weightDifferenceRatio = (weight - centerWeight) / centerWeight;
-    return weight * Math.pow(2, weightDifferenceRatio);
-  }
+//   function adjustWeight(weight) {
+//     const weightDifferenceRatio = (weight - centerWeight) / centerWeight;
+//     return weight * Math.pow(2, weightDifferenceRatio);
+//   }
 
-  let totalAdjustedWeight = candidatesArray.reduce(
-    (total, candidate) => total + candidate.adjustedWeight,
-    0
-  );
+//   let totalAdjustedWeight = candidatesArray.reduce(
+//     (total, candidate) => total + candidate.adjustedWeight,
+//     0
+//   );
 
-  const selectRandomly = () => {
-    let r = Math.random() * totalAdjustedWeight;
-    for (let i = 0; i < candidatesArray.length; i++) {
-      r -= candidatesArray[i].adjustedWeight;
-      if (r <= 0) {
-        return candidatesArray[i];
-      }
-    }
-  };
+//   const selectRandomly = () => {
+//     let r = Math.random() * totalAdjustedWeight;
+//     for (let i = 0; i < candidatesArray.length; i++) {
+//       r -= candidatesArray[i].adjustedWeight;
+//       if (r <= 0) {
+//         return candidatesArray[i];
+//       }
+//     }
+//   };
 
-  const selections = [];
-  for (let i = 0; i < maxSongs; i++) {
-    const selectedCandidate = selectRandomly();
-    if (!selectedCandidate) continue;
-    selections.push(selectedCandidate);
-    totalAdjustedWeight -= selectedCandidate.adjustedWeight;
-    candidatesArray.splice(candidatesArray.indexOf(selectedCandidate), 1);
-  }
-  return selections;
-}
+//   const selections = [];
+//   for (let i = 0; i < maxSongs; i++) {
+//     const selectedCandidate = selectRandomly();
+//     if (!selectedCandidate) continue;
+//     selections.push(selectedCandidate);
+//     totalAdjustedWeight -= selectedCandidate.adjustedWeight;
+//     candidatesArray.splice(candidatesArray.indexOf(selectedCandidate), 1);
+//   }
+//   return selections;
+// }
 
-function penalizeDuplicateRomajiNames(selectedTracks, reviewCandidates) {
-  console.log(
-    `penalizeDuplicateRomajiNames started with ${selectedTracks.length} tracks`
-  );
+// function penalizeDuplicateRomajiNames(selectedTracks, reviewCandidates) {
+//   console.log(
+//     `penalizeDuplicateRomajiNames started with ${selectedTracks.length} tracks`
+//   );
 
-  const MAX_ITERATIONS = 1000;
-  let iterations = 0;
-  let index = 0;
-  let totalReplacements = 0;
+//   const MAX_ITERATIONS = 1000;
+//   let iterations = 0;
+//   let index = 0;
+//   let totalReplacements = 0;
 
-  while (index < selectedTracks.length && iterations < MAX_ITERATIONS) {
-    iterations++;
-    let duplicateIndexes = [];
+//   while (index < selectedTracks.length && iterations < MAX_ITERATIONS) {
+//     iterations++;
+//     let duplicateIndexes = [];
 
-    for (let i = index + 1; i < selectedTracks.length; i++) {
-      if (
-        selectedTracks[index] &&
-        selectedTracks[i] &&
-        songList[selectedTracks[index].key] &&
-        songList[selectedTracks[i].key] &&
-        songList[selectedTracks[index].key].animeRomajiName ===
-          songList[selectedTracks[i].key].animeRomajiName
-      ) {
-        if (i - index <= 7) {
-          duplicateIndexes.push(i);
-        }
-      }
-    }
+//     for (let i = index + 1; i < selectedTracks.length; i++) {
+//       if (
+//         selectedTracks[index] &&
+//         selectedTracks[i] &&
+//         songList[selectedTracks[index].key] &&
+//         songList[selectedTracks[i].key] &&
+//         songList[selectedTracks[index].key].animeRomajiName ===
+//           songList[selectedTracks[i].key].animeRomajiName
+//       ) {
+//         if (i - index <= 7) {
+//           duplicateIndexes.push(i);
+//         }
+//       }
+//     }
 
-    console.log(
-      `Iteration ${iterations}: Found ${duplicateIndexes.length} duplicates at index ${index}`
-    );
+//     console.log(
+//       `Iteration ${iterations}: Found ${duplicateIndexes.length} duplicates at index ${index}`
+//     );
 
-    while (duplicateIndexes.length > 0 && selectedTracks.length > 1) {
-      let randomChance = Math.random() * 10;
-      if (randomChance >= 3) {
-        let dupeIndex = duplicateIndexes.pop();
-        let duplicateTrack = selectedTracks[dupeIndex];
-        selectedTracks.splice(dupeIndex, 1);
+//     while (duplicateIndexes.length > 0 && selectedTracks.length > 1) {
+//       let randomChance = Math.random() * 10;
+//       if (randomChance >= 3) {
+//         let dupeIndex = duplicateIndexes.pop();
+//         let duplicateTrack = selectedTracks[dupeIndex];
+//         selectedTracks.splice(dupeIndex, 1);
 
-        let newTrack;
-        let attempts = 0;
-        do {
-          attempts++;
-          let selectionResult = weightedRandomSelection(reviewCandidates, 1);
-          newTrack = selectionResult[0];
-        } while (
-          newTrack &&
-          songList[newTrack.key] &&
-          selectedTracks.some(
-            (track) =>
-              track &&
-              songList[track.key] &&
-              songList[track.key].animeRomajiName ===
-                songList[newTrack.key].animeRomajiName
-          ) &&
-          attempts < 100
-        );
+//         let newTrack;
+//         let attempts = 0;
+//         do {
+//           attempts++;
+//           let selectionResult = weightedRandomSelection(reviewCandidates, 1);
+//           newTrack = selectionResult[0];
+//         } while (
+//           newTrack &&
+//           songList[newTrack.key] &&
+//           selectedTracks.some(
+//             (track) =>
+//               track &&
+//               songList[track.key] &&
+//               songList[track.key].animeRomajiName ===
+//                 songList[newTrack.key].animeRomajiName
+//           ) &&
+//           attempts < 100
+//         );
 
-        if (attempts < 100 && newTrack && songList[newTrack.key]) {
-          selectedTracks.splice(dupeIndex, 0, newTrack);
-          totalReplacements++;
-          console.log(
-            `Replaced duplicate at index ${dupeIndex} after ${attempts} attempts:`
-          );
-          console.log(
-            `  Removed: "${songList[duplicateTrack.key].animeRomajiName}" (${
-              songList[duplicateTrack.key].songName
-            } by ${songList[duplicateTrack.key].songArtist})`
-          );
-          console.log(
-            `  Added:   "${songList[newTrack.key].animeRomajiName}" (${
-              songList[newTrack.key].songName
-            } by ${songList[newTrack.key].songArtist})`
-          );
-        } else {
-          console.log(
-            `Failed to find non-duplicate replacement after 100 attempts for:`
-          );
-          console.log(
-            `  "${songList[duplicateTrack.key].animeRomajiName}" (${
-              songList[duplicateTrack.key].songName
-            } by ${songList[duplicateTrack.key].songArtist})`
-          );
-        }
-      } else {
-        let skippedIndex = duplicateIndexes.pop();
-        console.log(
-          `Skipped replacement due to random chance for duplicate at index ${skippedIndex}:`
-        );
-        console.log(
-          `  "${songList[selectedTracks[skippedIndex].key].animeRomajiName}" (${
-            songList[selectedTracks[skippedIndex].key].songName
-          } by ${songList[selectedTracks[skippedIndex].key].songArtist})`
-        );
-      }
-    }
+//         if (attempts < 100 && newTrack && songList[newTrack.key]) {
+//           selectedTracks.splice(dupeIndex, 0, newTrack);
+//           totalReplacements++;
+//           console.log(
+//             `Replaced duplicate at index ${dupeIndex} after ${attempts} attempts:`
+//           );
+//           console.log(
+//             `  Removed: "${songList[duplicateTrack.key].animeRomajiName}" (${
+//               songList[duplicateTrack.key].songName
+//             } by ${songList[duplicateTrack.key].songArtist})`
+//           );
+//           console.log(
+//             `  Added:   "${songList[newTrack.key].animeRomajiName}" (${
+//               songList[newTrack.key].songName
+//             } by ${songList[newTrack.key].songArtist})`
+//           );
+//         } else {
+//           console.log(
+//             `Failed to find non-duplicate replacement after 100 attempts for:`
+//           );
+//           console.log(
+//             `  "${songList[duplicateTrack.key].animeRomajiName}" (${
+//               songList[duplicateTrack.key].songName
+//             } by ${songList[duplicateTrack.key].songArtist})`
+//           );
+//         }
+//       } else {
+//         let skippedIndex = duplicateIndexes.pop();
+//         console.log(
+//           `Skipped replacement due to random chance for duplicate at index ${skippedIndex}:`
+//         );
+//         console.log(
+//           `  "${songList[selectedTracks[skippedIndex].key].animeRomajiName}" (${
+//             songList[selectedTracks[skippedIndex].key].songName
+//           } by ${songList[selectedTracks[skippedIndex].key].songArtist})`
+//         );
+//       }
+//     }
 
-    if (duplicateIndexes.length === 0) {
-      index++;
-    }
-  }
+//     if (duplicateIndexes.length === 0) {
+//       index++;
+//     }
+//   }
 
-  if (iterations >= MAX_ITERATIONS) {
-    console.warn(
-      `penalizeDuplicateRomajiNames reached maximum iterations (${MAX_ITERATIONS})`
-    );
-  }
+//   if (iterations >= MAX_ITERATIONS) {
+//     console.warn(
+//       `penalizeDuplicateRomajiNames reached maximum iterations (${MAX_ITERATIONS})`
+//     );
+//   }
 
-  console.log(
-    `penalizeDuplicateRomajiNames completed after ${iterations} iterations`
-  );
-  console.log(`Total replacements made: ${totalReplacements}`);
-  console.log(`Final track count: ${selectedTracks.length}`);
+//   console.log(
+//     `penalizeDuplicateRomajiNames completed after ${iterations} iterations`
+//   );
+//   console.log(`Total replacements made: ${totalReplacements}`);
+//   console.log(`Final track count: ${selectedTracks.length}`);
 
-  // Remove any undefined or invalid tracks
-  selectedTracks = selectedTracks.filter(
-    (track) => track && songList[track.key]
-  );
+//   // Remove any undefined or invalid tracks
+//   selectedTracks = selectedTracks.filter(
+//     (track) => track && songList[track.key]
+//   );
 
-  return selectedTracks;
-}
+//   return selectedTracks;
+// }
 
-function penalizeAndAdjustSelection(
-  selectedCandidates,
-  reviewCandidates,
-  maxSongs
-) {
-  let adjustedSelection = [...selectedCandidates];
-  let remainingCandidates = reviewCandidates.filter(
-    (c) => !selectedCandidates.includes(c)
-  );
+// function penalizeAndAdjustSelection(
+//   selectedCandidates,
+//   reviewCandidates,
+//   maxSongs
+// ) {
+//   let adjustedSelection = [...selectedCandidates];
+//   let remainingCandidates = reviewCandidates.filter(
+//     (c) => !selectedCandidates.includes(c)
+//   );
 
-  // Separate new songs and regular songs
-  let newSongs = adjustedSelection.filter((c) => c.weight === 9999);
-  let regularSongs = adjustedSelection.filter((c) => c.weight !== 9999);
+//   // Separate new songs and regular songs
+//   let newSongs = adjustedSelection.filter((c) => c.weight === 9999);
+//   let regularSongs = adjustedSelection.filter((c) => c.weight !== 9999);
 
-  penalizeDuplicateRomajiNames(regularSongs, remainingCandidates);
+//   penalizeDuplicateRomajiNames(regularSongs, remainingCandidates);
 
-  // If we removed any regular songs during penalization, try to replace them with other regular songs
-  let regularSongsNeeded =
-    Math.min(
-      Math.floor(maxSongs / 2),
-      selectedCandidates.filter((c) => c.weight !== 9999).length
-    ) - regularSongs.length;
-  let availableRegularSongs = remainingCandidates.filter(
-    (c) => c.weight !== 9999
-  );
+//   // If we removed any regular songs during penalization, try to replace them with other regular songs
+//   let regularSongsNeeded =
+//     Math.min(
+//       Math.floor(maxSongs / 2),
+//       selectedCandidates.filter((c) => c.weight !== 9999).length
+//     ) - regularSongs.length;
+//   let availableRegularSongs = remainingCandidates.filter(
+//     (c) => c.weight !== 9999
+//   );
 
-  while (regularSongsNeeded > 0 && availableRegularSongs.length > 0) {
-    let randomRegularSong = weightedRandomSelection(
-      availableRegularSongs,
-      1
-    )[0];
-    regularSongs.push(randomRegularSong);
-    availableRegularSongs = availableRegularSongs.filter(
-      (c) => c !== randomRegularSong
-    );
-    regularSongsNeeded--;
-  }
+//   while (regularSongsNeeded > 0 && availableRegularSongs.length > 0) {
+//     let randomRegularSong = weightedRandomSelection(
+//       availableRegularSongs,
+//       1
+//     )[0];
+//     regularSongs.push(randomRegularSong);
+//     availableRegularSongs = availableRegularSongs.filter(
+//       (c) => c !== randomRegularSong
+//     );
+//     regularSongsNeeded--;
+//   }
 
-  // Combine new songs and regular songs
-  adjustedSelection = [...newSongs, ...regularSongs];
+//   // Combine new songs and regular songs
+//   adjustedSelection = [...newSongs, ...regularSongs];
 
-  return adjustedSelection.slice(0, maxSongs);
-}
+//   return adjustedSelection.slice(0, maxSongs);
+// }
 
 function addWeightAdjustmentButtons() {
   if (!quiz.cslActive || !isTraining || buttonContainerAdded) return;
@@ -2845,10 +2897,10 @@ function adjustWeightOnUserInteraction(factor) {
       originalWeight = reviewData[songKey].weight;
     }
 
-    const previousWeight = reviewData[songKey].weight || "error";
+    const previousWeight = reviewData[songKey].weight;
 
     reviewData[songKey].manualWeightAdjustment = factor;
-    reviewData[songKey].weight = calculateWeight(false, reviewData[songKey]);
+    reviewData[songKey].weight = calculateWeight(reviewData[songKey]);
 
     const newWeight = reviewData[songKey].weight;
     console.log(previousWeight, factor, newWeight);
@@ -2886,8 +2938,8 @@ function revertWeight() {
     const newWeight = previousAttemptData.weight;
 
     // Restore the previous state
-    reviewData[songKey] = { ...previousAttemptData };
-    delete reviewData[songKey].songKey; // Remove the extra songKey we added
+    const { songKey: _, ...previousReviewData } = previousAttemptData;
+    reviewData[songKey] = { ...previousReviewData };
 
     saveReviewData(reviewData);
 
@@ -2948,7 +3000,11 @@ function prepareSongForTraining(songKeys, maxSongs) {
   }
 
   let repeatMode = $("#cslgSettingsRepeatModeSwitch").prop("checked");
-  let repeatModeRange = $("#cslgSettingsRepeatMode").slider("getValue");
+
+  /** @type {[number, number]} */
+  let repeatModeRange = /** @type {any} */ (
+    $("#cslgSettingsRepeatMode").slider("getValue")
+  );
 
   console.log(`Repeat Mode: ${repeatMode ? "Enabled" : "Disabled"}`);
   if (repeatMode) {
@@ -3121,7 +3177,7 @@ function setup() {
   new Listener("New Player", (payload) => {
     if (quiz.cslActive && quiz.inQuiz && quiz.isHost) {
       let player = Object.values(quiz.players).find(
-        (p) => p._name === payload.name
+        (p) => p.name === payload.name
       );
       if (player) {
         sendSystemMessage(`CSL: reconnecting ${payload.name}`);
@@ -3142,7 +3198,7 @@ function setup() {
   new Listener("New Spectator", (payload) => {
     if (quiz.cslActive && quiz.inQuiz && quiz.isHost) {
       let player = Object.values(quiz.players).find(
-        (p) => p._name === payload.name
+        (p) => p.name === payload.name
       );
       if (player) {
         sendSystemMessage(`CSL: reconnecting ${payload.name}`);
@@ -3171,7 +3227,7 @@ function setup() {
   new Listener("Spectator Change To Player", (payload) => {
     if (quiz.cslActive && quiz.inQuiz && quiz.isHost) {
       let player = Object.values(quiz.players).find(
-        (p) => p._name === payload.name
+        (p) => p.name === payload.name
       );
       if (player) {
         cslMessage(
@@ -3191,10 +3247,10 @@ function setup() {
   new Listener("Player Change To Spectator", (payload) => {
     if (quiz.cslActive && quiz.inQuiz && quiz.isHost) {
       let player = Object.values(quiz.players).find(
-        (p) => p._name === payload.name
+        (p) => p.name === payload.playerDescription.name
       );
       if (player) {
-        cslMessage("§CSL17" + btoa(payload.name));
+        cslMessage("§CSL17" + btoa(payload.playerDescription.name));
       } else {
         cslMessage(
           "§CSL0" +
@@ -3207,7 +3263,7 @@ function setup() {
       }
     }
   }).bindListener();
-  new Listener("Host Promotion", (payload) => {
+  new Listener("Host Promotion", () => {
     if (quiz.cslActive && quiz.inQuiz) {
       sendSystemMessage("CSL host changed, ending quiz");
       quizOver();
@@ -3265,11 +3321,11 @@ function setup() {
       }
     }
   }).bindListener();
-  new Listener("Game Chat Message", (payload) => {
-    if (payload.message.startsWith("§CSL")) {
-      parseMessage(message.message, message.sender);
-    }
-  }).bindListener();
+  // new Listener("Game Chat Message", (payload) => {
+  //   if (payload.message.startsWith("§CSL")) {
+  //     parseMessage(message.message, message.sender);
+  //   }
+  // }).bindListener();
   new Listener("Game Starting", () => {
     clearTimeEvents();
   }).bindListener();
@@ -3289,7 +3345,9 @@ function setup() {
       if (list.length) {
         autocomplete = list.map((x) => x.toLowerCase());
         autocompleteInput = new AmqAwesomeplete(
-          document.querySelector("#cslgNewAnswerInput"),
+          /** @type {HTMLInputElement} **/ (
+            document.querySelector("#cslgNewAnswerInput")
+          ),
           { list: list },
           true
         );
@@ -3529,7 +3587,10 @@ function validateStart() {
       "invalid extra guess time"
     );
   }
-  startPointRange = $("#cslgSettingsStartPoint").slider("getValue");
+  /** @type {[number, number]} */
+  startPointRange = /** @type {any} */ (
+    $("#cslgSettingsStartPoint").slider("getValue")
+  );
   if (
     startPointRange[0] < 0 ||
     startPointRange[0] > 100 ||
@@ -3542,7 +3603,11 @@ function validateStart() {
       "song start sample must be a range 0-100"
     );
   }
-  difficultyRange = $("#cslgSettingsDifficulty").slider("getValue");
+
+  /** @type {[number, number]} */
+  difficultyRange = /** @type {any} */ (
+    $("#cslgSettingsDifficulty").slider("getValue")
+  );
   if (
     difficultyRange[0] < 0 ||
     difficultyRange[0] > 100 ||
@@ -3651,7 +3716,10 @@ function startQuiz() {
   } else {
     cslMultiplayer.host = lobby.hostName;
   }
+
+  /** @type {import('./types.js').Song} */
   let song;
+
   if (lobby.isHost) {
     song = finalSongList[songOrder[1]];
   }
@@ -3742,7 +3810,10 @@ function startQuiz() {
   }
 }
 
-// check if all conditions are met to go to next song
+/**
+ * Check if all conditions are met to go to next song
+ * @param {number} songNumber
+ */
 function readySong(songNumber) {
   if (songNumber === currentSong) return;
   //console.log("Ready song: " + songNumber);
@@ -3755,13 +3826,16 @@ function readySong(songNumber) {
       if (quiz.soloMode) {
         playSong(songNumber);
       } else if (quiz.isHost) {
-        cslMessage("§CSL4" + btoa(songNumber));
+        cslMessage("§CSL4" + btoa(String(songNumber)));
       }
     }
   }, 100);
 }
 
-// play a song
+/**
+ * Play a song
+ * @param {number} songNumber
+ */
 function playSong(songNumber) {
   if (!quiz.cslActive || !quiz.inQuiz) return reset();
   for (let key of Object.keys(quiz.players)) {
@@ -3920,7 +3994,7 @@ function endGuessPhase(songNumber) {
           song.altAnimeNamesAnswers || []
         ).join("\t")}\n${song.songArtist || ""}\n${song.songName || ""}\n${
           song.songType || ""
-        }\n${song.songTypeNumber || ""}\n${song.songDifficulty || ""}\n${
+        }\n${song.typeNumber || ""}\n${song.songDifficulty || ""}\n${
           song.animeType || ""
         }\n${song.animeVintage || ""}\n${song.annId || ""}\n${
           song.malId || ""
@@ -5186,10 +5260,28 @@ const isAMQData = (data) =>
   typeof data === "object" && data.roomName && data.startTime && data.songs;
 
 /**
+ * Check if data comes from the Joseph Song UI Export
+ *
+ * @param {any} data
+ * @returns {data is import('./types/josephsongui.js').JosephSongUI[]}
+ */
+const isJosephSongUIData = (data) =>
+  Array.isArray(data) && data.length && data[0].gameMode;
+
+/**
+ * Check if data comes from this script
+ *
+ * @param {any} data
+ * @returns {data is import('./types.js').Song[]}
+ */
+const isMyData = (data) =>
+  Array.isArray(data) && data.length && data[0].animeRomajiName;
+
+/**
  * Parse a song type string (e.g. "Opening 2") to an object with type and number. (Insert songs have no number).
  *
  * @param {string} songType
- * @returns {{ songType: SongTypes, typeNumber: number | null }}
+ * @returns {{ songType: import('./types.js').SongTypes, typeNumber: number | null }}
  */
 const parseSongType = (songType) => {
   if (songType.startsWith("Opening")) {
@@ -5314,7 +5406,7 @@ function handleData(data) {
     }
   }
   // joseph song export script structure
-  else if (Array.isArray(data) && data.length && data[0].gameMode) {
+  else if (isJosephSongUIData(data)) {
     for (let song of data) {
       finalSongList.push({
         animeRomajiName: song.anime.romaji,
@@ -5329,7 +5421,7 @@ function handleData(data) {
         songType: Object({ O: 1, E: 2, I: 3 })[song.type[0]],
         typeNumber:
           song.type[0] === "I" ? null : parseInt(song.type.split(" ")[1]),
-        songDifficulty: parseFloat(song.difficulty),
+        songDifficulty: song.difficulty === "Unrated" ? 0 : song.difficulty,
         animeType: song.animeType,
         animeVintage: song.vintage,
         annId: song.siteIds.annId,
@@ -5352,6 +5444,7 @@ function handleData(data) {
       });
     }
   }
+  //TODO
   // blissfulyoshi ranked data export structure
   else if (Array.isArray(data) && data.length && data[0].animeRomaji) {
     for (let song of data) {
@@ -5386,6 +5479,7 @@ function handleData(data) {
       });
     }
   }
+  //TODO
   // kempanator answer stats script export structure
   else if (typeof data === "object" && data.songHistory && data.playerInfo) {
     for (let song of Object.values(data.songHistory)) {
@@ -5420,7 +5514,7 @@ function handleData(data) {
     }
   }
   // this script structure
-  else if (Array.isArray(data) && data.length && data[0].animeRomajiName) {
+  else if (isMyData(data)) {
     finalSongList = data;
   }
   // Filter out ignored songs
@@ -5834,7 +5928,10 @@ function createAnswerTable() {
   }
 }
 
-// create link element for song list table
+/**
+ * Create link element for song list table
+ * @param {string} link
+ */
 function createLinkElement(link) {
   if (!link) return "";
   let $a = $("<a></a>");
@@ -5856,8 +5953,11 @@ function createLinkElement(link) {
   return $a;
 }
 
-// reset all values in table sort options and toggle specified index
-function setSongListTableSort(index) {
+/**
+ * Reset all values in table sort options and toggle specified index
+ * @param {number} [index]
+ */
+function setSongListTableSort(index = NaN) {
   if (Number.isInteger(index)) {
     let value = songListTableSort[index];
     songListTableSort.forEach((x, i) => {
@@ -5871,7 +5971,10 @@ function setSongListTableSort(index) {
   }
 }
 
-// get sorting value for anime vintage
+/**
+ * Get sorting value for anime vintage
+ * @param {string} vintage
+ */
 function vintageSortValue(vintage) {
   if (!vintage) return 0;
   let split = vintage.split(" ");
@@ -5884,7 +5987,11 @@ function vintageSortValue(vintage) {
   return year + season;
 }
 
-// get sorting value for song type
+/**
+ * Get sorting value for song type
+ * @param {number} type
+ * @param {number} typeNumber
+ */
 function songTypeSortValue(type, typeNumber) {
   return (type || 0) * 1000 + (typeNumber || 0);
 }
@@ -5907,7 +6014,10 @@ function tabReset() {
   $("#cslgInfoContainer").hide();
 }
 
-// convert full url to target data
+/**
+ * Convert full url to target data
+ * @param {string} url
+ */
 function formatTargetUrl(url) {
   if (url && url.startsWith("http")) {
     return url.split("/").slice(-1)[0];
@@ -5953,7 +6063,13 @@ function createCatboxLinkObject(audio, video480, video720) {
   return links;
 }
 
-// create hotkey element
+/**
+ * Create hotkey element
+ * @param {string} title
+ * @param {keyof import("./types.js").HotKeySettings} key
+ * @param {string} selectID
+ * @param {string} inputID
+ */
 function createHotkeyElement(title, key, selectID, inputID) {
   let $select = $(`<select id="${selectID}" style="padding: 3px 0;"></select>`)
     .append(`<option>ALT</option>`)
@@ -5962,26 +6078,26 @@ function createHotkeyElement(title, key, selectID, inputID) {
     .append(`<option>-</option>`);
   let $input = $(
     `<input id="${inputID}" type="text" maxlength="1" style="width: 40px;">`
-  ).val(hotKeys[key].key);
+  ).val(hotKeys[key]?.key ?? "");
   $select.on("change", () => {
     hotKeys[key] = {
-      altKey: $select.val().includes("ALT"),
-      ctrlKey: $select.val().includes("CTRL"),
-      key: $input.val().toLowerCase(),
+      altKey: String($select.val()).includes("ALT"),
+      ctrlKey: String($select.val()).includes("CTRL"),
+      key: String($input.val()).toLowerCase(),
     };
     saveSettings();
   });
   $input.on("change", () => {
     hotKeys[key] = {
-      altKey: $select.val().includes("ALT"),
-      ctrlKey: $select.val().includes("CTRL"),
-      key: $input.val().toLowerCase(),
+      altKey: String($select.val()).includes("ALT"),
+      ctrlKey: String($select.val()).includes("CTRL"),
+      key: String($input.val()).toLowerCase(),
     };
     saveSettings();
   });
-  if (hotKeys[key].altKey && hotKeys[key].ctrlKey) $select.val("CTRL ALT");
-  else if (hotKeys[key].altKey) $select.val("ALT");
-  else if (hotKeys[key].ctrlKey) $select.val("CTRL");
+  if (hotKeys[key]?.altKey && hotKeys[key].ctrlKey) $select.val("CTRL ALT");
+  else if (hotKeys[key]?.altKey) $select.val("ALT");
+  else if (hotKeys[key]?.ctrlKey) $select.val("CTRL");
   else $select.val("-");
   $("#cslgHotkeyTable tbody").append(
     $(`<tr></tr>`)
@@ -5991,9 +6107,17 @@ function createHotkeyElement(title, key, selectID, inputID) {
   );
 }
 
-// test hotkey
+/**
+ * Test hotkey
+ *
+ * @param {keyof import("./types.js").HotKeySettings} action
+ * @param {string} key
+ * @param {boolean} altKey
+ * @param {boolean} ctrlKey
+ */
 function testHotkey(action, key, altKey, ctrlKey) {
   let hotkey = hotKeys[action];
+  if (!hotkey) return false;
   return (
     key === hotkey.key && altKey === hotkey.altKey && ctrlKey === hotkey.ctrlKey
   );
@@ -6007,7 +6131,10 @@ function isRankedMode() {
   );
 }
 
-// safeguard against people putting valid javascript in the song json
+/**
+ * Safeguard against people putting valid javascript in the song json
+ * @param {string} text
+ */
 function preventCodeInjection(text) {
   if (/<script/i.test(text)) {
     cslMessage("⚠️ code injection attempt detected, ending quiz");
@@ -6463,6 +6590,7 @@ async function startImport() {
  * Validate json data in local storage
  *
  * @param {string} item The item to validate
+ * @returns {import('./types.js').CSLSettings}
  */
 function validateLocalStorage(item) {
   try {
