@@ -4876,7 +4876,7 @@ async function getMalIdsFromMyanimelist(username) {
             } else {
                 for (let anime of result.data) {
                      const malIdEntry = {
-                         malId: anime.nodeId,
+                         malId: anime.node.id,
                      };
                     malIds.push(malIdEntry);
                 }
