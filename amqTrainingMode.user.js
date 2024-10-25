@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.78
+// @version      0.79
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://*.animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -70,7 +70,7 @@ let isTraining = false;
 let CSLButtonCSS = saveData.CSLButtonCSS || "calc(25% - 250px)";
 let showCSLMessages = saveData.showCSLMessages ?? false;
 let replacedAnswers = saveData.replacedAnswers || {};
-let malClientId = saveData.malClientId ?? "";
+let malClientId = "6176e0dabde3ce826c24e7343b2a97c9";
 let hotKeys = saveData.hotKeys ?? {};
 let debug = Boolean(saveData.debug);
 let fastSkip = false;
@@ -3141,10 +3141,10 @@ function endGuessPhase(songNumber) {
                                 animeType: song.animeType,
                                 vintage: song.animeVintage,
                                 animeDifficulty: song.songDifficulty,
-                                animeTags: song.animeTags,
-                                animeGenre: song.animeGenre,
-                                altAnimeNames: song.altAnimeNames,
-                                altAnimeNamesAnswers: song.altAnimeNamesAnswers,
+                                animeTags: song.animeTags ?? [],
+                                animeGenre: song.animeGenre ?? [],
+                                altAnimeNames: song.altAnimeNames ?? [],
+                                altAnimeNamesAnswers: song.altAnimeNamesAnswers ?? [],
                                 rebroadcast: song.rebroadcast,
                                 dub: song.dub,
                                 siteIds: {
