@@ -25,7 +25,7 @@ export type AnisongEntry = {
   animeJPName: string;
   animeAltName?: string[];
   animeVintage?: string;
-  linked_ids: AnimeListLink;
+  linked_ids: AnisongAnimeListLink;
   animeType?: string;
   animeCategory?: string;
   songType: string;

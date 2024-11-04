@@ -1923,22 +1923,22 @@ $("#cslgAutocompleteButton").on("click", () => {
     );
   }
 });
-$("#cslgListImportUsernameInput").keypress((event) => {
+$("#cslgListImportUsernameInput").on("keypress", (event) => {
   if (event.which === 13) {
     startImport();
   }
 });
-$("#cslgListImportStartButton").click(() => {
+$("#cslgListImportStartButton").on("click", () => {
   startImport();
 });
-$("#cslgListImportMoveButton").click(() => {
+$("#cslgListImportMoveButton").on("click", () => {
   if (!importedSongList.length) return;
   handleData(importedSongList);
   setSongListTableSort();
   createSongListTable();
   createAnswerTable();
 });
-$("#cslgListImportDownloadButton").click(() => {
+$("#cslgListImportDownloadButton").on("click", () => {
   if (!importedSongList.length) return;
   let listType = $("#cslgListImportSelect").val();
   let username = String($("#cslgListImportUsernameInput").val()).trim();
@@ -6502,79 +6502,83 @@ async function getSongListFromMalIds(malIds) {
     };
     await fetch(url, data)
       .then((res) => res.json())
-      .then((json) => {
-        if (Array.isArray(json)) {
-          for (let anime of json) {
-            // Assuming anime is structured correctly to find the right item
-            const animeIndex = segment.findIndex(
-              (item) => item.malId === anime.linked_ids.myanimelist
-            );
-            if (animeIndex !== -1) {
-              let songType = anime.songType;
-              // Check and set the songType and typeNumber
-              if (songType.startsWith("Opening")) {
-                anime.songType = 1;
-                anime.typeNumber = parseInt(songType.replace(/\D/g, "")); // Extract the number
-              } else if (songType.startsWith("Ending")) {
-                anime.songType = 2;
-                anime.typeNumber = parseInt(songType.replace(/\D/g, ""));
-              } else if (songType === "Insert Song") {
-                anime.songType = 3;
-                anime.typeNumber = null; // No type number for Insert Song
-              }
-              anime.animeRomajiName = anime.animeJPName;
-              anime.animeEnglishName = anime.animeENName;
-              anime.video480 = anime.MQ;
-              anime.video720 = anime.HQ;
-              anime.altAnimeNames = [].concat(
-                anime.animeJPName,
-                anime.animeENName,
-                anime.animeAltName || []
+      .then(
+        (/** @type {import('./types/anisong.js').AnisongEntry[]} */ json) => {
+          if (Array.isArray(json)) {
+            for (const data of json) {
+              // Assuming anime is structured correctly to find the right item
+              const animeIndex = segment.findIndex(
+                (item) => item.malId === data.linked_ids.myanimelist
               );
-              anime.altAnimeNamesAnswers = [];
-              anime.annId = anime.annId;
-              anime.malId = anime.linked_ids?.myanimelist;
-              anime.kitsuId = anime.linked_ids?.kitsu;
-              anime.aniListId = anime.linked_ids?.anilist;
-              // Search if the song is in other animes in the list
-              for (let otherAnime of json) {
-                if (otherAnime !== anime) {
-                  // Skip comparing the anime with itself
-                  // Check if the names and artist match
-                  if (
-                    otherAnime.songName === anime.songName &&
-                    otherAnime.songArtist === anime.songArtist
-                  ) {
+              if (animeIndex !== -1) {
+                /** @type {import('./types.js').Song} */
+                const song = {
+                  songName: data.songName,
+                  songArtist: data.songArtist,
+                  animeRomajiName: data.animeJPName,
+                  animeEnglishName: data.animeENName,
+                  ...parseSongType(data.songType),
+                  animeVintage: data.animeVintage ?? null,
+                  video480: data.MQ ?? null,
+                  video720: data.HQ ?? null,
+                  altAnimeNames: [
+                    data.animeJPName,
+                    data.animeENName,
+                    ...(data.animeAltName ?? []),
+                  ],
+                  altAnimeNamesAnswers: [],
+                  annId: data.annId,
+                  malId: data.linked_ids.myanimelist,
+                  kitsuId: data.linked_ids.kitsu,
+                  aniListId: data.linked_ids.anilist,
+                  animeGenre: segment[animeIndex].genres ?? [], // Use the genres from malIds
+                  animeTags: segment[animeIndex].tags ?? [], // Use the tags from malIds
+                  rating: Number(segment[animeIndex].rating) ?? null,
+                  correctGuess: true,
+                  incorrectGuess: true,
+                  audio: data.audio ?? null,
+                  startPoint: null,
+                  rebroadcast: data.isRebroadcast ?? null,
+                  dub: data.isDub ?? null,
+                  songDifficulty: data.songDifficulty ?? null,
+                  animeType: data.animeType ?? null,
+                };
+
+                // Search if the song is in other animes in the list
+                for (let otherAnime of json) {
+                  if (otherAnime !== data) {
+                    // Skip comparing the anime with itself
+                    // Check if the names and artist match
                     if (
-                      !(
-                        otherAnime.animeJPName === anime.animeJPName &&
-                        otherAnime.animeENName === anime.animeENName
-                      )
+                      otherAnime.songName === data.songName &&
+                      otherAnime.songArtist === data.songArtist
                     ) {
-                      anime.altAnimeNamesAnswers.push(otherAnime.animeENName);
-                      anime.altAnimeNamesAnswers.push(otherAnime.animeJPName);
+                      if (
+                        !(
+                          otherAnime.animeJPName === data.animeJPName &&
+                          otherAnime.animeENName === data.animeENName
+                        )
+                      ) {
+                        song.altAnimeNamesAnswers.push(otherAnime.animeENName);
+                        song.altAnimeNamesAnswers.push(otherAnime.animeJPName);
+                      }
                     }
                   }
                 }
+                // Enrich the anime data with genres and tags
+                importedSongList.push(song);
               }
-              // Enrich the anime data with genres and tags
-              importedSongList.push({
-                ...anime, // Spread the existing anime data
-                animeGenre: segment[animeIndex].genres, // Use the genres from malIds
-                animeTags: segment[animeIndex].tags, // Use the tags from malIds
-                rating: segment[animeIndex].rating,
-              });
             }
+            $("#cslgListImportText").text(
+              `Anime: ${idsProcessed} / ${malIds.length} | Songs: ${importedSongList.length}`
+            );
+          } else {
+            $("#cslgListImportText").text("anisongdb error");
+            console.log(json);
+            throw new Error("did not receive an array from anisongdb");
           }
-          $("#cslgListImportText").text(
-            `Anime: ${idsProcessed} / ${malIds.length} | Songs: ${importedSongList.length}`
-          );
-        } else {
-          $("#cslgListImportText").text("anisongdb error");
-          console.log(json);
-          throw new Error("did not receive an array from anisongdb");
         }
-      })
+      )
       .catch((res) => {
         importedSongList = [];
         $("#cslgListImportText").text("anisongdb error");
