@@ -5309,6 +5309,24 @@ const isJosephSongUIData = (data) =>
   Array.isArray(data) && data.length && data[0].gameMode;
 
 /**
+ * Check if data comes from the Kempanator's Answer Stats script
+ *
+ * @param {any} data
+ * @returns {data is import('./types/answerstats.js').KempanatorAnswerStats}
+ */
+const isKempanatorAnswerStatsData = (data) =>
+  typeof data === "object" && data.songHistory && data.playerInfo;
+
+/**
+ * Check if data comes from a blissfulyoshi's ranked export
+ *
+ * @param {any} data
+ * @returns {data is import('./types/blissfullyoshi.js').BlissfullYoshiRankedExport}
+ */
+const isBlissfullyoshiRankedData = (data) =>
+  Array.isArray(data) && data.length && data[0].animeRomaji;
+
+/**
  * Check if data comes from this script
  *
  * @param {any} data
@@ -5480,9 +5498,8 @@ function handleData(data) {
       });
     }
   }
-  //TODO
   // blissfulyoshi ranked data export structure
-  else if (Array.isArray(data) && data.length && data[0].animeRomaji) {
+  else if (isBlissfullyoshiRankedData(data)) {
     for (let song of data) {
       finalSongList.push({
         animeRomajiName: song.animeRomaji,
@@ -5498,11 +5515,11 @@ function handleData(data) {
         animeType: null,
         animeVintage: song.vintage,
         annId: song.annId,
-        malId: song.malId,
-        kitsuId: song.kitsuId,
-        aniListId: song.aniListId,
-        animeTags: song.animeTags ?? [],
-        animeGenre: song.animeGenres ?? [],
+        malId: song.malId ?? undefined,
+        kitsuId: song.kitsuId ?? undefined,
+        aniListId: song.aniListId ?? undefined,
+        animeTags: [],
+        animeGenre: [],
         rebroadcast: null,
         dub: null,
         startPoint: null,
@@ -5515,9 +5532,8 @@ function handleData(data) {
       });
     }
   }
-  //TODO
   // kempanator answer stats script export structure
-  else if (typeof data === "object" && data.songHistory && data.playerInfo) {
+  else if (isKempanatorAnswerStatsData(data)) {
     for (let song of Object.values(data.songHistory)) {
       finalSongList.push({
         animeRomajiName: song.animeRomajiName,
