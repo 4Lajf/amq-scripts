@@ -24,6 +24,7 @@ declare class Quiz {
 
   /** @see https://socket.animemusicquiz.com/scripts/pages/gamePage/game/quiz/quizSkipController.js */
   skipController: {
+    toggled: boolean;
     voteSkip: () => void;
     sendSkipVote: () => void;
     autoVoteTimeout: number | undefined;
@@ -32,7 +33,7 @@ declare class Quiz {
   /**
    * Dictionary of player number to player object
    */
-  players: Record<number, Player>;
+  players: Record<number, QuizPlayer>;
 
   setupQuiz: (...args: any[]) => void;
 
@@ -70,8 +71,10 @@ declare class QuizAnswerInput {
   };
 }
 
-export type Player = {
+/** @see https://animemusicquiz.com/scripts/pages/gamePage/game/quiz/quizPlayer.js */
+export type QuizPlayer = {
   name: string;
+  level: number;
   answer: string;
   gamePlayerId: number;
   isSelf: boolean;
@@ -79,6 +82,48 @@ export type Player = {
   avatarSlot: {
     _answer: string | null;
     $body: JQuery<HTMLDivElement>;
+  };
+  avatarDisabled: boolean;
+  avatarInfo: AvatarInfo;
+};
+
+export type LobbyPlayer = {
+  host: boolean;
+  name: string;
+  ready: boolean;
+  avatarInfo: AvatarInfo;
+  gamePlayerId: number;
+  level: number;
+  lobbySlot: any;
+};
+
+export type AvatarInfo = {
+  avatar: {
+    active: number;
+    animated: number;
+    animatedHeadColorName: string;
+    avatarId: number;
+    avatarName: string;
+    backgroundFileName: string;
+    characterId: number;
+    colorActive: number;
+    colorId: number;
+    colorName: string;
+    editor: string;
+    extraArtist: string | null;
+    optionActive: boolean;
+    optionName: string;
+    outfitName: string;
+    sizeModifier: number;
+  };
+  background: {
+    avatarId: number;
+    avatarName: string;
+    backgroundHori: string;
+    backgroundUniqueId: number;
+    backgroundVert: string;
+    colorId: number;
+    outfitName: string;
   };
 };
 
@@ -97,6 +142,7 @@ declare class Lobby {
   isHost: boolean;
   changeToSpectator: (playerName: string) => void;
   leave: (args: any) => void;
+  setupLobby: (lobbyInfo: any, isSpectator: boolean) => void;
 }
 
 export type Gamemode = "Ranked" | "Multiplayer" | "Solo";
@@ -303,8 +349,17 @@ export class ListenerClass {
   unbindListener: () => void;
 }
 
+/** @see https://animemusicquiz.com/scripts/pages/gamePage/shared/listener.js */
+export class SocketListener {
+  constructor(command: string, callback: (payload: any) => void);
+  fire: (payload: any) => void;
+  bindListener: () => void;
+  unbindListener: () => void;
+}
+
 export type AMQSocket = {
   sendCommand: (params: { type: string; command: string; data?: any }) => void;
+  listners: Record<string, SocketListener[]>;
 };
 
 export type HotKey = {
@@ -420,7 +475,20 @@ export type CSLSettings = {
   showCSLMessages?: boolean;
   replacedAnswers?: any;
   malClientId?: string;
-  hotKeys: HotKeySettings;
+  hotKeys?: HotKeySettings;
+};
+
+export type CSLMultiplayer = {
+  host: string;
+  songInfo: any;
+  voteSkip: Record<number, boolean>; // GamePlayerId to boolean
+};
+
+export type MalIdEntry = {
+  malId: number;
+  genres?: string[];
+  tags?: string[];
+  rating?: string;
 };
 
 export type ReviewDataItem = {
@@ -454,7 +522,7 @@ export class AmqAwesomepleteClass {
  * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/shared/viewChanger.js
  */
 export class ViewChanger {
-  changeView: (view: string) => void;
+  changeView: (view: string, arg?: any) => void;
 }
 
 /**
@@ -462,6 +530,8 @@ export class ViewChanger {
  */
 export class HostModal {
   displayHostSolo: () => void;
+  $roomName: JQuery<HTMLInputElement>;
+  getSettings: () => any;
 }
 
 /**
@@ -469,6 +539,20 @@ export class HostModal {
  */
 export class RoomBrowser {
   host: () => void;
+}
+
+/**
+ * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/game/quiz/quizAnswerInput.js
+ */
+export class QuizTypeAnswerInputController {
+  submitAnswer: (answer: string) => void;
+}
+
+/**
+ * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/game/quiz/moeVideoPlayer.js
+ */
+export class MoeVideoPlayer {
+  handleError: () => void;
 }
 
 declare global {
@@ -494,12 +578,16 @@ declare global {
     link?: string;
     description?: string;
   }) => void;
+  var QuizTypeAnswerInputController = typeof QuizTypeAnswerInputController;
+  var MoeVideoPlayer = typeof MoeVideoPlayer;
 }
 
 /**
  * @see https://socket.animemusicquiz.com/scripts/pages/gamePage/game/chat/gameChat.js
  */
 declare class GameChat {
+  open: boolean;
   systemMessage: (message: string) => void;
   $chatMessageContainer: JQuery<HTMLDivElement>;
+  spectators: NewSpectatorPayload[];
 }

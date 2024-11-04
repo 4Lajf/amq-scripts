@@ -161,11 +161,17 @@ let autocomplete = []; //store lowercase version for faster compare speed
 /** @type {any} */
 let autocompleteInput;
 
+/** @type {import('./types.js').CSLMultiplayer} */
 let cslMultiplayer = { host: "", songInfo: {}, voteSkip: {} };
 let cslState = 0; //0: none, 1: guessing phase, 2: answer phase
+
+/** @type {Record<string, boolean>} */
 let songLinkReceived = {};
+
 let skipping = false;
-let answerChunks = {}; //store player answer chunks, ids are keys
+
+/** @type {Record<number, Chunk>} */
+let answerChunks = {}; //store player answer chunks, ids are gamePlayerId
 
 /** @type {Chunk} */
 let resultChunk;
@@ -515,7 +521,7 @@ function initializeSliders() {
       //@ts-ignore
       "change",
       function (/** @type {import('./types.js').SliderChangeEvent} */ e) {
-        fileHostOverride = e.value.newValue;
+        fileHostOverride = /** @type {1 | 2 | 3} */ (e.value.newValue);
       }
     );
 
@@ -792,7 +798,7 @@ function filterSongList() {
             song.animeEnglishName.toLowerCase().includes(lowerCaseFilter)
           );
         case "songType":
-          return songTypeText(song.songType, song.typeNumber)
+          return songTypeText(song.songType, song.typeNumber ?? 0)
             .toLowerCase()
             .includes(lowerCaseFilter);
         case "animeVintage":
@@ -804,7 +810,7 @@ function filterSongList() {
             song.songArtist.toLowerCase().includes(lowerCaseFilter) ||
             song.animeRomajiName.toLowerCase().includes(lowerCaseFilter) ||
             song.animeEnglishName.toLowerCase().includes(lowerCaseFilter) ||
-            songTypeText(song.songType, song.typeNumber)
+            songTypeText(song.songType, song.typeNumber ?? 0)
               .toLowerCase()
               .includes(lowerCaseFilter) ||
             song.animeVintage?.toLowerCase().includes(lowerCaseFilter)
@@ -1857,7 +1863,7 @@ $("#cslgSongOrderSelect").on("change", function () {
   songOrderType = String($(this).val());
 });
 $("#cslgHostOverrideSelect").on("change", function () {
-  fileHostOverride = parseInt(String($(this).val()));
+  fileHostOverride = /** @type {1 | 2 | 3} */ (parseInt(String($(this).val())));
 });
 $("#cslgMergeButton").on("click", () => {
   mergedSongList = Array.from(
@@ -3429,8 +3435,10 @@ function setup() {
   };
 
   const oldSubmitAnswer = QuizTypeAnswerInputController.prototype.submitAnswer;
-  QuizTypeAnswerInputController.prototype.submitAnswer = function (answer) {
-    if (quiz.cslActive) {
+  QuizTypeAnswerInputController.prototype.submitAnswer = function (
+    /** @type {string} */ answer
+  ) {
+    if (quiz.cslActive && quiz.ownGamePlayerId != null) {
       currentAnswers[quiz.ownGamePlayerId] = answer;
       this.skipController.highlight = true;
       fireListener("quiz answer", {
@@ -3734,8 +3742,17 @@ function startQuiz() {
   let data = {
     gameMode: lobby.soloMode ? "Solo" : "Multiplayer",
     showSelection: showSelection,
-    groupSlotMap: createGroupSlotMap(Object.keys(lobby.players)),
-    players: [],
+    groupSlotMap: createGroupSlotMap(Object.keys(lobby.players).map(Number)),
+    players: Object.values(lobby.players).map((player, i) => ({
+      ...player,
+      pose: 1,
+      score: 0,
+      posittion: Math.floor(i / 8) + 1,
+      positionSlot: i % 8,
+      teamCaptain: null,
+      teamNumber: null,
+      teamPlayer: null,
+    })),
     multipleChoice: false,
     quizDescription: {
       quizId: "",
@@ -3743,17 +3760,6 @@ function startQuiz() {
       roomName: hostModal.$roomName.val(),
     },
   };
-  Object.values(lobby.players).forEach((player, i) => {
-    player.pose = 1;
-    player.sore = 0;
-    player.position = Math.floor(i / 8) + 1;
-    player.positionSlot = i % 8;
-    player.teamCaptain = null;
-    player.teamNumber = null;
-    player.teamPlayer = null;
-    data.players.push(player);
-  });
-  //console.log(data.players);
   fireListener("Game Starting", data);
   setTimeout(() => {
     if (quiz.soloMode) {
@@ -3838,9 +3844,9 @@ function readySong(songNumber) {
  */
 function playSong(songNumber) {
   if (!quiz.cslActive || !quiz.inQuiz) return reset();
-  for (let key of Object.keys(quiz.players)) {
-    currentAnswers[key] = "";
-    cslMultiplayer.voteSkip[key] = false;
+  for (const player of Object.values(quiz.players)) {
+    currentAnswers[player.gamePlayerId] = "";
+    cslMultiplayer.voteSkip[player.gamePlayerId] = false;
   }
   answerChunks = {};
   resultChunk = new Chunk();
@@ -3874,7 +3880,7 @@ function playSong(songNumber) {
   }, (guessTime + extraGuessTime) * 1000);
   if (quiz.soloMode) {
     skipInterval = setInterval(() => {
-      if (quiz.skipController._toggled) {
+      if (quiz.skipController.toggled) {
         fireListener("quiz overlay message", "Skipping to Answers");
         clearInterval(skipInterval);
         clearTimeout(endGuessTimer);
@@ -3948,7 +3954,12 @@ function endGuessPhase(songNumber) {
     console.log("song found ", song);
   }
   fireListener("guess phase over");
-  if (!quiz.soloMode && quiz.inQuiz && !quiz.isSpectator) {
+  if (
+    !quiz.soloMode &&
+    quiz.inQuiz &&
+    !quiz.isSpectator &&
+    quiz.ownGamePlayerId != null
+  ) {
     let answer = currentAnswers[quiz.ownGamePlayerId];
     if (answer) {
       splitIntoChunks(btoa(encodeURIComponent(answer)) + "$", 144).forEach(
@@ -3972,20 +3983,17 @@ function endGuessPhase(songNumber) {
             : "";
         }
       }
-      for (let key of Object.keys(quiz.players)) {
-        cslMultiplayer.voteSkip[key] = false;
+      for (const player of Object.values(quiz.players)) {
+        cslMultiplayer.voteSkip[player.gamePlayerId] = false;
       }
       let data = {
-        answers: [],
-        progressBarState: null,
-      };
-      for (let player of Object.values(quiz.players)) {
-        data.answers.push({
+        answers: Object.values(quiz.players).map((player) => ({
           gamePlayerId: player.gamePlayerId,
           pose: 3,
           answer: currentAnswers[player.gamePlayerId] || "",
-        });
-      }
+        })),
+        progressBarState: null,
+      };
       fireListener("player answers", data);
       if (!quiz.soloMode && quiz.isHost) {
         let message = `${song.animeRomajiName || ""}\n${
@@ -4012,8 +4020,12 @@ function endGuessPhase(songNumber) {
       answerTimer = setTimeout(
         () => {
           if (!quiz.cslActive || !quiz.inQuiz) return reset();
+          /** @type {Record<number, boolean>} */
           let correct = {};
+
+          /** @type {Record<number, number>} */
           let pose = {};
+
           if (quiz.isHost) {
             for (let player of Object.values(quiz.players)) {
               let isCorrect = isCorrectAnswer(
@@ -4031,7 +4043,17 @@ function endGuessPhase(songNumber) {
           }
           if (quiz.soloMode) {
             let data = {
-              players: [],
+              players: Object.values(quiz.players).map((player) => ({
+                gamePlayerId: player.gamePlayerId,
+                pose: pose[player.gamePlayerId],
+                level: quiz.players[player.gamePlayerId].level,
+                correct: correct[player.gamePlayerId],
+                score: score[player.gamePlayerId],
+                listStatus: null,
+                showScore: null,
+                position: Math.floor(player.gamePlayerId / 8) + 1,
+                positionSlot: player.gamePlayerId % 8,
+              })),
               songInfo: {
                 animeNames: {
                   english: song.animeEnglishName,
@@ -4062,7 +4084,7 @@ function endGuessPhase(songNumber) {
                 dub: song.dub,
                 siteIds: {
                   annId: song.annId,
-                  malId: song.malIdt,
+                  malId: song.malId,
                   kitsuId: song.kitsuId,
                   aniListId: song.aniListId,
                 },
@@ -4071,28 +4093,21 @@ function endGuessPhase(songNumber) {
                 length: 25,
                 played: 0,
               },
-              groupMap: createGroupSlotMap(Object.keys(quiz.players)),
+              groupMap: createGroupSlotMap(
+                Object.keys(quiz.players).map(Number)
+              ),
               watched: false,
             };
-            for (let player of Object.values(quiz.players)) {
-              data.players.push({
-                gamePlayerId: player.gamePlayerId,
-                pose: pose[player.gamePlayerId],
-                level: quiz.players[player.gamePlayerId].level,
-                correct: correct[player.gamePlayerId],
-                score: score[player.gamePlayerId],
-                listStatus: null,
-                showScore: null,
-                position: Math.floor(player.gamePlayerId / 8) + 1,
-                positionSlot: player.gamePlayerId % 8,
-              });
-            }
+
             fireListener("answer results", data);
           } else if (quiz.isHost) {
             let list = [];
             for (let id of Object.keys(correct)) {
+              const numId = parseInt(id);
               list.push(
-                `${id},${correct[id] ? "1" : "0"},${pose[id]},${score[id]}`
+                `${id},${correct[numId] ? "1" : "0"},${pose[numId]},${
+                  score[numId]
+                }`
               );
             }
             splitIntoChunks(
@@ -4126,7 +4141,7 @@ function endGuessPhase(songNumber) {
               }
               if (quiz.soloMode) {
                 skipInterval = setInterval(() => {
-                  if (fastSkip || quiz.skipController._toggled) {
+                  if (fastSkip || quiz.skipController.toggled) {
                     if (!replayPhaseEnded) {
                       clearInterval(skipInterval);
                       clearTimeout(timeoutId); // Cancel the automatic timeout
@@ -4147,7 +4162,11 @@ function endGuessPhase(songNumber) {
   );
 }
 
-// end replay phase
+/**
+ * End replay phase
+ *
+ * @param {number} songNumber
+ */
 function endReplayPhase(songNumber) {
   if (!quiz.cslActive || !quiz.inQuiz) return reset();
   //console.log(`end replay phase (${songNumber})`);
@@ -4163,23 +4182,16 @@ function endReplayPhase(songNumber) {
     fireListener("quiz overlay message", "Skipping to Final Standings");
     setTimeout(
       () => {
-        let data = {
-          resultStates: [],
-        };
-        /*"progressBarState": {
-                "length": 26.484,
-                "played": 6.484
-            }*/
         let sortedScores = Array.from(new Set(Object.values(score))).sort(
           (a, b) => b - a
         );
-        for (let id of Object.keys(score)) {
-          data.resultStates.push({
-            gamePlayerId: parseInt(id),
+        let data = {
+          resultStates: Object.values(score).map((score, i) => ({
+            gamePlayerId: i,
             pose: 1,
-            endPosition: sortedScores.indexOf(score[id]) + 1,
-          });
-        }
+            endPosition: sortedScores.indexOf(score) + 1,
+          })),
+        };
         fireListener("quiz end result", data);
       },
       fastSkip ? 2000 : 5000
@@ -4197,8 +4209,13 @@ function endReplayPhase(songNumber) {
   }
 }
 
-// fire all event listeners (including scripts)
-function fireListener(type, data) {
+/**
+ * Fire all event listeners (including scripts)
+ *
+ * @param {string} type
+ * @param {any} data
+ */
+function fireListener(type, data = undefined) {
   try {
     for (let listener of socket.listners[type]) {
       listener.fire(data);
@@ -4211,7 +4228,11 @@ function fireListener(type, data) {
   }
 }
 
-// send csl chat message
+/**
+ * Send csl chat message
+ *
+ * @param {string} text
+ */
 function cslMessage(text) {
   if (!isRankedMode()) {
     socket.sendCommand({
@@ -4222,7 +4243,11 @@ function cslMessage(text) {
   }
 }
 
-// send a client side message to game chat
+/**
+ * Send a client side message to game chat
+ *
+ * @param {string} message
+ */
 function sendSystemMessage(message) {
   if (gameChat.open) {
     setTimeout(() => {
@@ -4231,14 +4256,19 @@ function sendSystemMessage(message) {
   }
 }
 
-// parse message
+/**
+ * Parse message
+ *
+ * @param {string} content
+ * @param {string} sender
+ */
 function parseMessage(content, sender) {
   if (isRankedMode()) return;
   let player;
   if (lobby.inLobby)
-    player = Object.values(lobby.players).find((x) => x._name === sender);
+    player = Object.values(lobby.players).find((x) => x.name === sender);
   else if (quiz.inQuiz)
-    player = Object.values(quiz.players).find((x) => x._name === sender);
+    player = Object.values(quiz.players).find((x) => x.name === sender);
   let isHost = sender === cslMultiplayer.host;
   if (content.startsWith("§CSL0")) {
     //start quiz
@@ -4331,7 +4361,7 @@ function parseMessage(content, sender) {
       if (name === selfName) {
         socket.sendCommand({ type: "lobby", command: "change to player" });
       } else if (quiz.cslActive && quiz.inQuiz) {
-        let player = Object.values(quiz.players).find((p) => p._name === name);
+        let player = Object.values(quiz.players).find((p) => p.name === name);
         if (player) {
           fireListener("Rejoining Player", {
             name: name,
@@ -4419,8 +4449,29 @@ function parseMessage(content, sender) {
       resultChunk.append(content);
       if (resultChunk.isComplete) {
         let split = resultChunk.decode().split("§");
+        let decodedPlayers = [];
+        for (const p of split) {
+          let playerSplit = p.split(",");
+          decodedPlayers.push({
+            id: parseInt(playerSplit[0]),
+            correct: Boolean(parseInt(playerSplit[1])),
+            pose: parseInt(playerSplit[2]),
+            score: parseInt(playerSplit[3]),
+          });
+        }
+        decodedPlayers.sort((a, b) => b.score - a.score);
         let data = {
-          players: [],
+          players: decodedPlayers.map((p, i) => ({
+            gamePlayerId: p.id,
+            pose: p.pose,
+            level: quiz.players[p.id].level,
+            correct: p.correct,
+            score: p.score,
+            listStatus: null,
+            showScore: null,
+            position: Math.floor(i / 8) + 1,
+            positionSlot: i % 8,
+          })),
           songInfo: {
             animeNames: {
               english: cslMultiplayer.songInfo.animeEnglishName,
@@ -4459,34 +4510,10 @@ function parseMessage(content, sender) {
             length: 25,
             played: 0,
           },
-          groupMap: createGroupSlotMap(Object.keys(quiz.players)),
+          groupMap: createGroupSlotMap(Object.keys(quiz.players).map(Number)),
           watched: false,
         };
-        let decodedPlayers = [];
-        for (p of split) {
-          let playerSplit = p.split(",");
-          decodedPlayers.push({
-            id: parseInt(playerSplit[0]),
-            correct: Boolean(parseInt(playerSplit[1])),
-            pose: parseInt(playerSplit[2]),
-            score: parseInt(playerSplit[3]),
-          });
-        }
-        decodedPlayers.sort((a, b) => b.score - a.score);
-        decodedPlayers.forEach((p, i) => {
-          data.players.push({
-            gamePlayerId: p.id,
-            pose: p.pose,
-            level: quiz.players[p.id].level,
-            correct: p.correct,
-            score: p.score,
-            listStatus: null,
-            showScore: null,
-            position: Math.floor(i / 8) + 1,
-            positionSlot: i % 8,
-          });
-        });
-        //console.log(data.players);
+
         fireListener("answer results", data);
       }
     }
@@ -4524,20 +4551,26 @@ function parseMessage(content, sender) {
 }
 
 function checkVoteSkip() {
-  let keys = Object.keys(cslMultiplayer.voteSkip).filter(
-    (key) =>
-      quiz.players.hasOwnProperty(key) && !quiz.players[key].avatarDisabled
-  );
-  for (let key of keys) {
-    if (!cslMultiplayer.voteSkip[key]) return false;
-  }
-  return true;
+  return Object.entries(cslMultiplayer.voteSkip)
+    .filter(
+      ([key, value]) =>
+        quiz.players.hasOwnProperty(key) &&
+        !quiz.players[parseInt(key)].avatarDisabled
+    )
+    .every(([, x]) => x);
 }
 
-// input list of player keys, return group slot map
+/**
+ * Input list of player keys, return group slot map
+ *
+ * @param {number[]} players
+ */
 function createGroupSlotMap(players) {
   players = players.map(Number);
+
+  /** @type {Record<number, number[]>} */
   let map = {};
+
   let group = 1;
   if (Object.keys(score).length) players.sort((a, b) => score[b] - score[a]);
   for (let i = 0; i < players.length; i += 8) {
@@ -4547,7 +4580,12 @@ function createGroupSlotMap(players) {
   return map;
 }
 
-// check if the player's answer is correct
+/**
+ * Check if the player's answer is correct
+ *
+ * @param {number} songNumber
+ * @param {string | null} answer
+ */
 function isCorrectAnswer(songNumber, answer) {
   let song = finalSongList[songOrder[songNumber]];
   if (!answer) {
@@ -4555,10 +4593,10 @@ function isCorrectAnswer(songNumber, answer) {
     return false;
   }
   answer = answer.toLowerCase();
-  let correctAnswers = [].concat(
-    song.altAnimeNames || [],
-    song.altAnimeNamesAnswers || []
-  );
+  let correctAnswers = [
+    ...(song.altAnimeNames || []),
+    ...(song.altAnimeNamesAnswers || []),
+  ];
   for (let a1 of correctAnswers) {
     let a2 = replacedAnswers[a1];
     if (a2 && a2.toLowerCase() === answer) {
@@ -4574,7 +4612,9 @@ function isCorrectAnswer(songNumber, answer) {
   return false;
 }
 
-// get start point value (0-100)
+/**
+ * Get start point value (0-100)
+ */
 function getStartPoint() {
   return (
     Math.floor(Math.random() * (startPointRange[1] - startPointRange[0] + 1)) +
@@ -4677,42 +4717,42 @@ function reset() {
   nextSongChunk = new Chunk();
 }
 
-// end quiz and set up lobby
+/**
+ * End quiz and set up lobby
+ */
 function quizOver() {
   reset();
   let data = {
-    spectators: [],
+    spectators: gameChat.spectators.map((s) => ({
+      name: s.name,
+      gamePlayerId: null,
+    })),
     inLobby: true,
     settings: hostModal.getSettings(),
     soloMode: quiz.soloMode,
     inQueue: [],
     hostName: lobby.hostName,
     gameId: lobby.gameId,
-    players: [],
-    numberOfTeams: 0,
-    teamFullMap: {},
-  };
-  for (let player of Object.values(quiz.players)) {
-    if (
-      gameChat.spectators.some((spectator) => spectator.name === player._name)
-    ) {
-      data.spectators.push({
-        name: player._name,
-        gamePlayerId: null,
-      });
-    } else if (!player.avatarDisabled) {
-      data.players.push({
-        name: player._name,
-        gamePlayerId: player.gamePlayerId,
-        level: player.level,
-        avatar: player.avatarInfo,
+    players: Object.values(quiz.players)
+      .filter(
+        (p) =>
+          !p.avatarDisabled &&
+          !gameChat.spectators.some((s) => s.name === p.name)
+      )
+      .map((p) => ({
+        name: p.name,
+        gamePlayerId: p.gamePlayerId,
+        level: p.level,
+        avatar: p.avatarInfo,
         ready: true,
         inGame: true,
         teamNumber: null,
         multipleChoice: false,
-      });
-    }
-  }
+      })),
+    numberOfTeams: 0,
+    teamFullMap: {},
+  };
+
   lobby.setupLobby(
     data,
     gameChat.spectators.some((spectator) => spectator.name === selfName)
@@ -5394,11 +5434,9 @@ function handleData(data) {
         rebroadcast: null,
         dub: null,
         startPoint: song.songInfo.startPoint,
-        audio: String(song.videoUrl).endsWith(".mp3") ? song.videoUrl : null,
+        audio: null,
         video480: null,
-        video720: String(song.videoUrl).endsWith(".webm")
-          ? song.videoUrl
-          : null,
+        video720: null,
         correctGuess: !song.songInfo.wrongGuess,
         incorrectGuess: song.songInfo.wrongGuess,
         rating: null,
@@ -5433,12 +5471,10 @@ function handleData(data) {
         rebroadcast: null,
         dub: null,
         startPoint: song.startSample,
-        audio: song.urls?.catbox?.[0] ?? song.urls?.openingsmoe?.[0] ?? null,
-        video480:
-          song.urls?.catbox?.[480] ?? song.urls?.openingsmoe?.[480] ?? null,
-        video720:
-          song.urls?.catbox?.[720] ?? song.urls?.openingsmoe?.[720] ?? null,
-        correctGuess: song.correct,
+        audio: song.urls?.[0] ?? null,
+        video480: song.urls?.[480] ?? null,
+        video720: song.urls?.[720] ?? null,
+        correctGuess: song.correct ?? false,
         incorrectGuess: !song.correct,
         rating: null,
       });
@@ -5930,7 +5966,7 @@ function createAnswerTable() {
 
 /**
  * Create link element for song list table
- * @param {string} link
+ * @param {string | null} link
  */
 function createLinkElement(link) {
   if (!link) return "";
@@ -5973,7 +6009,7 @@ function setSongListTableSort(index = NaN) {
 
 /**
  * Get sorting value for anime vintage
- * @param {string} vintage
+ * @param {string | null} vintage
  */
 function vintageSortValue(vintage) {
   if (!vintage) return 0;
@@ -5989,8 +6025,8 @@ function vintageSortValue(vintage) {
 
 /**
  * Get sorting value for song type
- * @param {number} type
- * @param {number} typeNumber
+ * @param {number | null} type
+ * @param {number | null} typeNumber
  */
 function songTypeSortValue(type, typeNumber) {
   return (type || 0) * 1000 + (typeNumber || 0);
@@ -6016,7 +6052,7 @@ function tabReset() {
 
 /**
  * Convert full url to target data
- * @param {string} url
+ * @param {string | null} url
  */
 function formatTargetUrl(url) {
   if (url && url.startsWith("http")) {
@@ -6025,15 +6061,25 @@ function formatTargetUrl(url) {
   return url;
 }
 
-// translate type and typeNumber ids to shortened type text
+/**
+ * Translate type and typeNumber ids to shortened type text
+ * @param {number} type
+ * @param {number | null} typeNumber
+ */
 function songTypeText(type, typeNumber) {
-  if (type === 1) return "OP" + typeNumber;
-  if (type === 2) return "ED" + typeNumber;
+  if (type === 1) return "OP" + (typeNumber ?? 1);
+  if (type === 2) return "ED" + (typeNumber ?? 1);
   if (type === 3) return "IN";
   return "";
 }
 
-// input 3 links, return formatted catbox link object
+/**
+ * Input 3 links, return formatted catbox link object
+ *
+ * @param {string | null} audio
+ * @param {string | null} video480
+ * @param {string | null} video720
+ */
 function createCatboxLinkObject(audio, video480, video720) {
   let links = {};
   if (fileHostOverride) {
@@ -6290,7 +6336,7 @@ async function getMalIdsFromMyanimelist(username) {
       } else {
         for (let anime of result.data) {
           const malIdEntry = {
-            malId: anime.nodeId,
+            malId: /** @type {number} */ (anime.nodeId),
           };
           malIds.push(malIdEntry);
         }
@@ -6305,10 +6351,11 @@ async function getMalIdsFromMyanimelist(username) {
  * Input anilist username, return list of mal ids
  *
  * @param {string} username Anilist username
- * @returns {Promise<{ malId: number }[]>}
  */
 async function getMalIdsFromAnilist(username) {
   let pageNumber = 1;
+
+  /** @type {import('./types.js').MalIdEntry[]} */
   let malIds = [];
 
   /** @type {import('./types/anilist.js').AnilistStatus[]} */
@@ -6336,6 +6383,7 @@ async function getMalIdsFromAnilist(username) {
     if (data) {
       for (let item of data.mediaList) {
         if (item.media.idMal) {
+          /** @type {import('./types.js').MalIdEntry} */
           const malIdEntry = {
             malId: item.media.idMal,
             genres: item.media.genres,
@@ -6410,6 +6458,9 @@ function getAnilistData(username, statuses, pageNumber) {
     .catch((error) => console.log(error));
 }
 
+/**
+ * @param {import('./types.js').MalIdEntry[]} malIds
+ */
 async function getSongListFromMalIds(malIds) {
   if (!malIds) malIds = [];
   importedSongList = [];
