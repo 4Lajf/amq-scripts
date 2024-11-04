@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.76
+// @version      0.79
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://*.animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -82,9 +82,9 @@ let selectedSetNewSongs = new Set();
 const version = "0.76";
 const saveData = validateLocalStorage("customSongListGame");
 const catboxHostDict = {
-  1: "nl.catbox.video",
-  2: "ladist1.catbox.video",
-  3: "vhdist1.catbox.video",
+  1: "https://nawdist.animemusicquiz.com/",
+  2: "https://naedist.animemusicquiz.com/",
+  3: "https://eudist.animemusicquiz.com/",
 };
 
 /** @type {string} */
@@ -5429,8 +5429,8 @@ function handleData(data) {
         malId: song.songInfo.siteIds.malId,
         kitsuId: song.songInfo.siteIds.kitsuId,
         aniListId: song.songInfo.siteIds.aniListId,
-        animeTags: song.songInfo.animeTags,
-        animeGenre: song.songInfo.animeGenre,
+        animeTags: song.songInfo.animeTags ?? [],
+        animeGenre: song.songInfo.animeGenre ?? [],
         rebroadcast: null,
         dub: null,
         startPoint: song.songInfo.startPoint,
@@ -5466,8 +5466,8 @@ function handleData(data) {
         malId: song.siteIds.malId,
         kitsuId: song.siteIds.kitsuId,
         aniListId: song.siteIds.aniListId,
-        animeTags: song.tags,
-        animeGenre: song.genre,
+        animeTags: song.tags ?? [],
+        animeGenre: song.genre ?? [],
         rebroadcast: null,
         dub: null,
         startPoint: song.startSample,
@@ -5501,8 +5501,8 @@ function handleData(data) {
         malId: song.malId,
         kitsuId: song.kitsuId,
         aniListId: song.aniListId,
-        animeTags: song.animeTags,
-        animeGenre: song.animeGenres,
+        animeTags: song.animeTags ?? [],
+        animeGenre: song.animeGenres ?? [],
         rebroadcast: null,
         dub: null,
         startPoint: null,
@@ -6336,7 +6336,7 @@ async function getMalIdsFromMyanimelist(username) {
       } else {
         for (let anime of result.data) {
           const malIdEntry = {
-            malId: /** @type {number} */ (anime.nodeId),
+            malId: /** @type {number} */ (anime.node.id),
           };
           malIds.push(malIdEntry);
         }
