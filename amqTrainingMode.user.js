@@ -3438,8 +3438,8 @@ function setup() {
   QuizTypeAnswerInputController.prototype.submitAnswer = function (
     /** @type {string} */ answer
   ) {
-    if (quiz.cslActive && quiz.ownGamePlayerId != null) {
-      currentAnswers[quiz.ownGamePlayerId] = answer;
+    if (quiz.cslActive) {
+      currentAnswers[quiz.ownGamePlayerId ?? 0] = answer;
       this.skipController.highlight = true;
       fireListener("quiz answer", {
         answer: answer,
