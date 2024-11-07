@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.80
+// @version      0.81
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://*.animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -3370,7 +3370,7 @@ function setup() {
     }, 10);
   }).bindListener();
 
-  quiz.pauseButton.$button.off("click").click(() => {
+  quiz.pauseButton.$button.off("click").on("click", () => {
     if (quiz.cslActive) {
       if (quiz.soloMode) {
         if (quiz.pauseButton.pauseOn) {
@@ -3385,6 +3385,7 @@ function setup() {
         } else {
           fireListener("quiz pause triggered", {
             playerName: selfName,
+            noPlayerPause: null,
           });
         }
       } else {
@@ -3738,16 +3739,25 @@ function startQuiz() {
   for (let player of Object.values(lobby.players)) {
     score[player.gamePlayerId] = 0;
   }
-  //console.log({showSelection, totalSongs, guessTime, extraGuessTime, fastSkip});
+
+  /** @type {import('./types.js').GameStartingPayload} */
   let data = {
-    gameMode: lobby.soloMode ? "Solo" : "Multiplayer",
+    gameMode: /** @type {import('./types.js').Gamemode} */ (
+      lobby.soloMode ? "Solo" : "Multiplayer"
+    ),
     showSelection: showSelection,
     groupSlotMap: createGroupSlotMap(Object.keys(lobby.players).map(Number)),
     players: Object.values(lobby.players).map((player, i) => ({
-      ...player,
+      name: player.name,
+      level: player.level,
+      gamePlayerId: player.gamePlayerId,
+      hasMultiChoiceActive: player.hasMultiChoiceActive,
+      host: player.host,
+      avatarInfo: player.avatarInfo,
+      inGame: player.inGame,
       pose: 1,
       score: 0,
-      posittion: Math.floor(i / 8) + 1,
+      position: Math.floor(i / 8) + 1,
       positionSlot: i % 8,
       teamCaptain: null,
       teamNumber: null,
@@ -3768,7 +3778,7 @@ function startQuiz() {
         playbackSpeed: 1,
         startPont: getStartPoint(),
         videoInfo: {
-          id: null,
+          id: -1,
           videoMap: {
             catbox: createCatboxLinkObject(
               song.audio,
@@ -3798,6 +3808,7 @@ function startQuiz() {
       }
     }
   }, 100);
+
   if (quiz.soloMode) {
     setTimeout(() => {
       fireListener("quiz ready", {
@@ -3904,7 +3915,7 @@ function playSong(songNumber) {
           playbackSpeed: 1,
           startPont: getStartPoint(),
           videoInfo: {
-            id: null,
+            id: -1,
             videoMap: {
               catbox: createCatboxLinkObject(
                 nextSong.audio,
@@ -4210,6 +4221,118 @@ function endReplayPhase(songNumber) {
 }
 
 /**
+ * @overload
+ * @param {"Game Starting"} type
+ * @param {import('./types.js').GameStartingPayload} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"quiz unpause triggered"} type
+ * @param {import('./types.js').QuizUnpausedPayload} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"quiz pause triggered"} type
+ * @param {import('./types.js').QuizPausedPayload} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"player answered"} type
+ * @param {number[]} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"quiz overlay message"} type
+ * @param {string} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"quiz next video info"} type
+ * @param {import('./types.js').QuizNextVideoInfoPayload} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"quiz ready"} type
+ * @param {import('./types.js').QuizReadyPayload} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"quiz waiting buffering"} type
+ * @param {import('./types.js').QuizWaitingBufferingPayload} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"play next song"} type
+ * @param {import('./types.js').QuizPlayNextSong} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"extra guess time"} type
+ * @param {void} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"guess phase over"} type
+ * @param {void} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"player answers"} type
+ * @param {any} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"Rejoining Player"} type
+ * @param {import('./types').PlayerRejoinPayload} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"answer results"} type
+ * @param {any} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"quiz end result"} type
+ * @param {any} data
+ * @return {void}
+ */
+
+/**
+ * @overload
+ * @param {"quiz answer"} type
+ * @param {any} data
+ * @return {void}
+ */
+
+/**
  * Fire all event listeners (including scripts)
  *
  * @param {string} type
@@ -4308,6 +4431,7 @@ function parseMessage(content, sender) {
     if (quiz.cslActive && isHost) {
       fireListener("quiz pause triggered", {
         playerName: sender,
+        noPlayerPause: null,
       });
     }
   } else if (content === "§CSL12") {
@@ -4392,7 +4516,7 @@ function parseMessage(content, sender) {
               playbackSpeed: 1,
               startPont: parseInt(split[1]),
               videoInfo: {
-                id: null,
+                id: -1,
                 videoMap: {
                   catbox: createCatboxLinkObject(split[2], split[3], split[4]),
                 },

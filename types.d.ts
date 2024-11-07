@@ -162,10 +162,25 @@ export type MessagePayload = {
 
 export type GameStartingPayload = {
   showSelection: number;
-  players: any[];
+  players: {
+    name: string;
+    level: number;
+    gamePlayerId: number;
+    host: boolean;
+    avatarInfo: any;
+    inGame: boolean;
+    teamPlayer: boolean | null;
+    teamNumber: number | null;
+    pose: any;
+    score: number;
+    teamCaptain: boolean | null;
+    hasMultiChoiceActive: boolean;
+    position: number;
+    positionSlot: number | null;
+  }[];
   groupSlotMap: Record<string, number[]>;
-  multipleChoiceEnabled: boolean;
-  quizIdentifier: any;
+  multipleChoice: boolean;
+  quizDescription: any;
   gameMode: Gamemode;
 };
 
@@ -246,6 +261,51 @@ export type SpectatorLeftPayload = {
 
 export type GameClosedPayload = {
   reason: string;
+};
+
+export type QuizWaitingBufferingPayload = {
+  firstSong: boolean;
+};
+
+export type QuizReadyPayload = {
+  numberOfSongs: number;
+};
+
+export type QuizPausedPayload = {
+  playerName: string | null;
+  noPlayerPause: boolean | null;
+};
+
+export type QuizUnpausedPayload = {
+  playerName: string | null;
+};
+
+export type QuizNextVideoInfoPayload = {
+  playbackSpeed: number;
+  playLength: number;
+  startPont: number;
+  videoInfo: {
+    id: number;
+    videoMap: { catbox: VideoMap };
+    videoVolumeMap: { catbox: Record<string, number> };
+  };
+};
+
+export type QuizPlayNextSong = {
+  songNumber: number;
+  onLastSong: boolean;
+  multipleChoiceNames: string[] | null;
+  time: number;
+  extraGuessTime: number;
+  progressBarState: {
+    length: number;
+    played: number;
+  };
+};
+
+export type PlayerRejoinPayload = {
+  gamePlayerId: number;
+  name: string;
 };
 
 export type AnimeNames = {
