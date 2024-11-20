@@ -5,8 +5,6 @@ type AMQSong = {
       english: string;
       romaji: string;
     };
-    altAnimeNames: string[];
-    altAnimeNamesAnswers: string[];
     artist: string;
     songName: string;
     type: number;
@@ -16,22 +14,33 @@ type AMQSong = {
     animeType: string; // e.g. "OVA"
     vintage: string; // e.g. "Fall 2016"
     animeDifficulty: number;
+    animeTags: string[];
+    animeGenre: string[];
+    altAnimeNames: string[];
+    altAnimeNamesAnswers: string[];
     siteIds: {
       annId: number;
       malId: number;
       kitsuId: number;
       aniListId: number;
     };
-    animeTags: string[];
-    animeGenre: string[];
-    answer: string;
-    correctGuess: number;
-    wrongGuess: boolean;
-    correctCount: number;
-    wrongCount: number;
-    startPoint: number;
-    videoLength: number;
+    rebroadcast?: number;
+    dub?: number;
   };
+  correctGuess: boolean;
+  wrongGuess: boolean;
+  answer: string;
+  correctCount: number;
+  wrongCount: number;
+  startPoint: number;
+  videoLength: number;
+  videoUrl?: string;
+  correctGuessPlayers?: string[];
+  listStates?: {
+    name: string;
+    status: number;
+    score: number;
+  }[];
 };
 
 export type AMQExport = {
