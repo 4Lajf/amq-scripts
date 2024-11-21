@@ -3776,7 +3776,7 @@ function startQuiz() {
       fireListener("quiz next video info", {
         playLength: guessTime,
         playbackSpeed: 1,
-        startPont: getStartPoint(),
+        startPoint: getStartPoint(),
         videoInfo: {
           id: -1,
           videoMap: {
@@ -3913,7 +3913,7 @@ function playSong(songNumber) {
         fireListener("quiz next video info", {
           playLength: guessTime,
           playbackSpeed: 1,
-          startPont: getStartPoint(),
+          startPoint: getStartPoint(),
           videoInfo: {
             id: -1,
             videoMap: {
@@ -4514,7 +4514,7 @@ function parseMessage(content, sender) {
             fireListener("quiz next video info", {
               playLength: guessTime,
               playbackSpeed: 1,
-              startPont: parseInt(split[1]),
+              startPoint: parseInt(split[1]),
               videoInfo: {
                 id: -1,
                 videoMap: {

@@ -283,7 +283,7 @@ export type QuizUnpausedPayload = {
 export type QuizNextVideoInfoPayload = {
   playbackSpeed: number;
   playLength: number;
-  startPont: number;
+  startPoint: number;
   videoInfo: {
     id: number;
     videoMap: { catbox: VideoMap };
