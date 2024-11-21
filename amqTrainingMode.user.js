@@ -5575,12 +5575,12 @@ function handleData(data) {
         animeGenre: song.songInfo.animeGenre ?? [],
         rebroadcast: null,
         dub: null,
-        startPoint: song.songInfo.startPoint,
+        startPoint: song.startPoint,
         audio: null,
         video480: null,
-        video720: null,
-        correctGuess: !song.songInfo.wrongGuess,
-        incorrectGuess: song.songInfo.wrongGuess,
+        video720: song.videoUrl ?? null,
+        correctGuess: !song.wrongGuess,
+        incorrectGuess: song.wrongGuess,
         rating: null,
       });
     }
