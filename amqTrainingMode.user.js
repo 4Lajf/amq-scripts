@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.83
+// @version      0.84
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://*.animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -3776,7 +3776,7 @@ function startQuiz() {
       fireListener("quiz next video info", {
         playLength: guessTime,
         playbackSpeed: 1,
-        startPont: getStartPoint(),
+        startPoint: getStartPoint(),
         videoInfo: {
           id: -1,
           videoMap: {
@@ -3913,7 +3913,7 @@ function playSong(songNumber) {
         fireListener("quiz next video info", {
           playLength: guessTime,
           playbackSpeed: 1,
-          startPont: getStartPoint(),
+          startPoint: getStartPoint(),
           videoInfo: {
             id: -1,
             videoMap: {
@@ -4514,7 +4514,7 @@ function parseMessage(content, sender) {
             fireListener("quiz next video info", {
               playLength: guessTime,
               playbackSpeed: 1,
-              startPont: parseInt(split[1]),
+              startPoint: parseInt(split[1]),
               videoInfo: {
                 id: -1,
                 videoMap: {
