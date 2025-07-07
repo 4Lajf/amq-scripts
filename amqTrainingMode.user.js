@@ -1,7 +1,8 @@
+// @ts-nocheck
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.85
+// @version      0.86
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://*.animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -79,7 +80,6 @@ let maxNewSongs24Hours = 20;
 let newSongsAdded24Hours = 0;
 let lastResetTime = Date.now();
 let selectedSetNewSongs = new Set();
-const version = "0.76";
 const saveData = validateLocalStorage("customSongListGame");
 const catboxHostDict = {
   1: "https://nawdist.animemusicquiz.com/",
@@ -156,7 +156,7 @@ let endGuessTimer;
 let fileHostOverride = 0;
 
 /** @type {string[]} */
-let autocomplete = []; //store lowercase version for faster compare speed
+let animeListLower = []; //store lowercase version for faster compare speed
 
 /** @type {any} */
 let autocompleteInput;
@@ -1041,7 +1041,7 @@ $("#gameContainer").append(
 							</div>
 						</div>
                         <div class="cslg-table-container">
-                            <table id="cslgSongListTable" class="table table-dark table-striped table-hover">
+                            <table id="cslgSongListTable" class="table table-dark table-striped table-hover styledTable">
                                 <thead>
                                     <tr>
                                         <th class="number">#</th>
@@ -1322,9 +1322,9 @@ $("#gameContainer").append(
                     </div>
                     <div id="cslgInfoContainer" style="text-align: center; margin: 10px 0;">
                         <h4>Script Info</h4>
-                        <div>Created by: kempanator (training mode by 4Lajf)</div>
-                        <div>Version: ${version}</div>
-                        <div><a href="https://github.com/kempanator/amq-scripts/blob/main/amqCustomSongListGame.user.js" target="blank">Github</a> <a href="https://github.com/kempanator/amq-scripts/raw/main/amqCustomSongListGame.user.js" target="blank">Install</a></div>
+                        <div>Created by: 4Lajf</div>
+                        <div>Version: ${GM_info.script.version}</div>
+                        <div><a href="https://github.com/4Lajf/amq-scripts/blob/main/amqTrainingMode.user.js" target="_blank">Github</a> <a href="https://github.com/4Lajf/amq-scripts/raw/main/amqTrainingMode.user.js" target="_blank">Install</a></div>
                         <h4 style="margin-top: 20px;">Custom CSS</h4>
                         <div><span style="font-size: 15px; margin-right: 17px;">#lnCustomSongListButton </span>right: <input id="cslgCSLButtonCSSInput" type="text" style="width: 150px; color: black;"></div>
                         <div style="margin: 10px 0"><button id="cslgResetCSSButton" style="color: black; margin-right: 10px;">Reset</button><button id="cslgApplyCSSButton" style="color: black;">Save</button></div>
@@ -1438,7 +1438,7 @@ function validateTrainingStart() {
       "no songs in My Songs list"
     );
   }
-  if (autocomplete.length === 0) {
+  if (animeListLower.length === 0) {
     return messageDisplayer.displayMessage(
       "Unable to start",
       "autocomplete list empty"
@@ -3345,29 +3345,21 @@ function setup() {
     reset();
     $("#cslgSettingsModal").modal("hide");
   }).bindListener();
-  new Listener("get all song names", () => {
-    setTimeout(() => {
-      let list = quiz.answerInput.typingInput.autoCompleteController.list;
-      if (list.length) {
-        autocomplete = list.map((x) => x.toLowerCase());
-        autocompleteInput = new AmqAwesomeplete(
-          /** @type {HTMLInputElement} **/ (
-            document.querySelector("#cslgNewAnswerInput")
-          ),
-          { list: list },
-          true
-        );
-      }
-    }, 10);
+  new Listener("get all song names", (data) => {
+    animeListLower = data.names.map(x => x.toLowerCase());
+    autocompleteInput = new AmqAwesomeplete(document.querySelector("#cslgNewAnswerInput"), { list: data.names }, true);
   }).bindListener();
-  new Listener("update all song names", () => {
-    setTimeout(() => {
-      let list = quiz.answerInput.typingInput.autoCompleteController.list;
-      if (list.length) {
-        autocomplete = list.map((x) => x.toLowerCase());
-        autocompleteInput.list = list;
-      }
-    }, 10);
+  new Listener("update all song names", (data) => {
+    if (data.deleted.length) {
+      const deletedLower = data.deleted.map(x => x.toLowerCase());
+      animeListLower = animeListLower.filter(name => !deletedLower.includes(name));
+      autocompleteInput.list = autocompleteInput.list.filter(name => !data.deleted.includes(name));
+    }
+    if (data.new.length) {
+      const newLower = data.new.map(x => x.toLowerCase());
+      animeListLower.push(...newLower);
+      autocompleteInput.list.push(...data.new);
+    }
   }).bindListener();
 
   quiz.pauseButton.$button.off("click").on("click", () => {
@@ -3521,10 +3513,10 @@ function setup() {
   nextSongChunk = new Chunk();
 
   AMQ_addScriptData({
-    name: "Custom Song List Game",
-    author: "kempanator",
-    version: version,
-    link: "https://github.com/kempanator/amq-scripts/raw/main/amqCustomSongListGame.user.js",
+    name: "Training Mode",
+    author: "4Lajf",
+    version: GM_info.script.version,
+    link: "https://github.com/4Lajf/amq-scripts/raw/main/amqTrainingMode.user.js",
     description: `
             </ul><b>How to start a custom song list game:</b>
                 <li>create a solo lobby</li>
@@ -3560,7 +3552,7 @@ function validateStart() {
       "no songs in My Songs list"
     );
   }
-  if (autocomplete.length === 0) {
+  if (animeListLower.length === 0) {
     return messageDisplayer.displayMessage(
       "Unable to start",
       "autocomplete list empty"
@@ -4071,6 +4063,21 @@ function endGuessPhase(songNumber) {
                   romaji: song.animeRomajiName,
                 },
                 artist: song.songArtist,
+                artistInfo: {
+                  artistId: null,
+                  groupId: null,
+                  name: song.songArtist
+                },
+                arrangerInfo: {
+                  artistId: null,
+                  groupId: null,
+                  name: song.songArranger
+                },
+                composerInfo: {
+                  artistId: null,
+                  groupId: null,
+                  name: song.songComposer
+                },
                 songName: song.songName,
                 videoTargetMap: {
                   catbox: {
@@ -4496,7 +4503,7 @@ function parseMessage(content, sender) {
     }
   } else if (content === "§CSL21") {
     //has autocomplete
-    cslMessage(`Autocomplete: ${autocomplete.length ? "✅" : "⛔"}`);
+    cslMessage(`Autocomplete: ${animeListLower.length ? "✅" : "⛔"}`);
   } else if (content === "§CSL22") {
     //version
     cslMessage(`CSL version ${version}`);
@@ -5168,7 +5175,7 @@ function openSettingsModal() {
   $("#cslgSettingsIncorrectSongs").val(incorrectSongsPerGame);
   $("#cslgSettingsCorrectSongs").val(correctSongsPerGame);
   if (lobby.inLobby) {
-    if (autocomplete.length) {
+    if (animeListLower.length) {
       $("#cslgAutocompleteButton")
         .removeClass("btn-danger")
         .addClass("btn-success disabled");
@@ -5515,6 +5522,8 @@ function handleData(data) {
         ].filter(Boolean),
         altAnimeNamesAnswers: [],
         songArtist: song.songArtist,
+        songArranger: song.songArranger,
+        songComposer: song.songComposer,
         songName: song.songName,
         ...parseSongType(song.songType),
         songDifficulty: song.songDifficulty ?? null,
@@ -6065,7 +6074,7 @@ function createAnswerTable() {
   $tbody.empty();
   if (finalSongList.length === 0) {
     $("#cslgAnswerText").text("No list loaded");
-  } else if (autocomplete.length === 0) {
+  } else if (animeListLower.length === 0) {
     $("#cslgAnswerText").text("Fetch autocomplete first");
   } else {
     let animeList = new Set();
@@ -6078,7 +6087,7 @@ function createAnswerTable() {
       answers.forEach((x) => animeList.add(x));
     }
     for (let anime of animeList) {
-      if (!autocomplete.includes(anime.toLowerCase())) {
+      if (!animeListLower.includes(anime.toLowerCase())) {
         missingAnimeList.push(anime);
       }
     }
