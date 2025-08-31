@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.86
+// @version      0.87
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://*.animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -1000,6 +1000,8 @@ $("#gameContainer").append(
 										<option>Season</option>
 										<option>Ann Id</option>
 										<option>Mal Id</option>
+										<option>Ann Song Id</option>
+										<option>Amq Song Id</option>
 									</select>
 									<input id="cslgAnisongdbQueryInput" type="text" class="form-control form-control-sm bg-dark text-light" placeholder="Add songs..." />
 								</div>
@@ -3439,7 +3441,8 @@ function setup() {
         success: true,
       });
       if (quiz.soloMode) {
-        fireListener("player answered", [0]);
+        const time = Number(((Date.now() - songStartTime) / 1000).toFixed(3));
+        fireListener("player answered", [{ answerTime: time, gamePlayerIds: [0] }]);
         if (options.autoVoteSkipGuess) {
           this.skipController.voteSkip();
           fireListener("quiz overlay message", "Skipping to Answers");
@@ -4251,7 +4254,7 @@ function endReplayPhase(songNumber) {
 /**
  * @overload
  * @param {"player answered"} type
- * @param {number[]} data
+ * @param {{ answerTime: number, gamePlayerIds: number[] }[]} data
  * @return {void}
  */
 
@@ -4451,7 +4454,8 @@ function parseMessage(content, sender) {
   } else if (content === "§CSL13") {
     //player answered
     if (quiz.cslActive && player) {
-      fireListener("player answered", [player.gamePlayerId]);
+      const time = Number(((Date.now() - songStartTime) / 1000).toFixed(3));
+      fireListener("player answered", [{ answerTime: time, gamePlayerIds: [player.gamePlayerId] }]);
     }
   } else if (content === "§CSL14") {
     //vote skip
@@ -5328,9 +5332,6 @@ function getAnisongdbData(
       partial_match: partial,
     };
   } else if (mode === "artist") {
-    console.log("query : ", query);
-    console.log("minGroupMembers : ", minGroupMembers);
-    console.log("maxOtherPeople : ", maxOtherPeople);
     json.artist_search_filter = {
       search: query,
       partial_match: partial,
@@ -5349,30 +5350,26 @@ function getAnisongdbData(
       arrangement: arrangement,
     };
   } else if (mode === "season") {
-    query = query.trim();
-    query = query.charAt(0).toUpperCase() + query.slice(1).toLowerCase();
-    payload.method = "GET"; // Use a GET request
-    url = `https://anisongdb.com/api/filter_season?${new URLSearchParams({
-      season: query,
-    })}`;
+    url = "https://anisongdb.com/api/season_request";
+    json.season = query;
   } else if (mode === "ann id") {
-    url = "https://anisongdb.com/api/annId_request";
-    json.annId = parseInt(query);
+    url = "https://anisongdb.com/api/ann_ids_request";
+    json.ann_ids = query.trim().split(/[\s,]+/).map(Number);
   } else if (mode === "mal id") {
-    url = "https://anisongdb.com/api/malIDs_request";
-    json.malIds = query
-      .split(/[, ]+/)
-      .map((n) => parseInt(n))
-      .filter((n) => !isNaN(n));
+    url = "https://anisongdb.com/api/mal_ids_request";
+    json.mal_ids = query.trim().split(/[\s,]+/).map(Number);
+  } else if (mode === "ann song id") {
+    url = "https://anisongdb.com/api/ann_song_ids_request";
+    json.ann_song_ids = query.trim().split(/[\s,]+/).map(Number);
+  } else if (mode === "amq song id") {
+    url = "https://anisongdb.com/api/amq_song_ids_request";
+    json.amq_song_ids = query.trim().split(/[\s,]+/).map(Number);
   } else {
     console.error("Invalid mode");
     return;
   }
 
-  if (mode !== "season") {
-    payload["body"] = JSON.stringify(json);
-  }
-
+  payload["body"] = JSON.stringify(json);
   console.log(url, payload);
 
   fetch(url, payload)
