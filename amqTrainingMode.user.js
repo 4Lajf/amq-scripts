@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         AMQ Training Mode
 // @namespace    https://github.com/4Lajf
-// @version      0.87
+// @version      0.88
 // @description  Extended version of kempanator's Custom Song List Game Training mode allows you to practice your songs efficiently something line anki or other memory card software. It's goal is to give you songs that you don't recozniged mixed with some songs that you do recognize to solidify them in your memory.
 // @match        https://*.animemusicquiz.com/*
 // @author       4Lajf & kempanator
@@ -107,6 +107,7 @@ let guessTime = 20;
 let extraGuessTime = 0;
 let currentSong = 0;
 let totalSongs = 0;
+let songStartTime;
 
 /**
  * @type {Record<number, string>} GamePlayerId -> Answer
@@ -3861,6 +3862,7 @@ function playSong(songNumber) {
   currentSong = songNumber;
   cslState = 1;
   skipping = false;
+  songStartTime = Date.now();
   fireListener("play next song", {
     time: guessTime,
     extraGuessTime: extraGuessTime,
@@ -6614,7 +6616,7 @@ async function getSongListFromMalIds(malIds) {
     `Anime: 0 / ${malIds.length} | Songs: ${importedSongList.length}`
   );
   if (malIds.length === 0) return;
-  let url = "https://anisongdb.com/api/malIDs_request";
+  let url = "https://anisongdb.com/api/mal_ids_request";
   let idsProcessed = 0;
   console.log("malIds: ", malIds);
   for (let i = 0; i < malIds.length; i += 500) {
@@ -6628,7 +6630,7 @@ async function getSongListFromMalIds(malIds) {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ malIds: malIdSegment }),
+      body: JSON.stringify({ mal_ids: malIdSegment }),
     };
     await fetch(url, data)
       .then((res) => res.json())
