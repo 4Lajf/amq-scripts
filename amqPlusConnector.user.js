@@ -7,6 +7,8 @@
 // @match        https://animemusicquiz.com/*
 // @match        https://*.animemusicquiz.com/*
 // @require      https://github.com/joske2865/AMQ-Scripts/raw/master/common/amqScriptInfo.js
+// @downloadURL  https://github.com/4Lajf/amq-scripts/raw/refs/heads/main/amqPlusConnector.user.js
+// @updateURL    https://github.com/4Lajf/amq-scripts/raw/refs/heads/main/amqPlusConnector.user.js
 // @grant        GM_xmlhttpRequest
 // @connect      localhost
 // @connect      *
@@ -2740,6 +2742,7 @@ function sendQuizMetadataAsMessages(quiz) {
         }, idx * 100);
     });
 }
+
 
 
 
