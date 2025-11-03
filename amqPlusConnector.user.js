@@ -24,8 +24,8 @@ let loadInterval = setInterval(() => {
   }
 }, 500);
 
-// const API_BASE_URL = "https://amqplus.moe";
-const API_BASE_URL = "http://localhost:5173";
+const API_BASE_URL = "https://amqplus.moe";
+// const API_BASE_URL = "http://localhost:5173";
 console.log("[AMQ+] Using API base URL:", API_BASE_URL);
 
 let amqPlusEnabled = true;
