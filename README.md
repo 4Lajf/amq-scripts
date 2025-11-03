@@ -1,6 +1,15 @@
 
 # amq_scripts
 
+### amqPlusConnector.user.js
+A bridge script that connects AMQ (Anime Music Quiz) to [AMQ+](https://github.com/4Lajf/amq-plus) quiz configurations for seamless quiz playing
+- Fetch and play quizzes directly from AMQ+ website by pasting play URLs
+- Automatically syncs player lists from lobby for Live Node quizzes
+- Export AMQ quizzes to AMQ+ import format from the quiz creator
+- Note: amqTrainingMode functionality will soon be merged into this script
+
+---
+
 ### amqSongListUIWithAniListExport.user.js
 A fork [TheJoseph98](https://github.com/TheJoseph98)'s [amqSongListUI](https://github.com/TheJoseph98/AMQ-Scripts/blob/master/amqSongListUI.user.js)
 - Let's you export your wrong guessed anime to AniList so you can use them in your next game
