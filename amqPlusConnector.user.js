@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.1
+// @version      1.0.2
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
