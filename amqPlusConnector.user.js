@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.0.1
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -2242,32 +2242,63 @@ async function gatherPlayerLists() {
   for (let i = 0; i < profileIcons.length; i++) {
     const icon = profileIcons[i];
 
-    $(icon).click();
-
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    const listInfo = readPlayerListFromProfile();
-    if (listInfo) {
-      userEntries.push({
-        id: `user-${i}-${Date.now()}`,
-        platform: listInfo.platform,
-        username: listInfo.username,
-        selectedLists: { ...defaultStatuses },
-        songPercentage: null
-      });
-      console.log(`[AMQ+] Added player ${i + 1} list:`, listInfo);
-    }
-
-    const profileContainer = $('.playerProfileContainer.floatingContainer:visible');
-    if (profileContainer.length > 0) {
-      const closeButton = profileContainer.find('.close');
-      if (closeButton.length > 0) {
-        closeButton[0].click();
-        await new Promise(resolve => setTimeout(resolve, 200));
+    try {
+      // Close any existing profile popup first
+      const existingProfile = $('.playerProfileContainer.floatingContainer:visible');
+      if (existingProfile.length > 0) {
+        const existingClose = existingProfile.find('.close');
+        if (existingClose.length > 0) {
+          existingClose[0].click();
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
       }
-    }
 
-    await new Promise(resolve => setTimeout(resolve, 300));
+      // Use native click instead of jQuery to avoid context issues
+      icon.click();
+
+      // Wait for profile to load
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      const listInfo = readPlayerListFromProfile();
+      if (listInfo) {
+        userEntries.push({
+          id: `user-${i}-${Date.now()}`,
+          platform: listInfo.platform,
+          username: listInfo.username,
+          selectedLists: { ...defaultStatuses },
+          songPercentage: null
+        });
+        console.log(`[AMQ+] Added player ${i + 1} list:`, listInfo);
+      } else {
+        console.log(`[AMQ+] No list info found for player ${i + 1}`);
+      }
+
+      // Close profile
+      const profileContainer = $('.playerProfileContainer.floatingContainer:visible');
+      if (profileContainer.length > 0) {
+        const closeButton = profileContainer.find('.close');
+        if (closeButton.length > 0) {
+          closeButton[0].click();
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
+
+      // Extra delay between players
+      await new Promise(resolve => setTimeout(resolve, 200));
+    } catch (error) {
+      console.error(`[AMQ+] Error processing player ${i + 1}:`, error);
+      // Try to close any open profile and continue
+      const profileContainer = $('.playerProfileContainer.floatingContainer:visible');
+      if (profileContainer.length > 0) {
+        const closeButton = profileContainer.find('.close');
+        if (closeButton.length > 0) {
+          closeButton[0].click();
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
+      // Continue to next player
+      continue;
+    }
   }
 
   console.log("[AMQ+] Total player lists gathered:", userEntries.length);
@@ -2805,6 +2836,5 @@ function sendQuizMetadataAsMessages(quiz) {
     }, idx * 100);
   });
 }
-
 
 
