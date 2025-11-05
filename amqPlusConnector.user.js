@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.2
+// @version      1.0.4
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
 // @match        https://*.animemusicquiz.com/*
 // @require      https://github.com/joske2865/AMQ-Scripts/raw/master/common/amqScriptInfo.js
+// @downloadURL  https://github.com/4Lajf/amq-scripts/raw/refs/heads/main/amqPlusConnector.user.js
+// @updateURL    https://github.com/4Lajf/amq-scripts/raw/refs/heads/main/amqPlusConnector.user.js
 // @grant        GM_xmlhttpRequest
 // @connect      amqplus.moe
 // @connect      localhost
@@ -24,8 +26,8 @@ let loadInterval = setInterval(() => {
   }
 }, 500);
 
-const API_BASE_URL = "https://amqplus.moe";
-// const API_BASE_URL = "http://localhost:5173";
+// const API_BASE_URL = "https://amqplus.moe";
+const API_BASE_URL = "http://localhost:5173";
 console.log("[AMQ+] Using API base URL:", API_BASE_URL);
 
 let amqPlusEnabled = true;
@@ -1186,20 +1188,43 @@ function buildSongSourceMap(data, quizSave) {
   songSourceMap = new Map();
   currentSongNumber = 0;
 
+  // Extract annSongIds from quizSave blocks to filter songSourceMap
+  const quizAnnSongIds = new Set();
+  if (quizSave && quizSave.ruleBlocks && Array.isArray(quizSave.ruleBlocks)) {
+    quizSave.ruleBlocks.forEach(ruleBlock => {
+      if (ruleBlock.blocks && Array.isArray(ruleBlock.blocks)) {
+        ruleBlock.blocks.forEach(block => {
+          if (block.annSongId) {
+            quizAnnSongIds.add(block.annSongId);
+          }
+        });
+      }
+    });
+  }
+
   // Check if we have songSourceMap directly from the API response (preferred)
   if (data.songSourceMap && Array.isArray(data.songSourceMap)) {
     console.log("[AMQ+] Building song source map from API songSourceMap");
 
-    // Create a map of annSongId to source info
+    // Create a map of annSongId to source info, filtered to only include songs in the quiz
+    let filteredCount = 0;
     data.songSourceMap.forEach(entry => {
       if (entry.annSongId) {
-        songSourceMap.set(entry.annSongId, {
-          sourceInfo: entry.sourceInfo || 'Unknown source',
-          nodeId: entry.nodeId,
-          username: entry.username
-        });
+        // Only add if song is in the quiz (or if quiz blocks aren't available yet)
+        if (quizAnnSongIds.size === 0 || quizAnnSongIds.has(entry.annSongId)) {
+          songSourceMap.set(entry.annSongId, {
+            sourceInfo: entry.sourceInfo || 'Unknown source',
+            nodeId: entry.nodeId,
+            username: entry.username
+          });
+        } else {
+          filteredCount++;
+        }
       }
     });
+    if (filteredCount > 0) {
+      console.log(`[AMQ+] Filtered out ${filteredCount} songSourceMap entries not in quiz (${quizAnnSongIds.size} songs in quiz)`);
+    }
   } else if (data.songsBySource && Array.isArray(data.songsBySource)) {
     // Fallback: build from songsBySource if songSourceMap not available
     console.log("[AMQ+] Building song source map from songsBySource (fallback)");
@@ -1262,12 +1287,22 @@ function extractUsernameFromSourceInfo(sourceInfo) {
 function formatSourceInfo(sourceInfo) {
   if (!sourceInfo) return { icon: '❓', text: 'Unknown source', nodeId: null };
 
-  if (sourceInfo.sourceInfo === 'Random' || sourceInfo.username === null) {
+  // Only treat as Random if the sourceInfo text itself indicates it's random
+  if (sourceInfo.sourceInfo === 'Random' || sourceInfo.sourceInfo === 'Unknown source') {
     return { icon: '🎲', text: 'Random', nodeId: sourceInfo.nodeId || null };
   }
 
-  // Use sourceInfo as primary display (it contains readable names like "Live Node - PlayerName" or "Saved list: Name")
-  const displayText = sourceInfo.sourceInfo || sourceInfo.username || 'Unknown';
+  // Transform source info to show player name
+  let displayText = sourceInfo.sourceInfo || sourceInfo.username || 'Unknown';
+
+  // Transform "Live Node - PlayerName" to "from list - PlayerName"
+  if (displayText.includes('Live Node - ')) {
+    const playerName = displayText.replace(/Live Node - /, '');
+    displayText = `from list - ${playerName}`;
+  } else if (sourceInfo.username) {
+    // If we have a username but no formatted sourceInfo, use it
+    displayText = `from list - ${sourceInfo.username}`;
+  }
 
   return {
     icon: '👤',
@@ -1604,6 +1639,15 @@ function setupListeners() {
       const quizName = payload.quizSave?.name || currentQuizData?.command?.data?.quizSave?.name || "Unknown Quiz";
       console.log("[AMQ+] Quiz saved successfully with ID:", newQuizId);
 
+      // Rebuild songSourceMap from the actual saved quiz to ensure it matches what AMQ saved
+      if (payload.quizSave && currentQuizData && currentQuizData.songSourceMap) {
+        console.log("[AMQ+] Rebuilding songSourceMap from saved quiz");
+        buildSongSourceMap({
+          songSourceMap: currentQuizData.songSourceMap,
+          command: { data: { quizSave: payload.quizSave } }
+        }, payload.quizSave);
+      }
+
       updateModalStatus("Quiz saved successfully - Applying to lobby...");
 
       setTimeout(() => {
@@ -1708,13 +1752,21 @@ function setupListeners() {
       console.log("[AMQ+] Song source:", `${formatted.icon} ${formatted.text}`, "for annSongId:", annSongId);
 
       setTimeout(() => {
-        sendSystemMessage(`${formatted.icon} Song source: ${formatted.text}`);
+        socket.sendCommand({
+          type: "lobby",
+          command: "game chat message",
+          data: { msg: `${formatted.icon} Song source: ${formatted.text}`, teamMessage: false }
+        });
       }, 500);
     } else if (annSongId) {
       // Song found but no source info - default to Random
       console.log("[AMQ+] Song annSongId:", annSongId, "but no source mapping found, defaulting to Random");
       setTimeout(() => {
-        sendSystemMessage('🎲 Song source: Random');
+        socket.sendCommand({
+          type: "lobby",
+          command: "game chat message",
+          data: { msg: '🎲 Song source: Random', teamMessage: false }
+        });
       }, 500);
     } else {
       // Couldn't determine annSongId
@@ -1835,6 +1887,9 @@ function fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMai
             return;
           }
 
+          // Update currentQuizData with the re-roll response data
+          currentQuizData = data;
+          buildSongSourceMap(data, data.command.data.quizSave);
           saveQuiz(data, selectedCustomQuizId);
 
           setTimeout(() => {
