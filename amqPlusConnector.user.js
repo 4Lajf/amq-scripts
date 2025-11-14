@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.4
+// @version      1.0.5
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -26,31 +26,68 @@ let loadInterval = setInterval(() => {
   }
 }, 500);
 
-// const API_BASE_URL = "https://amqplus.moe";
-const API_BASE_URL = "http://localhost:5173";
+const API_BASE_URL = "https://amqplus.moe";
+// const API_BASE_URL = "http://localhost:5173";
 console.log("[AMQ+] Using API base URL:", API_BASE_URL);
 
+// Settings state
 let amqPlusEnabled = true;
+let songSourceMessagesEnabled = true;
+let liveNodeSongSelectionMode = 'default';
+let amqPlusCreditsSent = false;
+let amqQuizLikesStorage = null;
+
+// Quiz state
 let currentQuizData = null;
 let currentQuizId = null;
+let currentQuizInfo = null;
 let selectedCustomQuizId = null;
 let selectedCustomQuizName = null;
+let lastLoadedQuizId = null;
+let lastLoadedQuizSave = null;
+
+// UI state
 let isWaitingForQuizList = false;
 let quizListAttempts = 0;
 let pendingQuizData = null;
-let amqPlusCreditsSent = false;
-let lastLoadedQuizId = null;
-let lastLoadedQuizSave = null;
 let pendingExportData = null;
 let pendingExportFilename = null;
+
+// Player list and song tracking state
 let cachedPlayerLists = null;
-let currentAMQQuizId = null; // AMQ's customQuizId from "quiz display custom quiz" event
-let amqQuizLikesStorage = null; // localStorage key for storing liked quizzes
-let currentQuizInfo = null; // Store quiz name, description, and creator for AMQ+ quizzes
-let songSourceMap = null; // Map of annSongId to player source info
-let currentSongNumber = 0; // Track current song number
-let songSourceMessagesEnabled = true; // Whether to show song source messages in chat
-let liveNodeSongSelectionMode = 'default'; // Song selection mode for live node: 'default' | 'many-lists' | 'few-lists'
+let songSourceMap = null;
+let currentSongNumber = 0;
+
+// Training mode state
+let isTrainingMode = false; // Flag to prevent start button hijacking during training
+let trainingState = {
+  isAuthenticated: false,
+  authToken: null,
+  userId: null,
+  username: null,
+  userQuizzes: [],
+  newSongPercentage: 30,
+  urlLoadedQuizId: null,
+  urlLoadedQuizName: null,
+  urlLoadedQuizSongCount: null,
+  currentSession: {
+    sessionId: null,
+    quizId: null,
+    quizName: null,
+    playlist: [],
+    currentIndex: 0,
+    startTime: null,
+    correctCount: 0,
+    incorrectCount: 0,
+    totalRated: 0
+  },
+  pendingSync: [], // Offline queue
+  lastSyncTime: null,
+  syncInProgress: false
+};
+
+let trainingSyncTimeout = null;
+const TRAINING_SYNC_DEBOUNCE = 500; // 500ms debounce for sync
 
 function loadSettings() {
   const saved = localStorage.getItem("amqPlusConnector");
@@ -74,6 +111,76 @@ function loadSettings() {
     console.error("[AMQ+] Failed to load liked quizzes:", e);
     amqQuizLikesStorage = {};
   }
+
+  // Load training settings
+  loadTrainingSettings();
+}
+
+function loadTrainingSettings() {
+  try {
+    const token = localStorage.getItem("amqPlusTrainingToken");
+    if (token) {
+      trainingState.authToken = token;
+      console.log("[AMQ+ Training] Loaded token from localStorage");
+    }
+
+    const savedState = localStorage.getItem("amqPlusTrainingState");
+    if (savedState) {
+      const state = JSON.parse(savedState);
+      if (state.currentSession && state.currentSession.sessionId) {
+        trainingState.currentSession = state.currentSession;
+        console.log("[AMQ+ Training] Restored session from localStorage");
+      }
+      // Load new song percentage if saved
+      if (state.newSongPercentage !== undefined) {
+        trainingState.newSongPercentage = state.newSongPercentage;
+      }
+      // Load URL-loaded quiz info if saved
+      if (state.urlLoadedQuizId) {
+        trainingState.urlLoadedQuizId = state.urlLoadedQuizId;
+        trainingState.urlLoadedQuizName = state.urlLoadedQuizName;
+        trainingState.urlLoadedQuizSongCount = state.urlLoadedQuizSongCount;
+        console.log("[AMQ+ Training] Restored URL-loaded quiz:", state.urlLoadedQuizName);
+      }
+      console.log("[AMQ+ Training] Loaded new song percentage:", trainingState.newSongPercentage, "%");
+    }
+
+    const pendingSync = localStorage.getItem("amqPlusTrainingSyncQueue");
+    if (pendingSync) {
+      trainingState.pendingSync = JSON.parse(pendingSync);
+      console.log("[AMQ+ Training] Loaded pending sync queue:", trainingState.pendingSync.length);
+    }
+  } catch (e) {
+    console.error("[AMQ+ Training] Failed to load training settings:", e);
+  }
+}
+
+function saveTrainingSettings() {
+  try {
+    if (trainingState.authToken) {
+      localStorage.setItem("amqPlusTrainingToken", trainingState.authToken);
+    }
+
+    // Save state including new song percentage and URL-loaded quiz
+    const stateToSave = {
+      newSongPercentage: trainingState.newSongPercentage,
+      urlLoadedQuizId: trainingState.urlLoadedQuizId,
+      urlLoadedQuizName: trainingState.urlLoadedQuizName,
+      urlLoadedQuizSongCount: trainingState.urlLoadedQuizSongCount
+    };
+
+    if (trainingState.currentSession && trainingState.currentSession.sessionId) {
+      stateToSave.currentSession = trainingState.currentSession;
+    }
+
+    localStorage.setItem("amqPlusTrainingState", JSON.stringify(stateToSave));
+
+    if (trainingState.pendingSync.length > 0) {
+      localStorage.setItem("amqPlusTrainingSyncQueue", JSON.stringify(trainingState.pendingSync));
+    }
+  } catch (e) {
+    console.error("[AMQ+ Training] Failed to save training settings:", e);
+  }
 }
 
 function saveSettings() {
@@ -90,6 +197,74 @@ function sendSystemMessage(message) {
   } else {
     console.log("[AMQ+] System message:", message);
   }
+}
+
+/**
+ * Helper to make API requests with consistent error handling
+ * @param {Object} config - Request configuration
+ * @param {string} config.url - API endpoint URL
+ * @param {string} config.method - HTTP method (GET, POST, etc.)
+ * @param {Object} [config.data] - Request payload
+ * @param {Function} [config.onSuccess] - Success callback
+ * @param {Function} [config.onError] - Error callback
+ * @param {string} [config.successMessage] - Optional success message for system chat
+ * @param {string} [config.errorPrefix] - Prefix for error messages
+ * @returns {Promise} Promise that resolves with response data
+ */
+function makeApiRequest({ url, method = 'GET', data = null, onSuccess = null, onError = null, successMessage = null, errorPrefix = 'API Error' }) {
+  return new Promise((resolve, reject) => {
+    const requestConfig = {
+      method: method,
+      url: url,
+      headers: data ? { "Content-Type": "application/json" } : undefined,
+      data: data ? JSON.stringify(data) : undefined,
+      onload: function (response) {
+        if (response.status === 200) {
+          try {
+            const responseData = JSON.parse(response.responseText);
+
+            // Check for success:false in response
+            if (responseData.success === false) {
+              const errorMsg = responseData.error || responseData.message || "Unknown error";
+              console.error(`[AMQ+] ${errorPrefix}:`, errorMsg);
+              if (onError) onError(errorMsg, responseData);
+              reject(new Error(errorMsg));
+              return;
+            }
+
+            if (successMessage) sendSystemMessage(successMessage);
+            if (onSuccess) onSuccess(responseData);
+            resolve(responseData);
+          } catch (e) {
+            const error = "Failed to parse response";
+            console.error(`[AMQ+] ${errorPrefix}:`, e);
+            if (onError) onError(error, null);
+            reject(new Error(error));
+          }
+        } else {
+          // Handle HTTP errors
+          let errorMsg = "Unknown error";
+          try {
+            const errorData = JSON.parse(response.responseText);
+            errorMsg = errorData.error || errorData.message || errorData.userMessage || `HTTP ${response.status}`;
+          } catch (e) {
+            errorMsg = `HTTP ${response.status}: ${response.statusText || 'Request failed'}`;
+          }
+          console.error(`[AMQ+] ${errorPrefix}:`, errorMsg);
+          if (onError) onError(errorMsg, null);
+          reject(new Error(errorMsg));
+        }
+      },
+      onerror: function (error) {
+        const errorMsg = "Connection error. Please check your network.";
+        console.error(`[AMQ+] ${errorPrefix}:`, error);
+        if (onError) onError(errorMsg, null);
+        reject(new Error(errorMsg));
+      }
+    };
+
+    GM_xmlhttpRequest(requestConfig);
+  });
 }
 
 function setup() {
@@ -147,24 +322,242 @@ function setupQuizSavedModalObserver() {
   });
 }
 
-function createUI() {
-  console.log("[AMQ+] Creating UI elements...");
+function createTrainingModalHTML() {
+  return `
+    <div class="modal fade" id="amqPlusTrainingModal" tabindex="-1" role="dialog">
+      <div class="modal-dialog" role="document" style="width: 700px; max-width: 90%;">
+        <div class="modal-content">
+          <div class="modal-header">
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+            <h4 class="modal-title">AMQ+ Training Mode</h4>
+            <button id="trainingLogoutBtn" class="btn btn-sm btn-danger" style="position: absolute; right: 40px; top: 8px; padding: 4px 8px; font-size: 11px; display: none;">
+              <i class="fa fa-sign-out"></i> Logout
+            </button>
+          </div>
+          <div class="modal-body">
+            <!-- Authentication Tab -->
+            <div id="trainingAuthTab" style="display: block;">
+              <div style="padding: 15px;">
+                <div style="text-align: center; margin-bottom: 20px;">
+                  <i class="fa fa-key" style="font-size: 48px; color: #6366f1; margin-bottom: 15px; display: block;"></i>
+                  <h4 style="margin-bottom: 10px; font-weight: bold;">Connect Your AMQ+ Account</h4>
+                  <p style="color: rgba(255,255,255,0.7); margin-bottom: 0;">Enter your training token to sync your progress</p>
+                </div>
 
-  if ($("#amqPlusToggle").length > 0) {
-    console.log("[AMQ+] Toggle button already exists, skipping creation");
-    return;
-  }
+                <div id="trainingAuthStatus" style="margin-bottom: 15px;"></div>
 
-  $("#lobbyPage .topMenuBar").append(`<div id="amqPlusToggle" class="clickAble topMenuButton topMenuMediumButton"><h3>AMQ+</h3></div>`);
-  $("#amqPlusToggle").click(() => {
-    console.log("[AMQ+] AMQ+ button clicked, opening modal");
-    $("#amqPlusModal").modal("show");
-  });
+                <div class="form-group">
+                  <label for="trainingTokenField">Training Token:</label>
+                  <input type="text" id="trainingTokenField" class="form-control" placeholder="Paste your 64-character token here"
+                         style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 8px 12px; font-family: monospace; text-align: center; font-size: 12px;"
+                         maxlength="64">
+                  <small class="form-text text-muted">
+                    Get your token from AMQ+ Training page
+                  </small>
+                </div>
 
-  updateToggleButton();
-  applyStyles();
+                <style>
+                  #trainingTokenField:focus {
+                    background-color: #16213e !important;
+                    border-color: #4a5568 !important;
+                    color: #fff !important;
+                    outline: none;
+                    box-shadow: 0 0 0 2px rgba(74, 85, 104, 0.3);
+                  }
+                  #trainingTokenField::placeholder {
+                    color: #718096;
+                  }
+                  .trainingRatingBtn:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+                    opacity: 0.9;
+                  }
+                  .trainingRatingBtn:active {
+                    transform: translateY(0);
+                  }
+                </style>
 
-  const modal = $(`
+                <div style="text-align: center; margin-bottom: 15px;">
+                  <button id="trainingLinkBtn" class="btn btn-primary" style="background-color: #6366f1; border-color: #6366f1; padding: 8px 24px;">
+                    <i class="fa fa-link"></i> Link Account
+                  </button>
+                </div>
+
+                <div style="padding: 15px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); border: 1px solid #2d3748;">
+                  <div style="font-weight: bold; margin-bottom: 12px; color: #fff; font-size: 14px;">
+                    <i class="fa fa-info-circle"></i> How to get your token:
+                  </div>
+                  <ol style="margin: 0; padding-left: 20px; color: rgba(255,255,255,0.8); font-size: 13px; line-height: 1.6;">
+                    <li>Visit <a href="https://amqplus.moe/training" target="_blank" rel="noopener noreferrer" style="color: #6366f1; text-decoration: underline; font-weight: bold;">amqplus.moe/training</a></li>
+                    <li>Click <strong>"Generate Token"</strong></li>
+                    <li>Copy and paste it here</li>
+                    <li>Your progress will sync automatically!</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quiz Selection Tab -->
+            <div id="trainingQuizTab" style="display: none;">
+              <div style="padding: 15px;">
+                <h4 style="margin-bottom: 15px; font-weight: bold;">Select a Quiz to Practice</h4>
+
+                <!-- Play from URL Section -->
+                <div style="margin-bottom: 15px; padding: 12px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 8px; border: 1px solid #2d3748;">
+                  <!-- URL Input (shown by default) -->
+                  <div id="trainingUrlInputSection">
+                    <label style="display: block; margin-bottom: 8px; color: rgba(255,255,255,0.9); font-size: 13px; font-weight: bold;">
+                      <i class="fa fa-link"></i> Play from URL
+                    </label>
+                    <div style="display: flex; gap: 8px;">
+                      <input type="text" id="trainingUrlInput" class="form-control" placeholder="https://amqplus.moe/play/...)"
+                             style="flex: 1; background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 8px 12px; font-size: 12px;">
+                      <button id="trainingLoadFromUrlBtn" class="btn btn-primary" style="background-color: #6366f1; border-color: #6366f1; padding: 8px 16px; white-space: nowrap;">
+                        <i class="fa fa-arrow-right"></i> Load
+                      </button>
+                    </div>
+                    <div id="trainingUrlError" style="display: none; margin-top: 8px; padding: 6px 8px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 4px; color: #ef4444; font-size: 11px;">
+                    </div>
+                  </div>
+
+                  <!-- Quiz Details (shown when quiz is loaded from URL) -->
+                  <div id="trainingUrlQuizDetails" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                      <label style="color: rgba(255,255,255,0.9); font-size: 13px; font-weight: bold;">
+                        <i class="fa fa-link"></i> Loaded from URL
+                      </label>
+                      <button id="trainingChangeUrlBtn" class="btn btn-sm" style="background-color: #4a5568; border-color: #4a5568; color: #fff; padding: 4px 10px; font-size: 11px;">
+                        <i class="fa fa-edit"></i> Change
+                      </button>
+                    </div>
+                    <div style="padding: 12px; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 6px;">
+                      <h5 id="trainingUrlQuizName" style="margin: 0 0 10px 0; color: #fff; font-weight: bold;"></h5>
+                      <div id="trainingUrlQuizStats"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style="text-align: center; margin-bottom: 15px; color: rgba(255,255,255,0.5); font-size: 12px;">— OR —</div>
+
+                <div id="trainingQuizList" style="max-height: 400px; overflow-y: auto;"></div>
+
+                <!-- Import from Old Script Section -->
+                <div style="margin-top: 20px; padding: 8px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;">
+                  <div id="trainingImportToggle" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 4px 0;">
+                    <span style="color: rgba(255,255,255,0.7); font-size: 12px;">
+                      <i class="fa fa-chevron-right" id="trainingImportChevron" style="margin-right: 6px; transition: transform 0.2s;"></i>
+                      Import from old training mode script
+                    </span>
+                  </div>
+                  <div id="trainingImportContent" style="display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+                    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                      <select id="trainingImportProfileSelect" class="form-control" style="flex: 1; background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; font-size: 11px;">
+                        <option value="">Select profile to import...</option>
+                      </select>
+                      <button id="trainingImportBtn" class="btn btn-default" style="background-color: #4a5568; border-color: #4a5568; color: #fff; padding: 5px 12px; font-size: 11px; white-space: nowrap;">
+                        <i class="fa fa-upload"></i> Import
+                      </button>
+                    </div>
+                    <div id="trainingImportStatus" style="margin-top: 8px; display: none;"></div>
+                  </div>
+                </div>
+
+                <div style="margin-top: 20px; padding: 15px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); border: 1px solid #2d3748;">
+                  <label style="display: block; margin-bottom: 12px; color: #fff; font-size: 14px; font-weight: bold;">Session Settings:</label>
+
+                  <div style="display: flex; align-items: flex-end; gap: 20px;">
+                    <div style="flex: 1; display: flex; gap: 15px;">
+                      <div style="min-width: 150px;">
+                        <label style="display: block; margin-bottom: 5px; color: rgba(255,255,255,0.9); font-size: 13px; white-space: nowrap;">Max Songs:</label>
+                        <input type="number" id="trainingSessionLength" class="form-control" value="20" min="5" max="50"
+                               style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 6px 10px; width: 100px;">
+                      </div>
+
+                      <div style="min-width: 150px;">
+                        <label style="display: block; margin-bottom: 5px; color: rgba(255,255,255,0.9); font-size: 13px; white-space: nowrap;">New Songs (%):</label>
+                        <input type="number" id="trainingNewPercentage" class="form-control" value="30" min="0" max="100"
+                               style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 6px 10px; width: 100px;">
+                      </div>
+                    </div>
+
+                    <button id="trainingStartBtn" class="btn btn-success" style="background-color: #10b981; border-color: #10b981; padding: 8px 24px; white-space: nowrap; flex-shrink: 0;">
+                      <i class="fa fa-play"></i> Start Training
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Active Session Tab -->
+            <div id="trainingSessionTab" style="display: none;">
+              <div style="padding: 15px;">
+                <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); border: 1px solid #2d3748; margin-bottom: 15px;">
+                  <h4 style="margin: 0 0 10px 0; font-weight: bold;" id="trainingSessionQuizName">Quiz Name</h4>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                      <span style="font-size: 24px; font-weight: bold; color: #6366f1;" id="trainingSessionProgress">0% accuracy (0/0)</span>
+                      <span style="opacity: 0.9; margin-left: 10px;">songs</span>
+                    </div>
+                    <div style="text-align: right;">
+                      <div style="margin-bottom: 4px;"><i class="fa fa-check-circle" style="color: #10b981;"></i> <span id="trainingSessionCorrect">0</span> correct</div>
+                      <div><i class="fa fa-times-circle" style="color: #ef4444;"></i> <span id="trainingSessionIncorrect">0</span> incorrect</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="trainingCurrentSong" style="padding: 15px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 8px; border: 1px solid #2d3748; margin-bottom: 15px;">
+                  <p style="color: rgba(255,255,255,0.7); margin: 0;">Waiting for quiz to start...</p>
+                </div>
+
+                <div id="trainingRatingSection" style="display: none; padding: 15px; background: linear-gradient(135deg, rgba(255, 193, 7, 0.2) 0%, rgba(255, 193, 7, 0.1) 100%); border: 1px solid rgba(255, 193, 7, 0.3); border-radius: 8px; margin-bottom: 15px;">
+                  <h5 style="margin-top: 0; margin-bottom: 15px; color: #ffc107; font-weight: bold; text-align: center;">
+                    <i class="fa fa-star"></i> Rate Your Performance
+                  </h5>
+                  <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button class="trainingRatingBtn btn" data-rating="1" style="flex: 1; background: #dc3545; color: white; border: none; padding: 15px 10px; font-weight: bold; transition: all 0.2s;">
+                      <i class="fa fa-times" style="font-size: 20px; display: block; margin-bottom: 5px;"></i>
+                      Again<br><small style="opacity: 0.9; font-size: 11px;">Forgot</small>
+                    </button>
+                    <button class="trainingRatingBtn btn" data-rating="2" style="flex: 1; background: #ffc107; color: white; border: none; padding: 15px 10px; font-weight: bold; transition: all 0.2s;">
+                      <i class="fa fa-meh" style="font-size: 20px; display: block; margin-bottom: 5px;"></i>
+                      Hard<br><small style="opacity: 0.9; font-size: 11px;">Difficult</small>
+                    </button>
+                    <button class="trainingRatingBtn btn" data-rating="3" style="flex: 1; background: #10b981; color: white; border: none; padding: 15px 10px; font-weight: bold; transition: all 0.2s;">
+                      <i class="fa fa-check" style="font-size: 20px; display: block; margin-bottom: 5px;"></i>
+                      Good<br><small style="opacity: 0.9; font-size: 11px;">Recalled</small>
+                    </button>
+                    <button class="trainingRatingBtn btn" data-rating="4" style="flex: 1; background: #6366f1; color: white; border: none; padding: 15px 10px; font-weight: bold; transition: all 0.2s;">
+                      <i class="fa fa-star" style="font-size: 20px; display: block; margin-bottom: 5px;"></i>
+                      Easy<br><small style="opacity: 0.9; font-size: 11px;">Perfect</small>
+                    </button>
+                  </div>
+                  <p style="text-align: center; margin: 12px 0 0 0; color: rgba(255,255,255,0.8); font-size: 12px;">
+                    <i class="fa fa-lightbulb"></i> Choose how well you remembered the song
+                  </p>
+                </div>
+
+                <div style="text-align: center;">
+                  <button id="trainingEndBtn" class="btn btn-danger" style="padding: 8px 24px;">
+                    <i class="fa fa-stop"></i> End Session
+                  </button>
+                </div>
+
+                <div id="trainingSyncStatus" style="margin-top: 15px; padding: 10px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); border-radius: 4px; display: none; color: #10b981;">
+                  <i class="fa fa-check-circle"></i> <span>Progress synced successfully</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function createModalHTML() {
+  return `
         <div class="modal fade" id="amqPlusModal" tabindex="-1" role="dialog">
             <div class="modal-dialog" role="document" style="width: 600px">
                 <div class="modal-content">
@@ -220,6 +613,9 @@ function createUI() {
                                     <button type="button" class="btn btn-sm btn-primary" id="amqPlusSyncBtn" style="background-color: #6366f1; border-color: #6366f1; color: #fff; padding: 4px 12px; font-size: 11px;">
                                         <i class="fa fa-sync" style="margin-right: 4px;"></i>Sync Now
                                     </button>
+                                    <button type="button" class="btn btn-sm btn-success" id="amqPlusManualAddBtn" style="background-color: #10b981; border-color: #10b981; color: #fff; padding: 4px 12px; font-size: 11px;">
+                                        <i class="fa fa-plus" style="margin-right: 4px;"></i>Manual Add
+                                    </button>
                                     <button type="button" class="btn btn-sm" id="amqPlusRandomPreset" style="background-color: #4a5568; border-color: #4a5568; color: #fff; padding: 4px 12px; font-size: 11px;">Random</button>
                                     <button type="button" class="btn btn-sm" id="amqPlusEqualPreset" style="background-color: #4a5568; border-color: #4a5568; color: #fff; padding: 4px 12px; font-size: 11px;">Equal</button>
                                 </div>
@@ -238,14 +634,14 @@ function createUI() {
                             </div>
 
                             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
-                                <label style="display: block; margin-bottom: 8px; color: #fff; font-size: 13px; font-weight: bold;">Song Selection Mode:</label>
-                                <select id="amqPlusSongSelectionMode" style="width: 100%; padding: 6px 10px; background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; font-size: 12px;">
-                                    <option value="default">Default</option>
-                                    <option value="many-lists">Prioritize songs on many lists</option>
-                                    <option value="few-lists">Prioritize songs on few lists</option>
+                                <label style="display: block; margin-bottom: 8px; color: #fff; font-size: 13px; font-weight: bold;">List Distribution Mode:</label>
+                                <select id="amqPlusSongSelectionMode" style="width: 100%; padding: 6px 10px; background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; font-size: 12px;" title="Controls how songs are prioritized during selection">
+                                    <option value="default" title="Random: Songs are selected randomly without prioritizing based on list overlap">Random</option>
+                                    <option value="many-lists" title="All Shared: Prioritizes songs that appear on the most user lists (songs everyone knows)">All Shared</option>
+                                    <option value="few-lists" title="No Shared: Prioritizes songs that appear on the fewest user lists (unique/rare songs)">No Shared</option>
                                 </select>
                                 <small style="display: block; margin-top: 6px; color: rgba(255,255,255,0.6); font-size: 11px;">
-                                    Controls how songs are prioritized during random selection. "Default" maintains current behavior where songs appear multiple times. "Many lists" prioritizes songs that appear on more user lists. "Few lists" prioritizes songs that appear on fewer user lists.
+                                    Controls how songs are prioritized during selection. "Random" maintains current behavior. "All Shared" prioritizes songs that appear on the most user lists (songs everyone knows). "No Shared" prioritizes songs that appear on the fewest user lists (unique/rare songs).
                                 </small>
                             </div>
                         </div>
@@ -258,7 +654,12 @@ function createUI() {
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus sync</strong> - Sync player lists manually</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus info</strong> - Display quiz metadata in chat</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus sources</strong> - Toggle song source messages</div>
-                                <div style="color: #e2e8f0;"><strong style="color: #fff;">/amqplus [url]</strong> - Fetch quiz from URL</div>
+                                <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus [url]</strong> - Fetch quiz from URL</div>
+                                <div style="margin-top: 10px; margin-bottom: 6px; color: #10b981; font-weight: bold;">Player List Commands (Live Node):</div>
+                                <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/add [status...]</strong> - Add list statuses</div>
+                                <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/remove [status...]</strong> - Remove list statuses</div>
+                                <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/list</strong> - Show your enabled lists</div>
+                                <div style="color: #e2e8f0;"><strong style="color: #fff;">/listhelp</strong> - Show list commands help</div>
                             </div>
                         </div>
 
@@ -276,8 +677,48 @@ function createUI() {
                 </div>
             </div>
         </div>
-    `);
+    `;
+}
 
+function createUI() {
+  console.log("[AMQ+] Creating UI elements...");
+
+  if ($("#amqPlusToggle").length > 0) {
+    console.log("[AMQ+] Toggle button already exists, skipping creation");
+    return;
+  }
+
+  // Add AMQ+ button
+  $("#lobbyPage .topMenuBar").append(`<div id="amqPlusToggle" class="clickAble topMenuButton topMenuMediumButton"><h3>AMQ+</h3></div>`);
+  $("#amqPlusToggle").click(() => {
+    console.log("[AMQ+] AMQ+ button clicked, opening modal");
+    $("#amqPlusModal").modal("show");
+  });
+
+  // Add Training button
+  $("#lobbyPage .topMenuBar").append(`<div id="amqPlusTrainingToggle" class="clickAble topMenuButton topMenuMediumButton"><h3>Training</h3></div>`);
+  $("#amqPlusTrainingToggle").click(() => {
+    console.log("[AMQ+ Training] Training button clicked, opening modal");
+    $("#amqPlusTrainingModal").modal("show");
+    // Show/hide logout button based on auth state
+    if (trainingState.isAuthenticated) {
+      $("#trainingLogoutBtn").show();
+      // Restore URL quiz display if saved
+      restoreUrlQuizDisplay();
+    } else {
+      $("#trainingLogoutBtn").hide();
+    }
+    if (trainingState.authToken && !trainingState.isAuthenticated) {
+      // Try to validate token on open
+      validateTrainingToken();
+    }
+  });
+
+  updateToggleButton();
+  applyStyles();
+
+  const modal = $(createModalHTML());
+  const trainingModal = $(createTrainingModalHTML());
   const gameContainer = $("#gameContainer");
   if (gameContainer.length > 0) {
     if ($("#amqPlusModal").length === 0) {
@@ -288,6 +729,15 @@ function createUI() {
       console.log("[AMQ+] Modal already exists, skipping creation");
       attachModalHandlers();
     }
+
+    if ($("#amqPlusTrainingModal").length === 0) {
+      gameContainer.append(trainingModal);
+      console.log("[AMQ+ Training] Training modal appended to gameContainer");
+      attachTrainingModalHandlers();
+    } else {
+      console.log("[AMQ+ Training] Training modal already exists");
+      attachTrainingModalHandlers();
+    }
   } else {
     console.warn("[AMQ+] GameContainer not found, appending to body as fallback");
     if ($("#amqPlusModal").length === 0) {
@@ -295,6 +745,13 @@ function createUI() {
       attachModalHandlers();
     } else {
       attachModalHandlers();
+    }
+
+    if ($("#amqPlusTrainingModal").length === 0) {
+      $("body").append(trainingModal);
+      attachTrainingModalHandlers();
+    } else {
+      attachTrainingModalHandlers();
     }
   }
 }
@@ -362,6 +819,10 @@ function attachModalHandlers() {
     handleManualSync();
   });
 
+  $("#amqPlusManualAddBtn").off("click").click(() => {
+    handleManualAdd();
+  });
+
   $("#amqPlusRandomPreset").off("click").click(() => {
     applyRandomPreset();
   });
@@ -405,6 +866,11 @@ function applyStyles() {
         #amqPlusToggle {
             position: absolute;
             right: calc(50% + 120px);
+            width: 80px;
+        }
+        #amqPlusTrainingToggle {
+            position: absolute;
+            left: calc(50% + 120px);
             width: 80px;
         }
         .amqPlusCustomLikeButton {
@@ -521,8 +987,10 @@ function fetchQuizFromUrl() {
   });
 }
 
-function checkQuizForLiveNode(quizId) {
+function checkAndHandleLiveNode(quizId, options = {}) {
+  const { isReRoll = false, skipAutoReady = null, originalFireMainButtonEvent = null } = options;
   const apiUrl = `${API_BASE_URL}/play/${quizId}`;
+
   GM_xmlhttpRequest({
     method: "GET",
     url: apiUrl,
@@ -531,52 +999,9 @@ function checkQuizForLiveNode(quizId) {
         try {
           const data = JSON.parse(response.responseText);
           if (data.success === false) {
-            return;
-          }
-
-          const configData = data.configuration_data || data.configurationData;
-          if (configData && configData.nodes) {
-            const hasLiveNode = configData.nodes.some(n => n.data?.id === 'live-node');
-            if (hasLiveNode) {
-              console.log("[AMQ+] Quiz has Live Node, fetching player lists");
-
-              if (cachedPlayerLists && cachedPlayerLists.length > 0) {
-                console.log("[AMQ+] Using cached player lists");
-                usePlayerLists(cachedPlayerLists, quizId);
-              } else {
-                gatherPlayerLists().then(userEntries => {
-                  cachedPlayerLists = userEntries;
-                  applyRandomPreset();
-                  usePlayerLists(userEntries, quizId);
-                }).catch(error => {
-                  console.error("[AMQ+] Error gathering player lists:", error);
-                  showError("Failed to gather player lists: " + error.message);
-                });
-              }
+            if (isReRoll) {
+              fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
             }
-          }
-        } catch (e) {
-          console.error("[AMQ+] Failed to check quiz for live node:", e);
-        }
-      }
-    },
-    onerror: function (error) {
-      console.error("[AMQ+] Error checking quiz for live node:", error);
-    }
-  });
-}
-
-function checkQuizForLiveNodeForReRoll(quizId, skipAutoReady, originalFireMainButtonEvent) {
-  const apiUrl = `${API_BASE_URL}/play/${quizId}`;
-  GM_xmlhttpRequest({
-    method: "GET",
-    url: apiUrl,
-    onload: function (response) {
-      if (response.status === 200) {
-        try {
-          const data = JSON.parse(response.responseText);
-          if (data.success === false) {
-            fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
             return;
           }
 
@@ -584,21 +1009,13 @@ function checkQuizForLiveNodeForReRoll(quizId, skipAutoReady, originalFireMainBu
           if (configData && configData.nodes) {
             const hasLiveNode = configData.nodes.some(n => n.data?.id === 'live-node');
             if (hasLiveNode) {
-              console.log("[AMQ+] Quiz has Live Node, fetching player lists for re-roll");
+              const logPrefix = isReRoll ? "re-roll" : "";
+              console.log(`[AMQ+] Quiz has Live Node, fetching player lists${logPrefix ? ' for ' + logPrefix : ''}`);
 
               if (cachedPlayerLists && cachedPlayerLists.length > 0) {
-                console.log("[AMQ+] Using cached player lists for re-roll");
-                const configuredEntries = getConfiguredPlayerLists();
-                const liveNodeData = {
-                  useEntirePool: false,
-                  userEntries: configuredEntries,
-                  songSelectionMode: liveNodeSongSelectionMode
-                };
-                fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMainButtonEvent);
-              } else {
-                gatherPlayerLists().then(userEntries => {
-                  cachedPlayerLists = userEntries;
-                  applyRandomPreset();
+                console.log(`[AMQ+] Using cached player lists${logPrefix ? ' for ' + logPrefix : ''}`);
+
+                if (isReRoll) {
                   const configuredEntries = getConfiguredPlayerLists();
                   const liveNodeData = {
                     useEntirePool: false,
@@ -606,31 +1023,117 @@ function checkQuizForLiveNodeForReRoll(quizId, skipAutoReady, originalFireMainBu
                     songSelectionMode: liveNodeSongSelectionMode
                   };
                   fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMainButtonEvent);
+                } else {
+                  usePlayerLists(cachedPlayerLists, quizId);
+                }
+              } else {
+                gatherPlayerLists().then(userEntries => {
+                  cachedPlayerLists = userEntries;
+                  applyRandomPreset();
+
+                  if (isReRoll) {
+                    const configuredEntries = getConfiguredPlayerLists();
+                    const liveNodeData = {
+                      useEntirePool: false,
+                      userEntries: configuredEntries,
+                      songSelectionMode: liveNodeSongSelectionMode
+                    };
+                    fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMainButtonEvent);
+                  } else {
+                    usePlayerLists(userEntries, quizId);
+                  }
                 }).catch(error => {
-                  console.error("[AMQ+] Error gathering player lists for re-roll:", error);
-                  sendSystemMessage("Failed to gather player lists, re-rolling without live data...");
-                  fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
+                  console.error(`[AMQ+] Error gathering player lists${logPrefix ? ' for ' + logPrefix : ''}:`, error);
+                  if (isReRoll) {
+                    sendSystemMessage("Failed to gather player lists, re-rolling without live data...");
+                    fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
+                  } else {
+                    showError("Failed to gather player lists: " + error.message);
+                  }
                 });
               }
-            } else {
+            } else if (isReRoll) {
               fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
             }
-          } else {
+          } else if (isReRoll) {
             fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
           }
         } catch (e) {
           console.error("[AMQ+] Failed to check quiz for live node:", e);
-          fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
+          if (isReRoll) {
+            fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
+          }
         }
-      } else {
+      } else if (isReRoll) {
         fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
       }
     },
     onerror: function (error) {
       console.error("[AMQ+] Error checking quiz for live node:", error);
-      fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
+      if (isReRoll) {
+        fetchQuizForReRoll(quizId, null, skipAutoReady, originalFireMainButtonEvent);
+      }
     }
   });
+}
+
+function checkQuizForLiveNode(quizId) {
+  checkAndHandleLiveNode(quizId, { isReRoll: false });
+}
+
+function checkQuizForLiveNodeForReRoll(quizId, skipAutoReady, originalFireMainButtonEvent) {
+  checkAndHandleLiveNode(quizId, { isReRoll: true, skipAutoReady, originalFireMainButtonEvent });
+}
+
+function handleManualAdd() {
+  console.log("[AMQ+] Manual add button clicked");
+
+  // Prompt for username
+  const username = prompt("Enter player username:");
+  if (!username || username.trim() === '') {
+    return;
+  }
+
+  // Prompt for platform
+  const platform = prompt("Enter platform (anilist or myanimelist):", "anilist");
+  if (!platform || (platform.toLowerCase() !== 'anilist' && platform.toLowerCase() !== 'myanimelist')) {
+    sendSystemMessage("Invalid platform. Please enter 'anilist' or 'myanimelist'");
+    return;
+  }
+
+  // Create a new player entry
+  const newEntry = {
+    id: `manual_${Date.now()}`,
+    username: username.trim(),
+    platform: platform.toLowerCase(),
+    songPercentage: {
+      random: false,
+      value: 100,
+      min: 0,
+      max: 100
+    },
+    selectedLists: {
+      completed: true,
+      watching: false,
+      planning: false,
+      on_hold: false,
+      dropped: false
+    }
+  };
+
+  // Initialize cachedPlayerLists if it doesn't exist
+  if (!cachedPlayerLists) {
+    cachedPlayerLists = [];
+  }
+
+  // Add the new entry to cachedPlayerLists
+  cachedPlayerLists.push(newEntry);
+
+  // Update the UI
+  updatePlayerListsConfigUI();
+
+  sendSystemMessage(`Manually added ${username} (${platform})`);
+  console.log("[AMQ+] Manually added player:", newEntry);
 }
 
 function handleManualSync() {
@@ -664,7 +1167,26 @@ function handleManualSync() {
       "cursor": "pointer"
     });
 
-    const listMessage = userEntries.map((entry, idx) => {
+    // Check for Kitsu platform or no-list entries and send warnings
+    const hasKitsuOrNoList = userEntries.some(entry =>
+      entry.platform === 'kitsu' || entry.username === '-'
+    );
+
+    if (hasKitsuOrNoList) {
+      userEntries.forEach((entry, idx) => {
+        const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx}`;
+        if (entry.platform === 'kitsu') {
+          sendSystemMessage(`Warning: ${prefix} has a Kitsu list - Kitsu platform is not implemented yet`);
+        } else if (entry.username === '-') {
+          sendSystemMessage(`Warning: ${prefix} has no list provided - this will be ignored`);
+        }
+      });
+    }
+
+    // Filter out entries with no list (username === '-') from sync stats
+    const validEntries = userEntries.filter(entry => entry.username !== '-');
+
+    const listMessage = validEntries.map((entry, idx) => {
       const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx + 1}`;
       const statuses = [];
       if (entry.selectedLists?.completed) statuses.push('Completed');
@@ -675,7 +1197,7 @@ function handleManualSync() {
       return `${prefix}: ${entry.username} (${entry.platform}) - ${statuses.join(', ')}`;
     }).join(' | ');
 
-    sendSystemMessage(`Synced ${userEntries.length} player list${userEntries.length !== 1 ? 's' : ''}: ${listMessage}`);
+    sendSystemMessage(`Synced ${validEntries.length} player list${validEntries.length !== 1 ? 's' : ''}: ${listMessage}`);
   }).catch(error => {
     console.error("[AMQ+] Error gathering player lists:", error);
     syncBtn.prop("disabled", false);
@@ -687,31 +1209,23 @@ function handleManualSync() {
   });
 }
 
-function updatePlayerListsConfigUI() {
-  if (!cachedPlayerLists || cachedPlayerLists.length === 0) {
-    $("#amqPlusPlayerListsConfigContent").html('<div style="color: rgba(255,255,255,0.6); padding: 20px; text-align: center;"><div style="margin-bottom: 12px; padding: 10px; background-color: rgba(255, 193, 7, 0.2); border: 1px solid rgba(255, 193, 7, 0.5); border-radius: 4px; color: #ffc107; font-size: 12px;"><strong>Note:</strong> This feature will only work if the quiz has a Live Node in it.</div>No player lists fetched yet. Click "Sync Now" to gather player lists from the lobby.</div>');
-    return;
-  }
+function createPlayerEntryHTML(entry, idx) {
+  const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx}`;
+  const hasPercentage = entry.songPercentage !== null && entry.songPercentage !== undefined;
+  const isRandom = hasPercentage && entry.songPercentage.random === true;
+  const value = hasPercentage ? (isRandom ? null : entry.songPercentage.value) : null;
+  const min = hasPercentage && isRandom ? entry.songPercentage.min : null;
+  const max = hasPercentage && isRandom ? entry.songPercentage.max : null;
 
-  $("#amqPlusPlayerListsConfig").show();
+  const selectedLists = entry.selectedLists || {
+    completed: true,
+    watching: true,
+    planning: false,
+    on_hold: false,
+    dropped: false
+  };
 
-  const html = cachedPlayerLists.map((entry, idx) => {
-    const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx}`;
-    const hasPercentage = entry.songPercentage !== null && entry.songPercentage !== undefined;
-    const isRandom = hasPercentage && entry.songPercentage.random === true;
-    const value = hasPercentage ? (isRandom ? null : entry.songPercentage.value) : null;
-    const min = hasPercentage && isRandom ? entry.songPercentage.min : null;
-    const max = hasPercentage && isRandom ? entry.songPercentage.max : null;
-
-    const selectedLists = entry.selectedLists || {
-      completed: true,
-      watching: true,
-      planning: false,
-      on_hold: false,
-      dropped: false
-    };
-
-    return `
+  return `
             <div class="amqPlusPlayerEntry" data-entry-idx="${idx}" style="margin-bottom: 12px; padding: 10px; background-color: rgba(255,255,255,0.03); border-radius: 4px; border: 1px solid rgba(255,255,255,0.1);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <div style="font-weight: bold; color: #fff; font-size: 13px;">${prefix}: ${entry.username} (${entry.platform})</div>
@@ -773,8 +1287,17 @@ function updatePlayerListsConfigUI() {
                 </div>
             </div>
         `;
-  }).join('');
+}
 
+function updatePlayerListsConfigUI() {
+  if (!cachedPlayerLists || cachedPlayerLists.length === 0) {
+    $("#amqPlusPlayerListsConfigContent").html('<div style="color: rgba(255,255,255,0.6); padding: 20px; text-align: center;"><div style="margin-bottom: 12px; padding: 10px; background-color: rgba(255, 193, 7, 0.2); border: 1px solid rgba(255, 193, 7, 0.5); border-radius: 4px; color: #ffc107; font-size: 12px;"><strong>Note:</strong> This feature will only work if the quiz has a Live Node in it.</div>No player lists fetched yet. Click "Sync Now" to gather player lists from the lobby.</div>');
+    return;
+  }
+
+  $("#amqPlusPlayerListsConfig").show();
+
+  const html = cachedPlayerLists.map((entry, idx) => createPlayerEntryHTML(entry, idx)).join('');
   $("#amqPlusPlayerListsConfigContent").html(html);
 
   $('.amqPlusUseRandom').off('change').on('change', function () {
@@ -796,6 +1319,11 @@ function updatePlayerListsConfigUI() {
     }
   });
 
+  attachPercentageHandlers();
+  validatePercentages();
+}
+
+function attachPercentageHandlers() {
   $('.amqPlusPercentageValue, .amqPlusPercentageMin, .amqPlusPercentageMax').off('input').on('input', function () {
     const idx = $(this).data('entry-idx');
     const val = parseFloat($(this).val()) || 0;
@@ -821,8 +1349,6 @@ function updatePlayerListsConfigUI() {
     }
     validatePercentages();
   });
-
-  validatePercentages();
 }
 
 function updatePercentageControls(idx) {
@@ -847,31 +1373,7 @@ function updatePercentageControls(idx) {
         `);
   }
 
-  $('.amqPlusPercentageValue, .amqPlusPercentageMin, .amqPlusPercentageMax').off('input').on('input', function () {
-    const idx = $(this).data('entry-idx');
-    const val = parseFloat($(this).val()) || 0;
-    if ($(this).hasClass('amqPlusPercentageValue')) {
-      $(`.amqPlusPercentageSlider[data-entry-idx="${idx}"]`).val(val);
-    } else if ($(this).hasClass('amqPlusPercentageMin')) {
-      $(`.amqPlusPercentageSliderMin[data-entry-idx="${idx}"]`).val(val);
-    } else if ($(this).hasClass('amqPlusPercentageMax')) {
-      $(`.amqPlusPercentageSliderMax[data-entry-idx="${idx}"]`).val(val);
-    }
-    validatePercentages();
-  });
-
-  $('.amqPlusPercentageSlider, .amqPlusPercentageSliderMin, .amqPlusPercentageSliderMax').off('input').on('input', function () {
-    const idx = $(this).data('entry-idx');
-    const val = parseFloat($(this).val()) || 0;
-    if ($(this).hasClass('amqPlusPercentageSlider')) {
-      $(`.amqPlusPercentageValue[data-entry-idx="${idx}"]`).val(val);
-    } else if ($(this).hasClass('amqPlusPercentageSliderMin')) {
-      $(`.amqPlusPercentageMin[data-entry-idx="${idx}"]`).val(val);
-    } else if ($(this).hasClass('amqPlusPercentageSliderMax')) {
-      $(`.amqPlusPercentageMax[data-entry-idx="${idx}"]`).val(val);
-    }
-    validatePercentages();
-  });
+  attachPercentageHandlers();
 }
 
 function validatePercentages() {
@@ -1033,13 +1535,35 @@ function getConfiguredPlayerLists() {
 function usePlayerLists(userEntries, quizId) {
   const configuredEntries = userEntries === cachedPlayerLists ? getConfiguredPlayerLists() : userEntries;
 
+  // Filter out entries with no list (username === '-') before sending to server
+  const validEntriesForServer = configuredEntries.filter(entry => entry.username !== '-');
+
   const liveNodeData = {
     useEntirePool: false,
-    userEntries: configuredEntries,
+    userEntries: validEntriesForServer,
     songSelectionMode: liveNodeSongSelectionMode
   };
 
-  const listMessage = configuredEntries.map((entry, idx) => {
+  // Check for Kitsu platform or no-list entries and send warnings
+  const hasKitsuOrNoList = configuredEntries.some(entry =>
+    entry.platform === 'kitsu' || entry.username === '-'
+  );
+
+  if (hasKitsuOrNoList) {
+    configuredEntries.forEach((entry, idx) => {
+      const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx + 1}`;
+      if (entry.platform === 'kitsu') {
+        sendSystemMessage(`Warning: ${prefix} has a Kitsu list - Kitsu platform is not implemented yet`);
+      } else if (entry.username === '-') {
+        sendSystemMessage(`Warning: ${prefix} has no list provided - this will be ignored`);
+      }
+    });
+  }
+
+  // Filter out entries with no list (username === '-') from sync stats
+  const validEntries = configuredEntries.filter(entry => entry.username !== '-');
+
+  const listMessage = validEntries.map((entry, idx) => {
     const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx + 1}`;
     const statuses = [];
     if (entry.selectedLists?.completed) statuses.push('Completed');
@@ -1056,7 +1580,7 @@ function usePlayerLists(userEntries, quizId) {
     return `${prefix}: ${entry.username} (${entry.platform})${statusStr}${percentageStr}`;
   }).join(' | ');
 
-  sendSystemMessage(`Synced ${configuredEntries.length} player list${configuredEntries.length !== 1 ? 's' : ''}: ${listMessage}`);
+  sendSystemMessage(`Synced ${validEntries.length} player list${validEntries.length !== 1 ? 's' : ''}: ${listMessage}`);
 
   console.log("[AMQ+] Sending player lists to quiz");
   fetchQuiz(quizId, liveNodeData);
@@ -1146,6 +1670,9 @@ function handleQuizData(data, quizId) {
   console.log("[AMQ+] Handling quiz data for quiz ID:", quizId);
   currentQuizData = data;
   currentQuizId = quizId;
+
+  // Log the full command received from server
+  console.log("[AMQ+] Full command received from server:", JSON.stringify(data.command, null, 2));
 
   const quizSave = data.command.data.quizSave;
   const ruleBlock = quizSave.ruleBlocks[0];
@@ -1391,6 +1918,9 @@ function createOrUpdateQuiz(data) {
     : data.command.data.quizSave.name;
   console.log("[AMQ+] Creating or updating quiz with title:", quizTitle);
 
+  // Log the full command received from server
+  console.log("[AMQ+] Full command received from server:", JSON.stringify(data.command, null, 2));
+
   pendingQuizData = data;
 
   console.log("[AMQ+] Requesting quiz list from server...");
@@ -1435,13 +1965,19 @@ function handleQuizListResponse(payload) {
   console.log("[AMQ+] Total quizzes in list:", quizzes.length);
   console.log("[AMQ+] Quiz names:", quizzes.map(q => q.name));
 
-  const existingQuiz = quizzes.find(q => q.name.startsWith("AMQ+"));
+  // Find existing quiz by exact name match
+  // Training quizzes now use standard "AMQ+ " prefix format
+  const quizName = pendingQuizData?.command?.data?.quizSave?.name;
+  let existingQuiz = null;
+  if (quizName) {
+    existingQuiz = quizzes.find(q => q.name === quizName);
+  }
 
   if (existingQuiz) {
-    console.log("[AMQ+] Found existing AMQ+ quiz:", existingQuiz.name, "ID:", existingQuiz.customQuizId);
+    console.log("[AMQ+] Found existing quiz:", existingQuiz.name, "ID:", existingQuiz.customQuizId);
     saveQuiz(pendingQuizData, existingQuiz.customQuizId);
   } else {
-    console.log("[AMQ+] No existing AMQ+ quiz found, creating new one");
+    console.log("[AMQ+] No existing quiz found, creating new one");
     saveQuiz(pendingQuizData, null);
   }
 
@@ -1464,7 +2000,7 @@ function saveQuiz(data, quizId) {
 
   console.log("[AMQ+] Quiz name:", quizName);
   console.log("[AMQ+] Song blocks count:", command.data.quizSave.ruleBlocks[0].blocks.length);
-  console.log("[AMQ+] Command to send:", command);
+  console.log("[AMQ+] Full command to send to AMQ:", JSON.stringify(command, null, 2));
 
   socket.sendCommand(command);
 
@@ -1475,32 +2011,348 @@ function applyQuizToLobby(quizId, quizName) {
   console.log("[AMQ+] Applying quiz to lobby, quiz ID:", quizId, "quiz name:", quizName);
 
   console.log("[AMQ+] Sending community mode command...");
-  socket.sendCommand({
+  const communityModeCommand = {
     type: "lobby",
     command: "change game settings",
     data: {
       settingChanges: {},
       communityMode: true
     }
-  });
+  };
+  console.log("[AMQ+] Full community mode command:", JSON.stringify(communityModeCommand, null, 2));
+  socket.sendCommand(communityModeCommand);
 
   setTimeout(() => {
     console.log("[AMQ+] Sending select custom quiz command, quiz ID:", quizId);
-    socket.sendCommand({
+    const selectQuizCommand = {
       command: "select custom quiz",
       type: "lobby",
       data: {
         quizId: quizId
       }
-    });
+    };
+    console.log("[AMQ+] Full select quiz command:", JSON.stringify(selectQuizCommand, null, 2));
+    socket.sendCommand(selectQuizCommand);
 
     updateModalStatus("Quiz applied - Click 'Start' button to begin");
-    $("#amqPlusLoadingSpinner").hide();
     console.log("[AMQ+] Quiz applied");
     setTimeout(() => {
       $("#amqPlusModal").modal("hide");
     }, 100);
   }, 500);
+}
+
+// Valid list statuses for player list commands
+const VALID_LIST_STATUSES = ['completed', 'watching', 'planning', 'on-hold', 'dropped', 'paused'];
+const STATUS_ALIASES = {
+  'complete': 'completed',
+  'watch': 'watching',
+  'plan': 'planning',
+  'onhold': 'on-hold',
+  'on_hold': 'on-hold',
+  'drop': 'dropped',
+  'pause': 'paused',
+  'paused': 'on-hold' // Map paused to on-hold since that's the actual status name
+};
+
+// Map display names to internal status keys
+const STATUS_TO_KEY = {
+  'completed': 'completed',
+  'watching': 'watching',
+  'planning': 'planning',
+  'on-hold': 'on_hold',
+  'dropped': 'dropped'
+};
+
+/**
+ * Handle player list management commands from any player
+ * Only processes if the user is the host and has a Live Node quiz active
+ */
+function handlePlayerListCommand(message, sender) {
+  // Don't process if not a command
+  if (!message.startsWith('/')) {
+    return;
+  }
+
+  const msgLower = message.toLowerCase().trim();
+
+  // Check if it's a list management command
+  if (!msgLower.startsWith('/add') && !msgLower.startsWith('/remove') &&
+    !msgLower.startsWith('/list') && !msgLower.startsWith('/listhelp')) {
+    return;
+  }
+
+  // Only process if we're the host (lobby.isHost check)
+  if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
+    return;
+  }
+
+  // Only process if we have cached player lists (Live Node quiz is active)
+  if (!cachedPlayerLists || cachedPlayerLists.length === 0) {
+    if (msgLower.startsWith('/add') || msgLower.startsWith('/remove') || msgLower === '/list') {
+      sendSystemMessage(`${sender}: List commands are only available when a Live Node quiz is active. Use /listhelp for more info.`);
+    }
+    return;
+  }
+
+  console.log(`[AMQ+] Processing list command from ${sender}: ${message}`);
+
+  const parts = message.trim().split(/\s+/);
+  const command = parts[0].toLowerCase();
+  const args = parts.slice(1).map(arg => arg.toLowerCase());
+
+  // Handle different commands
+  if (command === '/listhelp') {
+    handleListHelpCommand(sender);
+  } else if (command === '/list') {
+    handleListShowCommand(sender);
+  } else if (command === '/add') {
+    handleListAddCommand(sender, args);
+  } else if (command === '/remove') {
+    handleListRemoveCommand(sender, args);
+  }
+}
+
+/**
+ * Show help information for list commands
+ */
+function handleListHelpCommand(sender) {
+  const helpMessages = [
+    `@${sender}: Player List Commands Help`,
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "/add [status...] - Add list statuses",
+    "/remove [status...] - Remove list statuses",
+    "/list - Show your enabled lists",
+    "/listhelp - Show this help",
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "Valid statuses: completed, watching, planning, on-hold, dropped",
+    "Example: /add completed watching",
+    "Example: /remove dropped"
+  ];
+
+  helpMessages.forEach((msg, index) => {
+    setTimeout(() => sendSystemMessage(msg), 100 * index);
+  });
+}
+
+/**
+ * Show current enabled lists for a player
+ */
+function handleListShowCommand(sender) {
+  const playerEntry = findPlayerInCache(sender);
+
+  if (!playerEntry) {
+    sendSystemMessage(`${sender}: You are not in the current Live Node configuration. Ask the host to sync or add you manually.`);
+    return;
+  }
+
+  const enabledLists = [];
+  if (playerEntry.selectedLists) {
+    if (playerEntry.selectedLists.completed) enabledLists.push('Completed');
+    if (playerEntry.selectedLists.watching) enabledLists.push('Watching');
+    if (playerEntry.selectedLists.planning) enabledLists.push('Planning');
+    if (playerEntry.selectedLists.on_hold) enabledLists.push('On-Hold');
+    if (playerEntry.selectedLists.dropped) enabledLists.push('Dropped');
+  }
+
+  if (enabledLists.length === 0) {
+    sendSystemMessage(`${sender}: No lists enabled (songs will be selected from entire pool)`);
+  } else {
+    sendSystemMessage(`${sender}: Enabled lists: ${enabledLists.join(', ')}`);
+  }
+}
+
+/**
+ * Add list statuses for a player
+ */
+function handleListAddCommand(sender, args) {
+  if (args.length === 0) {
+    sendSystemMessage(`${sender}: Usage: /add [status...]. Valid: completed, watching, planning, on-hold, dropped. Use /listhelp for more info.`);
+    return;
+  }
+
+  const playerEntry = findPlayerInCache(sender);
+
+  if (!playerEntry) {
+    sendSystemMessage(`${sender}: You are not in the current Live Node configuration. Ask the host to sync or add you manually.`);
+    return;
+  }
+
+  const { validStatuses, invalidStatuses } = parseStatuses(args);
+
+  if (invalidStatuses.length > 0) {
+    sendSystemMessage(`${sender}: Invalid status(es): ${invalidStatuses.join(', ')}. Valid: completed, watching, planning, on-hold, dropped`);
+    return;
+  }
+
+  if (validStatuses.length === 0) {
+    sendSystemMessage(`${sender}: No valid statuses provided. Use /listhelp for more info.`);
+    return;
+  }
+
+  // Add the statuses
+  const addedStatuses = [];
+  validStatuses.forEach(status => {
+    const key = STATUS_TO_KEY[status];
+    if (!playerEntry.selectedLists[key]) {
+      playerEntry.selectedLists[key] = true;
+      addedStatuses.push(capitalizeFirst(status.replace('-', '-')));
+    }
+  });
+
+  if (addedStatuses.length === 0) {
+    sendSystemMessage(`${sender}: All specified lists were already enabled.`);
+  } else {
+    sendSystemMessage(`${sender}: Added lists: ${addedStatuses.join(', ')}`);
+    updatePlayerListsConfigUI();
+  }
+}
+
+/**
+ * Remove list statuses for a player
+ */
+function handleListRemoveCommand(sender, args) {
+  if (args.length === 0) {
+    sendSystemMessage(`${sender}: Usage: /remove [status...]. Valid: completed, watching, planning, on-hold, dropped. Use /listhelp for more info.`);
+    return;
+  }
+
+  const playerEntry = findPlayerInCache(sender);
+
+  if (!playerEntry) {
+    sendSystemMessage(`${sender}: You are not in the current Live Node configuration. Ask the host to sync or add you manually.`);
+    return;
+  }
+
+  const { validStatuses, invalidStatuses } = parseStatuses(args);
+
+  if (invalidStatuses.length > 0) {
+    sendSystemMessage(`${sender}: Invalid status(es): ${invalidStatuses.join(', ')}. Valid: completed, watching, planning, on-hold, dropped`);
+    return;
+  }
+
+  if (validStatuses.length === 0) {
+    sendSystemMessage(`${sender}: No valid statuses provided. Use /listhelp for more info.`);
+    return;
+  }
+
+  // Remove the statuses
+  const removedStatuses = [];
+  validStatuses.forEach(status => {
+    const key = STATUS_TO_KEY[status];
+    if (playerEntry.selectedLists[key]) {
+      playerEntry.selectedLists[key] = false;
+      removedStatuses.push(capitalizeFirst(status.replace('-', '-')));
+    }
+  });
+
+  if (removedStatuses.length === 0) {
+    sendSystemMessage(`${sender}: All specified lists were already disabled.`);
+  } else {
+    sendSystemMessage(`${sender}: Removed lists: ${removedStatuses.join(', ')}`);
+    updatePlayerListsConfigUI();
+  }
+}
+
+/**
+ * Find a player in the cached player lists by name
+ */
+function findPlayerInCache(playerName) {
+  if (!cachedPlayerLists) return null;
+
+  // Try to find by exact username match
+  let player = cachedPlayerLists.find(entry => entry.username === playerName);
+
+  // If not found and playerName is selfName, try to find by id containing 'self'
+  if (!player && playerName === selfName) {
+    player = cachedPlayerLists.find(entry => entry.id && entry.id.includes('self'));
+  }
+
+  return player;
+}
+
+/**
+ * Parse and validate status arguments
+ */
+function parseStatuses(args) {
+  const validStatuses = [];
+  const invalidStatuses = [];
+
+  args.forEach(arg => {
+    const normalized = arg.toLowerCase().trim();
+
+    // Check if it's already a valid status
+    if (VALID_LIST_STATUSES.includes(normalized)) {
+      const finalStatus = normalized === 'paused' ? 'on-hold' : normalized;
+      if (!validStatuses.includes(finalStatus)) {
+        validStatuses.push(finalStatus);
+      }
+    }
+    // Check if it's an alias
+    else if (STATUS_ALIASES[normalized]) {
+      const finalStatus = STATUS_ALIASES[normalized];
+      if (!validStatuses.includes(finalStatus)) {
+        validStatuses.push(finalStatus);
+      }
+    }
+    // Invalid status
+    else {
+      invalidStatuses.push(arg);
+    }
+  });
+
+  return { validStatuses, invalidStatuses };
+}
+
+/**
+ * Capitalize first letter of a string
+ */
+function capitalizeFirst(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function handleChatCommand(msg) {
+  console.log("[AMQ+] Chat message from self:", msg);
+
+  if (!msg.startsWith("/amqplus")) {
+    // Also check for player list commands from self
+    handlePlayerListCommand(msg, selfName);
+    return;
+  }
+
+  console.log("[AMQ+] AMQ+ command detected");
+  const parts = msg.split(" ");
+
+  if (parts[1] === "toggle") {
+    console.log("[AMQ+] Toggle command received");
+    amqPlusEnabled = !amqPlusEnabled;
+    saveSettings();
+    updateToggleButton();
+    sendSystemMessage("AMQ+ mode " + (amqPlusEnabled ? "enabled" : "disabled"));
+  } else if (parts[1] === "reload" && currentQuizId) {
+    console.log("[AMQ+] Reload command received, quiz ID:", currentQuizId);
+    fetchQuiz(currentQuizId);
+  } else if (parts[1] === "sync") {
+    console.log("[AMQ+] Sync command received");
+    handleSyncCommand();
+  } else if (parts[1] === "info" || parts[1] === "metadata") {
+    console.log("[AMQ+] Info/Metadata command received");
+    handleMetadataCommand();
+  } else if (parts[1] === "sources") {
+    console.log("[AMQ+] Sources command received");
+    songSourceMessagesEnabled = !songSourceMessagesEnabled;
+    saveSettings();
+    sendSystemMessage("Song source messages " + (songSourceMessagesEnabled ? "enabled" : "disabled"));
+  } else if (parts.length > 1) {
+    const url = parts.slice(1).join(" ");
+    console.log("[AMQ+] URL command received:", url);
+    const quizId = extractQuizIdFromUrl(url);
+    if (quizId) {
+      fetchQuiz(quizId);
+    } else {
+      sendSystemMessage("Invalid AMQ+ URL");
+    }
+  }
 }
 
 function setupListeners() {
@@ -1538,8 +2390,6 @@ function setupListeners() {
     console.log("[AMQ+] Quiz display custom quiz event received:", payload);
     const quizDesc = payload.data?.quizDescription || payload.quizDescription;
     if (quizDesc) {
-      currentAMQQuizId = quizDesc.customQuizId;
-      console.log("[AMQ+] Stored AMQ quiz ID:", currentAMQQuizId);
       console.log("[AMQ+] Quiz description object:", quizDesc);
       console.log("[AMQ+] Quiz name:", quizDesc.name);
       console.log("[AMQ+] Quiz description:", quizDesc.description);
@@ -1553,13 +2403,34 @@ function setupListeners() {
           creatorUsername: quizDesc.creatorName || null
         };
         console.log("[AMQ+] Stored quiz info for AMQ+ quiz:", currentQuizInfo);
+
+        // Check if this is a training quiz - if not, disable training features
+        const isTrainingQuiz = quizDesc.description && quizDesc.description.includes("Training session");
+        if (!isTrainingQuiz) {
+          console.log("[AMQ+ Training] Non-training quiz displayed, disabling training features");
+          // Hide and remove training rating UI if it exists
+          $("#trainingRatingContainer").fadeOut(300, function () {
+            $(this).remove();
+          });
+          $("#trainingRatingSection").fadeOut(300);
+        }
       } else {
         console.log("[AMQ+] Quiz name does not start with 'AMQ+', not storing quiz info. Name:", quizDesc.name);
         currentQuizInfo = null;
+        // Disable training features for non-AMQ+ quizzes
+        $("#trainingRatingContainer").fadeOut(300, function () {
+          $(this).remove();
+        });
+        $("#trainingRatingSection").fadeOut(300);
       }
     } else {
       console.warn("[AMQ+] No quiz description found in payload");
       currentQuizInfo = null;
+      // Disable training features if no quiz description
+      $("#trainingRatingContainer").fadeOut(300, function () {
+        $(this).remove();
+      });
+      $("#trainingRatingSection").fadeOut(300);
     }
   }).bindListener();
 
@@ -1617,12 +2488,28 @@ function setupListeners() {
         currentQuizInfo = null;
       }
 
+      // Check if this is a training quiz - if not, disable training features
+      const isTrainingQuiz = quizDesc.description && quizDesc.description.includes("Training session");
+      if (!isTrainingQuiz) {
+        console.log("[AMQ+ Training] Non-training quiz selected, disabling training features");
+        // Hide and remove training rating UI if it exists
+        $("#trainingRatingContainer").fadeOut(300, function () {
+          $(this).remove();
+        });
+        $("#trainingRatingSection").fadeOut(300);
+      }
+
       if (!selectedCustomQuizName.startsWith("AMQ+")) {
         amqPlusCreditsSent = false;
       }
     } else {
       console.warn("[AMQ+] Custom quiz selected event missing quizDescription:", payload);
       currentQuizInfo = null;
+      // If no quiz description, assume non-training and disable training features
+      $("#trainingRatingContainer").fadeOut(300, function () {
+        $(this).remove();
+      });
+      $("#trainingRatingSection").fadeOut(300);
     }
   }).bindListener();
 
@@ -1664,7 +2551,15 @@ function setupListeners() {
       }, 100);
 
       amqPlusCreditsSent = false;
-      applyQuizToLobby(newQuizId, quizName);
+
+      // Check if this is a training quiz by checking description
+      // Training quizzes are handled by their own listener in startTrainingSession
+      const isTrainingQuiz = payload.quizSave?.description?.includes("Training session") ||
+        currentQuizData?.command?.data?.quizSave?.description?.includes("Training session");
+
+      if (!isTrainingQuiz) {
+        applyQuizToLobby(newQuizId, quizName);
+      }
     } else {
       console.error("[AMQ+] Save quiz command failed:", payload);
       showError("Failed to save quiz");
@@ -1682,6 +2577,16 @@ function setupListeners() {
         });
         amqPlusCreditsSent = true;
       }, 500);
+
+      // Only send play count if user is the host
+      if (typeof lobby !== 'undefined' && lobby.isHost && currentQuizInfo && currentQuizInfo.name && currentQuizInfo.description && currentQuizInfo.creatorUsername) {
+        // Count players in lobby (from payload)
+        const playerCount = payload && payload.players ? payload.players.length : 1;
+        console.log(`[AMQ+] Host detected, sending play count for ${playerCount} player(s)`);
+        sendQuizPlayByIdentifiers(currentQuizInfo, playerCount);
+      } else if (typeof lobby !== 'undefined' && !lobby.isHost) {
+        console.log("[AMQ+] Not the host, skipping play count");
+      }
     }
     // Reset song tracking (preserve songSourceMap - it's built from quiz data and needed during game)
     currentSongNumber = 0;
@@ -1777,88 +2682,20 @@ function setupListeners() {
   new Listener("game chat update", (payload) => {
     for (let message of payload.messages) {
       if (message.sender === selfName) {
-        const msg = message.message.toLowerCase();
-        console.log("[AMQ+] Chat message from self:", msg);
-
-        if (msg.startsWith("/amqplus")) {
-          console.log("[AMQ+] AMQ+ command detected");
-          const parts = msg.split(" ");
-
-          if (parts[1] === "toggle") {
-            console.log("[AMQ+] Toggle command received");
-            amqPlusEnabled = !amqPlusEnabled;
-            saveSettings();
-            updateToggleButton();
-            sendSystemMessage("AMQ+ mode " + (amqPlusEnabled ? "enabled" : "disabled"));
-          } else if (parts[1] === "reload" && currentQuizId) {
-            console.log("[AMQ+] Reload command received, quiz ID:", currentQuizId);
-            fetchQuiz(currentQuizId);
-          } else if (parts[1] === "sync") {
-            console.log("[AMQ+] Sync command received");
-            handleSyncCommand();
-          } else if (parts[1] === "info" || parts[1] === "metadata") {
-            console.log("[AMQ+] Info/Metadata command received");
-            handleMetadataCommand();
-          } else if (parts[1] === "sources") {
-            console.log("[AMQ+] Sources command received");
-            songSourceMessagesEnabled = !songSourceMessagesEnabled;
-            saveSettings();
-            sendSystemMessage("Song source messages " + (songSourceMessagesEnabled ? "enabled" : "disabled"));
-          } else if (parts.length > 1) {
-            const url = parts.slice(1).join(" ");
-            console.log("[AMQ+] URL command received:", url);
-            const quizId = extractQuizIdFromUrl(url);
-            if (quizId) {
-              fetchQuiz(quizId);
-            } else {
-              sendSystemMessage("Invalid AMQ+ URL");
-            }
-          }
-        }
+        handleChatCommand(message.message.toLowerCase());
+      } else {
+        // Handle player list commands from other players (host only)
+        handlePlayerListCommand(message.message, message.sender);
       }
     }
   }).bindListener();
 
   new Listener("Game Chat Message", (payload) => {
     if (payload.sender === selfName) {
-      const msg = payload.message.toLowerCase();
-      console.log("[AMQ+] Game Chat Message from self:", msg);
-
-      if (msg.startsWith("/amqplus")) {
-        console.log("[AMQ+] AMQ+ command detected");
-        const parts = msg.split(" ");
-
-        if (parts[1] === "toggle") {
-          console.log("[AMQ+] Toggle command received");
-          amqPlusEnabled = !amqPlusEnabled;
-          saveSettings();
-          updateToggleButton();
-          sendSystemMessage("AMQ+ mode " + (amqPlusEnabled ? "enabled" : "disabled"));
-        } else if (parts[1] === "reload" && currentQuizId) {
-          console.log("[AMQ+] Reload command received, quiz ID:", currentQuizId);
-          fetchQuiz(currentQuizId);
-        } else if (parts[1] === "sync") {
-          console.log("[AMQ+] Sync command received");
-          handleSyncCommand();
-        } else if (parts[1] === "info" || parts[1] === "metadata") {
-          console.log("[AMQ+] Info/Metadata command received");
-          handleMetadataCommand();
-        } else if (parts[1] === "sources") {
-          console.log("[AMQ+] Sources command received");
-          songSourceMessagesEnabled = !songSourceMessagesEnabled;
-          saveSettings();
-          sendSystemMessage("Song source messages " + (songSourceMessagesEnabled ? "enabled" : "disabled"));
-        } else if (parts.length > 1) {
-          const url = parts.slice(1).join(" ");
-          console.log("[AMQ+] URL command received:", url);
-          const quizId = extractQuizIdFromUrl(url);
-          if (quizId) {
-            fetchQuiz(quizId);
-          } else {
-            sendSystemMessage("Invalid AMQ+ URL");
-          }
-        }
-      }
+      handleChatCommand(payload.message.toLowerCase());
+    } else {
+      // Handle player list commands from other players (host only)
+      handlePlayerListCommand(payload.message, payload.sender);
     }
   }).bindListener();
 
@@ -1942,13 +2779,20 @@ function hijackStartButton() {
   const originalFireMainButtonEvent = lobby.fireMainButtonEvent.bind(lobby);
 
   lobby.fireMainButtonEvent = function (skipAutoReady) {
-    console.log("[AMQ+] fireMainButtonEvent called, AMQ+ enabled:", amqPlusEnabled, "skipAutoReady:", skipAutoReady);
+    console.log("[AMQ+] fireMainButtonEvent called, AMQ+ enabled:", amqPlusEnabled, "skipAutoReady:", skipAutoReady, "isTrainingMode:", isTrainingMode);
 
     const startButton = $("#lbStartButton");
     const buttonText = startButton.find("h1").text().trim();
 
     if (buttonText !== "Start") {
       console.log("[AMQ+] Button text is not 'Start' (is '" + buttonText + "'), proceeding normally");
+      originalFireMainButtonEvent(skipAutoReady);
+      return;
+    }
+
+    // Don't hijack if in training mode - let it start normally
+    if (isTrainingMode) {
+      console.log("[AMQ+] Training mode active, proceeding with normal start");
       originalFireMainButtonEvent(skipAutoReady);
       return;
     }
@@ -2025,13 +2869,7 @@ function setupQuizCreatorExportButton() {
 
 function updateExportButtonVisibility() {
   const exportButton = $("#amqPlusExportButton");
-  if (exportButton.length > 0) {
-    if (lastLoadedQuizSave !== null) {
-      exportButton.show().css("opacity", "1").css("pointer-events", "auto");
-    } else {
-      exportButton.hide().css("opacity", "0.5").css("pointer-events", "none");
-    }
-  }
+  exportButton.toggle(lastLoadedQuizSave !== null);
 }
 
 function exportQuizToAMQPlus() {
@@ -2361,8 +3199,8 @@ async function gatherPlayerLists() {
   return userEntries;
 }
 
-function sendQuizPlayByIdentifiers(quizInfo) {
-  console.log("[AMQ+] Sending play to API for quiz:", quizInfo.name);
+function sendQuizPlayByIdentifiers(quizInfo, playCount = 1) {
+  console.log(`[AMQ+] Sending ${playCount} play(s) to API for quiz:`, quizInfo.name);
   GM_xmlhttpRequest({
     method: "POST",
     url: `${API_BASE_URL}/api/quiz-configurations/stats`,
@@ -2372,11 +3210,12 @@ function sendQuizPlayByIdentifiers(quizInfo) {
     data: JSON.stringify({
       name: quizInfo.name,
       description: quizInfo.description,
-      creatorUsername: quizInfo.creatorUsername
+      creatorUsername: quizInfo.creatorUsername,
+      playCount: playCount
     }),
     onload: function (response) {
       if (response.status === 200) {
-        console.log("[AMQ+] Play recorded successfully");
+        console.log(`[AMQ+] ${playCount} play(s) recorded successfully`);
       } else {
         let errorMessage = "Failed to record play";
         let errorDetails = null;
@@ -2402,6 +3241,15 @@ function sendQuizPlayByIdentifiers(quizInfo) {
       console.error("[AMQ+] Error sending play:", error);
     }
   });
+}
+
+function getQuizStorageKey(quizInfo) {
+  return `${quizInfo.name}|${quizInfo.description || ''}|${quizInfo.creatorUsername || ''}`;
+}
+
+function getStoredLikeState(quizInfo) {
+  const storageKey = getQuizStorageKey(quizInfo);
+  return amqQuizLikesStorage && amqQuizLikesStorage[storageKey] ? amqQuizLikesStorage[storageKey].likeState : 0;
 }
 
 function createCustomLikeButton(quizInfo) {
@@ -2440,8 +3288,7 @@ function createCustomLikeButton(quizInfo) {
 
   console.log("[AMQ+] Creating custom like button for AMQ+ quiz:", quizInfo.name);
 
-  const storageKey = `${quizInfo.name}|${quizInfo.description || ''}|${quizInfo.creatorUsername || ''}`;
-  const currentLikeState = amqQuizLikesStorage && amqQuizLikesStorage[storageKey] ? amqQuizLikesStorage[storageKey].likeState : 0;
+  const currentLikeState = getStoredLikeState(quizInfo);
   const likeButton = document.createElement('div');
   likeButton.id = 'amqPlusCustomLikeButton';
   likeButton.className = 'amqPlusCustomLikeButton clickAble';
@@ -2470,7 +3317,7 @@ function createCustomLikeButton(quizInfo) {
 
     console.log("[AMQ+] Custom like button clicked");
 
-    const storedState = amqQuizLikesStorage && amqQuizLikesStorage[storageKey] ? amqQuizLikesStorage[storageKey].likeState : 0;
+    const storedState = getStoredLikeState(quizInfo);
     const newLikeState = storedState === 1 ? 0 : 1;
 
     updateCustomLikeButtonUI(likeButton, newLikeState);
@@ -2515,16 +3362,14 @@ function updateCustomLikeButtonState(quizInfo) {
   const likeButton = document.getElementById('amqPlusCustomLikeButton');
   if (!likeButton || !quizInfo) return;
 
-  const storageKey = `${quizInfo.name}|${quizInfo.description || ''}|${quizInfo.creatorUsername || ''}`;
-  const currentLikeState = amqQuizLikesStorage && amqQuizLikesStorage[storageKey] ? amqQuizLikesStorage[storageKey].likeState : 0;
-
+  const currentLikeState = getStoredLikeState(quizInfo);
   updateCustomLikeButtonUI(likeButton, currentLikeState);
 }
 
 function sendQuizLikeByIdentifiers(quizInfo, likeState) {
   console.log("[AMQ+] Sending like state to API for quiz:", quizInfo.name, "likeState:", likeState);
 
-  const storageKey = `${quizInfo.name}|${quizInfo.description || ''}|${quizInfo.creatorUsername || ''}`;
+  const storageKey = getQuizStorageKey(quizInfo);
 
   if (!amqQuizLikesStorage) {
     amqQuizLikesStorage = {};
@@ -2596,8 +3441,7 @@ function sendQuizLikeByIdentifiers(quizInfo, likeState) {
 
         const customLikeButton = document.getElementById('amqPlusCustomLikeButton');
         if (customLikeButton) {
-          const storageKey = `${quizInfo.name}|${quizInfo.description || ''}|${quizInfo.creatorUsername || ''}`;
-          const storedState = amqQuizLikesStorage && amqQuizLikesStorage[storageKey] ? amqQuizLikesStorage[storageKey].likeState : 0;
+          const storedState = getStoredLikeState(quizInfo);
           updateCustomLikeButtonUI(customLikeButton, storedState);
         }
       }
@@ -2606,8 +3450,7 @@ function sendQuizLikeByIdentifiers(quizInfo, likeState) {
       console.error("[AMQ+] Error sending like state:", error);
       const customLikeButton = document.getElementById('amqPlusCustomLikeButton');
       if (customLikeButton) {
-        const storageKey = `${quizInfo.name}|${quizInfo.description || ''}|${quizInfo.creatorUsername || ''}`;
-        const storedState = amqQuizLikesStorage && amqQuizLikesStorage[storageKey] ? amqQuizLikesStorage[storageKey].likeState : 0;
+        const storedState = getStoredLikeState(quizInfo);
         updateCustomLikeButtonUI(customLikeButton, storedState);
       }
     }
@@ -2720,6 +3563,46 @@ function handleMetadataCommand() {
   });
 }
 
+function formatMetadataWithCountOrPercentage(label, icon, data) {
+  if (!data?.enabled) return null;
+
+  // Always display the count, which is now the allocated value
+  if (data.count !== undefined) {
+    return `${icon} ${label} ${data.count}`;
+  }
+
+  // Fallback for older metadata formats or if count is missing
+  if (data.minCount !== undefined && data.maxCount !== undefined) {
+    return `${icon} ${label} ${data.minCount}-${data.maxCount}`;
+  } else {
+    const percent = data.percentage || 0;
+    if (data.random) {
+      return `${icon} ${label} ${percent}% (${data.minPercentage || 0}-${data.maxPercentage || 0})`;
+    }
+    return `${icon} ${label} ${percent}%`;
+  }
+}
+
+function formatSongTypeMetadata(label, icon, data) {
+  if (!data?.enabled) return null;
+
+  // Always display the count, which is now the allocated value
+  if (data.count !== undefined) {
+    return `${icon} ${label} ${data.count}`;
+  }
+
+  // Fallback for older metadata formats or if count is missing
+  if (data.minCount !== undefined && data.maxCount !== undefined) {
+    return `${icon} ${label} ${data.minCount}-${data.maxCount}`;
+  } else {
+    const percent = data.percentage || 0;
+    if (data.random) {
+      return `${icon} ${label} ${percent}% (${data.minPercentage || 0}-${data.maxPercentage || 0})`;
+    }
+    return `${icon} ${label} ${percent}%`;
+  }
+}
+
 function sendQuizMetadataAsMessages(quiz) {
   const messages = [];
   if (quiz.quiz_metadata) {
@@ -2735,95 +3618,56 @@ function sendQuizMetadataAsMessages(quiz) {
       }
     }
 
+    // Add guess time information
+    if (meta.guessTime) {
+      const gt = meta.guessTime.guessTime;
+      const egt = meta.guessTime.extraGuessTime;
+      let guessTimeMsg = '⏱️ Guess Time: ';
+
+      if (gt.useRange) {
+        guessTimeMsg += `${gt.min}-${gt.max}s`;
+      } else {
+        guessTimeMsg += `${gt.staticValue}s`;
+      }
+
+      // Add extra guess time if present and non-zero
+      if (egt && ((egt.useRange && (egt.min > 0 || egt.max > 0)) || (!egt.useRange && egt.staticValue > 0))) {
+        guessTimeMsg += ' + ';
+        if (egt.useRange) {
+          guessTimeMsg += `${egt.min}-${egt.max}s`;
+        } else {
+          guessTimeMsg += `${egt.staticValue}s`;
+        }
+      }
+
+      messages.push(guessTimeMsg);
+    }
+
     if (meta.songTypes) {
-      if (meta.songTypes.openings?.enabled) {
-        // Match quizzes page display: prioritize count ranges over percentage
-        if (meta.songTypes.openings.minCount !== undefined && meta.songTypes.openings.maxCount !== undefined) {
-          messages.push(`🎵 OP ${meta.songTypes.openings.minCount}-${meta.songTypes.openings.maxCount}`);
-        } else {
-          const opPercent = meta.songTypes.openings.percentage || 0;
-          if (meta.songTypes.openings.random) {
-            messages.push(`🎵 OP ${opPercent}% (${meta.songTypes.openings.minPercentage || 0}-${meta.songTypes.openings.maxPercentage || 0})`);
-          } else {
-            messages.push(`🎵 OP ${opPercent}%`);
-          }
-        }
-      }
-      if (meta.songTypes.endings?.enabled) {
-        // Match quizzes page display: prioritize count ranges over percentage
-        if (meta.songTypes.endings.minCount !== undefined && meta.songTypes.endings.maxCount !== undefined) {
-          messages.push(`🎵 ED ${meta.songTypes.endings.minCount}-${meta.songTypes.endings.maxCount}`);
-        } else {
-          const edPercent = meta.songTypes.endings.percentage || 0;
-          if (meta.songTypes.endings.random) {
-            messages.push(`🎵 ED ${edPercent}% (${meta.songTypes.endings.minPercentage || 0}-${meta.songTypes.endings.maxPercentage || 0})`);
-          } else {
-            messages.push(`🎵 ED ${edPercent}%`);
-          }
-        }
-      }
-      if (meta.songTypes.inserts?.enabled) {
-        // Match quizzes page display: prioritize count ranges over percentage
-        if (meta.songTypes.inserts.minCount !== undefined && meta.songTypes.inserts.maxCount !== undefined) {
-          messages.push(`🎵 IN ${meta.songTypes.inserts.minCount}-${meta.songTypes.inserts.maxCount}`);
-        } else {
-          const insPercent = meta.songTypes.inserts.percentage || 0;
-          if (meta.songTypes.inserts.random) {
-            messages.push(`🎵 IN ${insPercent}% (${meta.songTypes.inserts.minPercentage || 0}-${meta.songTypes.inserts.maxPercentage || 0})`);
-          } else {
-            messages.push(`🎵 IN ${insPercent}%`);
-          }
-        }
-      }
+      const songTypeFormatters = [
+        { data: meta.songTypes.openings, label: 'OP', icon: '🎵' },
+        { data: meta.songTypes.endings, label: 'ED', icon: '🎵' },
+        { data: meta.songTypes.inserts, label: 'IN', icon: '🎵' }
+      ];
+
+      songTypeFormatters.forEach(formatter => {
+        const msg = formatter();
+        if (msg) messages.push(msg);
+      });
     }
 
     if (meta.difficulty) {
       if (meta.difficulty.mode === 'basic') {
-        if (meta.difficulty.levels.easy?.enabled) {
-          // Match quizzes page display: count ranges > count > percentage
-          if (meta.difficulty.levels.easy.minCount !== undefined && meta.difficulty.levels.easy.maxCount !== undefined) {
-            messages.push(`⭐ Easy ${meta.difficulty.levels.easy.minCount}-${meta.difficulty.levels.easy.maxCount}`);
-          } else if (meta.difficulty.levels.easy.count !== undefined) {
-            messages.push(`⭐ Easy ${meta.difficulty.levels.easy.count}`);
-          } else {
-            const easyPercent = meta.difficulty.levels.easy.percentage || 0;
-            if (meta.difficulty.levels.easy.random) {
-              messages.push(`⭐ Easy ${easyPercent}% (${meta.difficulty.levels.easy.minPercentage || 0}-${meta.difficulty.levels.easy.maxPercentage || 0})`);
-            } else {
-              messages.push(`⭐ Easy ${easyPercent}%`);
-            }
-          }
-        }
-        if (meta.difficulty.levels.medium?.enabled) {
-          // Match quizzes page display: count ranges > count > percentage
-          if (meta.difficulty.levels.medium.minCount !== undefined && meta.difficulty.levels.medium.maxCount !== undefined) {
-            messages.push(`⭐ Medium ${meta.difficulty.levels.medium.minCount}-${meta.difficulty.levels.medium.maxCount}`);
-          } else if (meta.difficulty.levels.medium.count !== undefined) {
-            messages.push(`⭐ Medium ${meta.difficulty.levels.medium.count}`);
-          } else {
-            const medPercent = meta.difficulty.levels.medium.percentage || 0;
-            if (meta.difficulty.levels.medium.random) {
-              messages.push(`⭐ Medium ${medPercent}% (${meta.difficulty.levels.medium.minPercentage || 0}-${meta.difficulty.levels.medium.maxPercentage || 0})`);
-            } else {
-              messages.push(`⭐ Medium ${medPercent}%`);
-            }
-          }
-        }
-        if (meta.difficulty.levels.hard?.enabled) {
-          // Match quizzes page display: count ranges > count > percentage
-          if (meta.difficulty.levels.hard.minCount !== undefined && meta.difficulty.levels.hard.maxCount !== undefined) {
-            messages.push(`⭐ Hard ${meta.difficulty.levels.hard.minCount}-${meta.difficulty.levels.hard.maxCount}`);
-          } else if (meta.difficulty.levels.hard.count !== undefined) {
-            messages.push(`⭐ Hard ${meta.difficulty.levels.hard.count}`);
-          } else {
-            const hardPercent = meta.difficulty.levels.hard.percentage || 0;
-            if (meta.difficulty.levels.hard.random) {
-              messages.push(`⭐ Hard ${hardPercent}% (${meta.difficulty.levels.hard.minPercentage || 0}-${meta.difficulty.levels.hard.maxPercentage || 0})`);
-            } else {
-              messages.push(`⭐ Hard ${hardPercent}%`);
-            }
-          }
-        }
+        const difficultyLevels = [
+          { data: meta.difficulty.levels.easy, label: 'Easy' },
+          { data: meta.difficulty.levels.medium, label: 'Medium' },
+          { data: meta.difficulty.levels.hard, label: 'Hard' }
+        ];
+
+        difficultyLevels.forEach(({ data, label }) => {
+          const formatted = formatMetadataWithCountOrPercentage(label, '⭐', data);
+          if (formatted) messages.push(formatted);
+        });
       } else if (meta.difficulty.mode === 'advanced') {
         if (meta.difficulty.ranges && meta.difficulty.ranges.length > 0) {
           meta.difficulty.ranges.forEach(range => {
@@ -2834,62 +3678,1367 @@ function sendQuizMetadataAsMessages(quiz) {
     }
 
     if (meta.songSelection) {
-      if (meta.songSelection.random?.enabled) {
-        // Match quizzes page display: count > count ranges > percentage
-        if (meta.songSelection.random.count !== undefined) {
-          messages.push(`🎲 Random ${meta.songSelection.random.count}`);
-        } else if (meta.songSelection.random.minCount !== undefined && meta.songSelection.random.maxCount !== undefined) {
-          messages.push(`🎲 Random ${meta.songSelection.random.minCount}-${meta.songSelection.random.maxCount}`);
-        } else {
-          messages.push(`🎲 Random ${meta.songSelection.random.percentage || 0}%`);
-        }
-      }
-      if (meta.songSelection.watched?.enabled) {
-        // Match quizzes page display: count > count ranges > percentage
-        if (meta.songSelection.watched.count !== undefined) {
-          messages.push(`👁️ Watched ${meta.songSelection.watched.count}`);
-        } else if (meta.songSelection.watched.minCount !== undefined && meta.songSelection.watched.maxCount !== undefined) {
-          messages.push(`👁️ Watched ${meta.songSelection.watched.minCount}-${meta.songSelection.watched.maxCount}`);
-        } else {
-          messages.push(`👁️ Watched ${meta.songSelection.watched.percentage || 0}%`);
-        }
-      }
+      const randomMsg = formatMetadataWithCountOrPercentage('Random', '🎲', meta.songSelection.random);
+      if (randomMsg) messages.push(randomMsg);
+      const watchedMsg = formatMetadataWithCountOrPercentage('Watched', '👁️', meta.songSelection.watched);
+      if (watchedMsg) messages.push(watchedMsg);
     }
 
-    if (meta.sourceNodes && meta.sourceNodes.length > 0) {
-      const liveNodes = meta.sourceNodes.filter(source => source.type === 'liveNode');
-      liveNodes.forEach((source, idx) => {
-        let sourceMsg = `Source ${idx + 1}: Live Node`;
-        if (source.useEntirePool) {
-          sourceMsg += ' - Entire Pool';
+    // Advanced difficulty ranges
+    if (meta.difficulty && meta.difficulty.mode === 'advanced' && meta.difficulty.ranges) {
+      meta.difficulty.ranges.forEach(range => {
+        messages.push(`⭐ ${range.from}-${range.to} (${range.count})`);
+      });
+    }
+
+    if (messages.length > 0) {
+      messages.forEach((msg, index) => {
+        setTimeout(() => sendSystemMessage(msg), 100 * (index + 1));
+      });
+    } else {
+      sendSystemMessage("No quiz metadata available for this configuration.");
+    }
+  } else {
+    sendSystemMessage("No detailed quiz metadata available.");
+  }
+}
+
+// ============================================
+// TRAINING MODE FUNCTIONS
+// ============================================
+
+// Helper function to check if the current quiz is a training quiz
+function isCurrentQuizTrainingQuiz() {
+  // Check if current quiz info has training description
+  if (currentQuizInfo && currentQuizInfo.description && currentQuizInfo.description.includes("Training session")) {
+    return true;
+  }
+  // Also check selectedCustomQuizName for training quizzes
+  if (selectedCustomQuizName && selectedCustomQuizName.includes("Training")) {
+    return true;
+  }
+  return false;
+}
+
+// Chat filter for training mode - removes pause/unpause messages
+new Listener("game chat update", (payload) => {
+  // Only filter if training mode is active AND current quiz is a training quiz
+  if (!trainingState.currentSession || !trainingState.currentSession.sessionId) {
+    return;
+  }
+
+  // Disable training features if current quiz is not a training quiz
+  if (!isCurrentQuizTrainingQuiz()) {
+    return;
+  }
+
+  for (let message of payload.messages) {
+    const text = message.message || "";
+
+    // Check if this is a pause/unpause message
+    if (text.includes("has paused the game") || text.includes("has unpaused the game")) {
+      console.log("[AMQ+ Training] Filtering pause/unpause message from chat:", text);
+
+      // Remove the message from DOM after it's been added
+      setTimeout(() => {
+        let $message = gameChat.$chatMessageContainer
+          .find(".gcMessage")
+          .last();
+
+        const messageText = $message.text();
+        if (messageText.includes("has paused the game") || messageText.includes("has unpaused the game")) {
+          console.log("[AMQ+ Training] Removed pause/unpause message from chat");
+          $message.parent().remove();
         }
-        sourceMsg += ` - Players: ${source.playerCount}`;
-        messages.push(sourceMsg);
-        if (source.players && source.players.length > 0) {
-          source.players.forEach((player, pIdx) => {
-            let playerMsg = `  Player ${pIdx + 1}: ${player.username} (${player.platform}) [${player.lists.join(', ')}]`;
-            if (player.percentage) {
-              playerMsg += ` - ${player.percentage}`;
-            }
-            messages.push(playerMsg);
+      }, 0);
+    }
+  }
+}).bindListener();
+
+function attachTrainingModalHandlers() {
+  $("#trainingLinkBtn").off("click").on("click", () => {
+    const token = $("#trainingTokenField").val().trim();
+    if (!token || token.length !== 64) {
+      showTrainingStatus("Please enter a valid 64-character token", "error");
+      return;
+    }
+    trainingState.authToken = token;
+    validateTrainingToken();
+  });
+
+  $("#trainingLogoutBtn").off("click").on("click", () => {
+    unlinkTrainingAccount();
+  });
+
+  $("#trainingImportToggle").off("click").on("click", () => {
+    const content = $("#trainingImportContent");
+    const chevron = $("#trainingImportChevron");
+    if (content.is(":visible")) {
+      content.slideUp(200);
+      chevron.css("transform", "rotate(0deg)");
+    } else {
+      content.slideDown(200);
+      chevron.css("transform", "rotate(90deg)");
+    }
+  });
+
+  $("#trainingImportBtn").off("click").on("click", () => {
+    importOldTrainingData();
+  });
+
+  // Handle loading from URL
+  $("#trainingLoadFromUrlBtn").off("click").on("click", () => {
+    loadTrainingFromUrl();
+  });
+
+  // Allow pressing Enter in URL input to load
+  $("#trainingUrlInput").off("keypress").on("keypress", function (e) {
+    if (e.which === 13) {
+      loadTrainingFromUrl();
+    }
+  });
+
+  // Handle change URL button
+  $("#trainingChangeUrlBtn").off("click").on("click", () => {
+    resetUrlQuizSelection();
+  });
+
+  $("#trainingStartBtn").off("click").on("click", () => {
+    // Check if a quiz was loaded from URL
+    let selectedQuizId = trainingState.urlLoadedQuizId;
+
+    // If no URL quiz, check if a quiz card was selected
+    if (!selectedQuizId) {
+      const selectedCard = $("#trainingQuizList .training-quiz-card.selected");
+      selectedQuizId = selectedCard.data("quiz-id");
+    }
+
+    console.log("[AMQ+ Training] Start button clicked, selectedQuizId:", selectedQuizId);
+
+    if (!selectedQuizId) {
+      alert("Please select a quiz to practice or load one from URL");
+      return;
+    }
+
+    const sessionLength = parseInt($("#trainingSessionLength").val()) || 20;
+    if (sessionLength < 5 || sessionLength > 50) {
+      alert("Session length must be between 5 and 50 songs");
+      return;
+    }
+
+    const newSongPercentage = parseInt($("#trainingNewPercentage").val()) || 30;
+
+    // Validate new song percentage
+    if (newSongPercentage < 0 || newSongPercentage > 100) {
+      alert("New song percentage must be between 0 and 100");
+      return;
+    }
+
+    // Calculate due song percentage (rest of the session)
+    const dueSongPercentage = 100 - newSongPercentage;
+
+    // Save new song preference
+    trainingState.newSongPercentage = newSongPercentage;
+    saveTrainingSettings();
+
+    // Show loading state
+    const startBtn = $("#trainingStartBtn");
+    const originalHtml = startBtn.html();
+    startBtn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Starting...');
+
+    console.log("[AMQ+ Training] Starting session with quizId:", selectedQuizId, "sessionLength:", sessionLength, "newSongs:", newSongPercentage + "%", "dueSongs:", dueSongPercentage + "%");
+    startTrainingSession(selectedQuizId, sessionLength, dueSongPercentage);
+  });
+
+  $("#trainingEndBtn").off("click").on("click", () => {
+    if (confirm("Are you sure you want to end this training session?")) {
+      endTrainingSession();
+    }
+  });
+
+  $(".trainingRatingBtn").off("click").on("click", function () {
+    const rating = parseInt($(this).data("rating"));
+    submitTrainingRating(rating);
+  });
+
+  // Handle quiz card selection - use event delegation that works with dynamically added cards
+  $(document).off("click", ".training-quiz-card").on("click", ".training-quiz-card", function (e) {
+    e.stopPropagation();
+    $(".training-quiz-card").removeClass("selected");
+    $(this).addClass("selected");
+    console.log("[AMQ+ Training] Quiz selected:", $(this).data("quiz-id"));
+
+    // Reset URL selection when a quiz card is selected
+    resetUrlQuizSelection();
+  });
+}
+
+function showTrainingStatus(message, type = "info") {
+  const statusDiv = $("#trainingAuthStatus");
+  const colors = {
+    info: "#0dcaf0",
+    success: "#28a745",
+    error: "#dc3545",
+    warning: "#ffc107"
+  };
+
+  statusDiv.html(`
+    <div style="padding: 12px; background: ${colors[type]}15; border-left: 4px solid ${colors[type]}; border-radius: 4px;">
+      <strong style="color: ${colors[type]};">${message}</strong>
+    </div>
+  `);
+}
+
+function validateTrainingToken() {
+  if (!trainingState.authToken) {
+    showTrainingStatus("No token found", "error");
+    return;
+  }
+
+  showTrainingStatus("Validating token...", "info");
+
+  makeApiRequest({
+    url: `${API_BASE_URL}/api/training/token/validate`,
+    method: 'POST',
+    data: { token: trainingState.authToken },
+    errorPrefix: 'Token Validation',
+    onSuccess: (data) => {
+      trainingState.isAuthenticated = true;
+      trainingState.userId = data.userId;
+      trainingState.username = data.username;
+      trainingState.userQuizzes = data.quizzes || [];
+
+      saveTrainingSettings();
+
+      showTrainingStatus(`✓ Connected as ${data.username}`, "success");
+      $("#trainingTokenField").prop("disabled", true);
+      $("#trainingLinkBtn").hide();
+      $("#trainingLogoutBtn").show();
+
+      // Switch to quiz selection tab
+      setTimeout(() => {
+        $("#trainingAuthTab").hide();
+        $("#trainingQuizTab").show();
+        loadTrainingQuizzes();
+
+        // Restore saved new song percentage
+        $("#trainingNewPercentage").val(trainingState.newSongPercentage);
+
+        // Restore URL quiz display if saved
+        restoreUrlQuizDisplay();
+      }, 1000);
+
+      // Process any pending sync queue
+      if (trainingState.pendingSync.length > 0) {
+        processTrainingSyncQueue();
+      }
+    },
+    onError: (errorMsg) => {
+      showTrainingStatus(errorMsg, "error");
+      trainingState.isAuthenticated = false;
+      $("#trainingLogoutBtn").hide();
+    }
+  });
+}
+
+function unlinkTrainingAccount() {
+  if (confirm("Are you sure you want to unlink your training account?")) {
+    trainingState.isAuthenticated = false;
+    trainingState.authToken = null;
+    trainingState.userId = null;
+    trainingState.username = null;
+    trainingState.userQuizzes = [];
+
+    localStorage.removeItem("amqPlusTrainingToken");
+    localStorage.removeItem("amqPlusTrainingState");
+
+    $("#trainingTokenField").val("").prop("disabled", false);
+    $("#trainingLinkBtn").show();
+    $("#trainingLogoutBtn").hide();
+    $("#trainingQuizTab").hide();
+    $("#trainingSessionTab").hide();
+    $("#trainingAuthTab").show();
+
+    showTrainingStatus("Account unlinked successfully", "success");
+  }
+}
+
+function loadTrainingQuizzes() {
+  const quizListDiv = $("#trainingQuizList");
+
+  if (!trainingState.userQuizzes || trainingState.userQuizzes.length === 0) {
+    quizListDiv.html(`
+      <div style="text-align: center; padding: 40px; color: rgba(255,255,255,0.6);">
+        <i class="fa fa-inbox" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5; display: block;"></i>
+        <p>No quizzes found. Create some quizzes on AMQ+ website first!</p>
+      </div>
+    `);
+    return;
+  }
+
+  // Populate profile dropdown
+  scanOldTrainingProfiles();
+
+  let html = "";
+  trainingState.userQuizzes.forEach(quiz => {
+    const stats = quiz.stats || {};
+    const hasTrainingData = stats.totalAttempts > 0;
+    const dueColor = stats.dueToday > 10 ? "#ef4444" : stats.dueToday > 5 ? "#ffc107" : "#10b981";
+
+    // Calculate accuracy: successfulAttempts / totalAttempts * 100
+    const accuracy = hasTrainingData && stats.totalAttempts > 0
+      ? Math.round((stats.successfulAttempts / stats.totalAttempts) * 100)
+      : 0;
+
+    html += `
+      <div class="training-quiz-card" data-quiz-id="${quiz.id}" style="
+        padding: 15px;
+        margin-bottom: 10px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border: 1px solid #2d3748;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      " onmouseover="this.style.borderColor='#6366f1'; this.style.boxShadow='0 4px 8px rgba(99, 102, 241, 0.3)'"
+         onmouseout="if(!this.classList.contains('selected')) { this.style.borderColor='#2d3748'; this.style.boxShadow='0 2px 4px rgba(0,0,0,0.2)'; }">
+        <h5 style="margin: 0 0 10px 0; color: #fff; font-weight: bold;">${quiz.name}</h5>
+        ${hasTrainingData ? `
+        <div style="display: flex; gap: 20px; font-size: 13px; color: rgba(255,255,255,0.8);">
+          <div title="Accuracy = (Successful Attempts / Total Attempts) × 100">
+            <i class="fa fa-chart-line"></i> ${accuracy}% accuracy
+            <small style="display: block; font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 2px;">
+              (${stats.successfulAttempts || 0}/${stats.totalAttempts || 0})
+            </small>
+          </div>
+          <div style="color: ${dueColor}; font-weight: bold;">
+            <i class="fa fa-clock"></i> ${stats.dueToday || 0} due today
+          </div>
+        </div>
+        ` : `
+        <div style="font-size: 12px; color: rgba(255,255,255,0.5); font-style: italic;">
+          No training data yet. Start a session to begin tracking progress!
+        </div>
+        `}
+      </div>
+    `;
+  });
+
+  quizListDiv.html(html);
+
+  // Add selected style - darker selection color
+  if (!$("#trainingQuizCardStyles").length) {
+    $("<style id='trainingQuizCardStyles'>")
+      .text(".training-quiz-card.selected { border-color: #4f46e5 !important; background: linear-gradient(135deg, #4338ca 0%, #312e81 100%) !important; box-shadow: 0 4px 12px rgba(67, 56, 202, 0.6) !important; }")
+      .appendTo("head");
+  }
+}
+
+
+function resetUrlQuizSelection() {
+  console.log("[AMQ+ Training] Resetting URL quiz selection");
+  trainingState.urlLoadedQuizId = null;
+  trainingState.urlLoadedQuizName = null;
+  trainingState.urlLoadedQuizSongCount = null;
+  saveTrainingSettings(); // Save the reset state
+
+  $("#trainingUrlInputSection").show();
+  $("#trainingUrlQuizDetails").hide();
+  $("#trainingUrlInput").val("");
+  $("#trainingUrlError").hide();
+}
+
+/**
+ * Fetch training stats for a quiz and display them
+ * @param {string} quizId - Quiz ID to fetch stats for
+ * @param {string} quizName - Quiz name for display
+ */
+function fetchQuizStatsAndDisplay(quizId, quizName) {
+  if (!trainingState.authToken) {
+    // Not authenticated, just show no data message
+    $("#trainingUrlQuizStats").html(getQuizStatsHTML(quizId));
+    $("#trainingUrlInputSection").hide();
+    $("#trainingUrlQuizDetails").show();
+    $(".training-quiz-card").removeClass("selected");
+    return;
+  }
+
+  // Fetch stats from server
+  makeApiRequest({
+    url: `${API_BASE_URL}/api/training/quiz/${quizId}/stats`,
+    method: 'POST',
+    data: { token: trainingState.authToken },
+    errorPrefix: 'Fetch Quiz Stats',
+    onSuccess: (data) => {
+      console.log("[AMQ+ Training] Fetched stats for quiz:", quizId, data);
+
+      // Add quiz to user's quiz list if it has stats
+      if (data.stats && data.stats.totalAttempts > 0) {
+        const quizData = {
+          id: quizId,
+          name: quizName,
+          stats: data.stats
+        };
+
+        // Check if already exists
+        const existingIndex = trainingState.userQuizzes.findIndex(q => q.id === quizId);
+        if (existingIndex >= 0) {
+          // Update existing
+          trainingState.userQuizzes[existingIndex] = quizData;
+        } else {
+          // Add new
+          trainingState.userQuizzes.push(quizData);
+        }
+
+        console.log("[AMQ+ Training] Added quiz to user's quiz list with stats");
+      }
+
+      // Display stats
+      $("#trainingUrlQuizStats").html(getQuizStatsHTML(quizId));
+      $("#trainingUrlInputSection").hide();
+      $("#trainingUrlQuizDetails").show();
+      $(".training-quiz-card").removeClass("selected");
+    },
+    onError: (errorMsg) => {
+      console.log("[AMQ+ Training] No stats found for quiz or error:", errorMsg);
+      // Show no data message
+      $("#trainingUrlQuizStats").html(getQuizStatsHTML(quizId));
+      $("#trainingUrlInputSection").hide();
+      $("#trainingUrlQuizDetails").show();
+      $(".training-quiz-card").removeClass("selected");
+    }
+  });
+}
+
+/**
+ * Helper function to get training stats HTML for a quiz
+ * @param {string} quizId - Quiz ID to look up stats for
+ * @returns {string} HTML string with stats or no data message
+ */
+function getQuizStatsHTML(quizId) {
+  // Try to find the quiz in user's private quizzes
+  const quiz = trainingState.userQuizzes.find(q => q.id === quizId);
+
+  if (!quiz || !quiz.stats) {
+    return `
+      <div style="font-size: 12px; color: rgba(255,255,255,0.5); font-style: italic;">
+        No training data yet. Start a session to begin tracking progress!
+      </div>
+    `;
+  }
+
+  const stats = quiz.stats;
+  const hasTrainingData = stats.totalAttempts > 0;
+
+  if (!hasTrainingData) {
+    return `
+      <div style="font-size: 12px; color: rgba(255,255,255,0.5); font-style: italic;">
+        No training data yet. Start a session to begin tracking progress!
+      </div>
+    `;
+  }
+
+  const accuracy = Math.round((stats.successfulAttempts / stats.totalAttempts) * 100);
+  const dueColor = stats.dueToday > 10 ? "#ef4444" : stats.dueToday > 5 ? "#ffc107" : "#10b981";
+
+  return `
+    <div style="display: flex; gap: 20px; font-size: 13px; color: rgba(255,255,255,0.8);">
+      <div title="Accuracy = (Successful Attempts / Total Attempts) × 100">
+        <i class="fa fa-chart-line"></i> ${accuracy}% accuracy
+        <small style="display: block; font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 2px;">
+          (${stats.successfulAttempts || 0}/${stats.totalAttempts || 0})
+        </small>
+      </div>
+      <div style="color: ${dueColor}; font-weight: bold;">
+        <i class="fa fa-clock"></i> ${stats.dueToday || 0} due today
+      </div>
+    </div>
+  `;
+}
+
+function restoreUrlQuizDisplay() {
+  // Restore URL quiz display if there's a saved URL quiz
+  if (trainingState.urlLoadedQuizId && trainingState.urlLoadedQuizName) {
+    console.log("[AMQ+ Training] Restoring URL quiz display:", trainingState.urlLoadedQuizName);
+    $("#trainingUrlQuizName").text(trainingState.urlLoadedQuizName);
+
+    // Update stats display
+    $("#trainingUrlQuizStats").html(getQuizStatsHTML(trainingState.urlLoadedQuizId));
+
+    $("#trainingUrlInputSection").hide();
+    $("#trainingUrlQuizDetails").show();
+  } else {
+    $("#trainingUrlInputSection").show();
+    $("#trainingUrlQuizDetails").hide();
+  }
+}
+
+function loadTrainingFromUrl() {
+  const urlInput = $("#trainingUrlInput").val().trim();
+  const errorDiv = $("#trainingUrlError");
+
+  console.log("[AMQ+ Training] Loading from URL:", urlInput);
+
+  if (!urlInput) {
+    errorDiv.html('<i class="fa fa-exclamation-triangle"></i> Please enter a URL or quiz ID').show();
+    return;
+  }
+
+  // Parse quiz ID/token from various formats:
+  // - Full URL: https://amqplus.moe/play/abc123 (could be quiz ID or play token)
+  // - Path: /play/abc123
+  // - Just the ID/token: abc123
+  let identifier = null;
+
+  try {
+    // Try to parse as URL
+    if (urlInput.includes('/')) {
+      const match = urlInput.match(/\/play\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        identifier = match[1];
+      }
+    } else {
+      // Assume it's just the quiz ID or token
+      identifier = urlInput;
+    }
+
+    if (!identifier) {
+      throw new Error("Could not extract identifier from URL");
+    }
+
+    console.log("[AMQ+ Training] Parsed identifier:", identifier);
+
+    // Clear error and disable button
+    errorDiv.hide();
+    const loadBtn = $("#trainingLoadFromUrlBtn");
+    loadBtn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Loading...');
+
+    // Determine if this is a play token (contains hyphens) or a quiz ID
+    const isPlayToken = identifier.includes('-');
+    const apiUrl = isPlayToken
+      ? `${API_BASE_URL}/api/quiz/play/${identifier}`
+      : `${API_BASE_URL}/api/quiz/${identifier}`;
+
+    console.log("[AMQ+ Training] Fetching quiz info from:", apiUrl, isPlayToken ? "(play token)" : "(quiz ID)");
+
+    // Fetch quiz details from server using helper
+    makeApiRequest({
+      url: apiUrl,
+      method: 'GET',
+      errorPrefix: 'Training URL Load',
+      onSuccess: (quizData) => {
+        console.log("[AMQ+ Training] Quiz loaded:", quizData);
+
+        // Store quiz info in training state (use actual quiz ID from response if it's a token)
+        const quizId = quizData.id || identifier;
+        trainingState.urlLoadedQuizId = quizId;
+        trainingState.urlLoadedQuizName = quizData.name;
+        trainingState.urlLoadedQuizSongCount = quizData.songCount || 0;
+        saveTrainingSettings(); // Save URL quiz info
+
+        // Update UI to show quiz details
+        $("#trainingUrlQuizName").text(quizData.name);
+
+        // Check if quiz exists in user's private quizzes
+        const existingQuiz = trainingState.userQuizzes.find(q => q.id === quizId);
+
+        if (existingQuiz) {
+          // Quiz already in list, show stats
+          console.log("[AMQ+ Training] Quiz found in private quizzes, showing existing stats");
+          $("#trainingUrlQuizStats").html(getQuizStatsHTML(quizId));
+          $("#trainingUrlInputSection").hide();
+          $("#trainingUrlQuizDetails").show();
+          $(".training-quiz-card").removeClass("selected");
+        } else {
+          // Quiz not in list, fetch stats from server
+          console.log("[AMQ+ Training] Quiz not in list, fetching stats from server");
+          fetchQuizStatsAndDisplay(quizId, quizData.name);
+        }
+
+        console.log("[AMQ+ Training] Quiz details displayed for:", quizData.name, "(ID:", quizId + ")");
+      },
+      onError: (errorMsg) => {
+        errorDiv.html('<i class="fa fa-exclamation-triangle"></i> ' + errorMsg).show();
+      }
+    }).finally(() => {
+      loadBtn.prop("disabled", false).html('<i class="fa fa-arrow-right"></i> Load');
+    });
+
+  } catch (error) {
+    console.error("[AMQ+ Training] Error parsing URL:", error);
+    errorDiv.html('<i class="fa fa-exclamation-triangle"></i> Invalid URL format. Use format: https://amqplus.com/play/token-or-id').show();
+    const loadBtn = $("#trainingLoadFromUrlBtn");
+    loadBtn.prop("disabled", false).html('<i class="fa fa-arrow-right"></i> Load');
+    return;
+  }
+}
+
+function startTrainingSession(quizId, sessionLength, dueSongPercentage) {
+  showTrainingStatus("Starting training session...", "info");
+  isTrainingMode = true; // Set flag to prevent hijacking
+
+  GM_xmlhttpRequest({
+    method: "POST",
+    url: `${API_BASE_URL}/api/training/session/start`,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    data: JSON.stringify({
+      token: trainingState.authToken,
+      quizId: quizId,
+      sessionLength: sessionLength,
+      dueSongPercentage: dueSongPercentage
+    }),
+    onload: function (response) {
+      // Reset button states
+      const startBtn = $("#trainingStartBtn");
+      startBtn.prop("disabled", false).html('<i class="fa fa-play"></i> Start Training');
+
+      const loadBtn = $("#trainingLoadFromUrlBtn");
+      loadBtn.prop("disabled", false).html('<i class="fa fa-arrow-right"></i> Load');
+
+      if (response.status === 200) {
+        const data = JSON.parse(response.responseText);
+
+        // Use playlist metadata from server (includes proper songKey format)
+        console.log("[AMQ+ Training] Received playlist metadata:", data.playlist);
+
+        trainingState.currentSession = {
+          sessionId: data.sessionId,
+          quizId: quizId,
+          quizName: data.quizName,
+          playlist: data.playlist, // Use server's playlist metadata with proper songKey format
+          currentIndex: 0,
+          startTime: Date.now(),
+          correctCount: 0,
+          incorrectCount: 0,
+          totalRated: 0 // Only count songs that were actually rated (not skipped)
+        };
+
+        saveTrainingSettings();
+
+        // Display warnings if any
+        if (data.warnings && data.warnings.length > 0) {
+          console.log("[AMQ+ Training] Warnings from API:", data.warnings);
+          data.warnings.forEach(warning => {
+            sendSystemMessage("⚠️ Training: " + warning);
           });
         }
-        if (source.percentage) {
-          messages.push(`  Percentage: ${source.percentage}`);
+
+        // Display composition info
+        if (data.composition) {
+          const comp = data.composition;
+          let compositionMsg = `🎵 Session: ${comp.due} already played (${comp.duePercentage}%), ${comp.new} new (${comp.newPercentage}%)`;
+          if (comp.revision > 0) {
+            compositionMsg += `, ${comp.revision} revision (${comp.revisionPercentage}%)`;
+          }
+          sendSystemMessage(compositionMsg);
         }
-      });
+
+        // Use the command object directly from the API response
+        console.log("[AMQ+ Training] Command received from server");
+        console.log("[AMQ+ Training] Full command from server:", JSON.stringify(data.command, null, 2));
+        const quizName = data.command.data.quizSave.name;
+
+        // Close modal
+        $("#amqPlusTrainingModal").modal("hide");
+        sendSystemMessage(`Creating training quiz: ${data.quizName} (${data.totalSongs} songs)...`);
+
+        // Use existing createOrUpdateQuiz function with the server-provided command
+        createOrUpdateQuiz({ command: data.command });
+
+        // Set up one-time listener for quiz save completion to apply and start training quiz
+        const quizSavedListener = new Listener("save custom quiz", (payload) => {
+          if (payload.success) {
+            const savedQuizName = payload.quizSave?.name || quizName;
+            if (savedQuizName === quizName) {
+              console.log("[AMQ+ Training] Training quiz saved, applying to lobby...");
+              quizSavedListener.unbindListener();
+
+              const newQuizId = payload.quizId;
+              applyQuizToLobby(newQuizId, quizName);
+
+              // Set up listener for quiz selection to auto-start
+              const quizSelectedListener = new Listener("custom quiz selected", (selectPayload) => {
+                const selectedQuizName = selectPayload.quizName || selectPayload.data?.quizName || selectPayload.quizDescription?.name;
+                if (selectedQuizName === quizName) {
+                  console.log("[AMQ+ Training] Training quiz selected, starting game...");
+                  quizSelectedListener.unbindListener();
+
+                  setTimeout(() => {
+                    console.log("[AMQ+ Training] Starting game automatically...");
+                    if (typeof lobby.fireMainButtonEvent === 'function') {
+                      lobby.fireMainButtonEvent(false);
+                    } else if (typeof startQuiz === 'function') {
+                      startQuiz();
+                    }
+
+                    sendSystemMessage(`Training quiz started: ${quizName}`);
+                    isTrainingMode = false; // Reset flag after starting
+                  }, 500);
+                }
+              });
+              quizSelectedListener.bindListener();
+            }
+          }
+        });
+        quizSavedListener.bindListener();
+
+        console.log("[AMQ+ Training] Session started:", data);
+      } else {
+        isTrainingMode = false; // Reset flag on error
+        const errorData = JSON.parse(response.responseText);
+        showTrainingStatus(errorData.error || "Failed to start session. Please try again.", "error");
+      }
+    },
+    onerror: function () {
+      isTrainingMode = false; // Reset flag on error
+      // Reset button states on error
+      const startBtn = $("#trainingStartBtn");
+      startBtn.prop("disabled", false).html('<i class="fa fa-play"></i> Start Training');
+
+      const loadBtn = $("#trainingLoadFromUrlBtn");
+      loadBtn.prop("disabled", false).html('<i class="fa fa-arrow-right"></i> Load');
+
+      showTrainingStatus("Connection error. Please try again.", "error");
+    }
+  });
+}
+
+function endTrainingSession() {
+  if (!trainingState.currentSession.sessionId) return;
+
+  // Hide and remove rating UI if it exists
+  $("#trainingRatingContainer").fadeOut(300, function () {
+    $(this).remove();
+  });
+  $("#trainingRatingSection").fadeOut(300);
+
+  GM_xmlhttpRequest({
+    method: "POST",
+    url: `${API_BASE_URL}/api/training/session/${trainingState.currentSession.sessionId}/complete`,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    data: JSON.stringify({
+      token: trainingState.authToken
+    }),
+    onload: function (response) {
+      if (response.status === 200) {
+        const data = JSON.parse(response.responseText);
+        const summary = data.summary;
+
+        sendSystemMessage(
+          `Training session completed! ` +
+          `${summary.correctSongs}/${summary.totalSongs} correct (${summary.accuracy}%) ` +
+          `in ${summary.durationMinutes} minutes`
+        );
+
+        // Clear session
+        trainingState.currentSession = {
+          sessionId: null,
+          quizId: null,
+          quizName: null,
+          playlist: [],
+          currentIndex: 0,
+          startTime: null,
+          correctCount: 0,
+          incorrectCount: 0,
+          totalRated: 0
+        };
+
+        localStorage.removeItem("amqPlusTrainingState");
+
+        // Reset UI
+        $("#trainingSessionTab").hide();
+        $("#trainingQuizTab").show();
+      }
+    },
+    onerror: function (error) {
+      console.error("[AMQ+ Training] Error ending session:", error);
+    }
+  });
+}
+
+function reportSongProgress(songKey, annSongId, rating, success) {
+  if (!trainingState.currentSession.sessionId || !trainingState.authToken) {
+    console.warn("[AMQ+ Training] Cannot report progress: no active session");
+    return;
+  }
+
+  const syncData = {
+    sessionId: trainingState.currentSession.sessionId,
+    songKey: songKey,
+    annSongId: annSongId, // Include annSongId for database storage
+    rating: rating,
+    success: success,
+    timestamp: new Date().toISOString()
+  };
+
+  console.log("[AMQ+ Training] Reporting progress to server:", {
+    songKey: songKey,
+    annSongId: annSongId,
+    rating: rating,
+    success: success,
+    sessionId: trainingState.currentSession.sessionId
+  });
+
+  // Send immediately instead of debouncing
+  sendProgressToServer(syncData);
+}
+
+function sendProgressToServer(syncData) {
+  console.log("[AMQ+ Training] Sending progress request to server:", syncData);
+
+  GM_xmlhttpRequest({
+    method: "POST",
+    url: `${API_BASE_URL}/api/training/session/${syncData.sessionId}/progress`,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    data: JSON.stringify({
+      token: trainingState.authToken,
+      songKey: syncData.songKey,
+      annSongId: syncData.annSongId, // Include annSongId
+      rating: syncData.rating,
+      success: syncData.success
+    }),
+    onload: function (response) {
+      console.log("[AMQ+ Training] Progress request response:", response.status, response.responseText);
+      if (response.status === 200) {
+        try {
+          const responseData = JSON.parse(response.responseText);
+          if (responseData.success === false) {
+            const errorMsg = responseData.error || "Unknown error";
+            console.error("[AMQ+ Training] ✗ Server returned error:", errorMsg);
+            sendSystemMessage(`⚠️ Training error: ${errorMsg}`);
+            // Add to queue for retry
+            trainingState.pendingSync.push(syncData);
+            saveTrainingSettings();
+            processTrainingSyncQueue();
+          } else {
+            console.log("[AMQ+ Training] ✓ Progress successfully sent to server");
+          }
+        } catch (e) {
+          console.log("[AMQ+ Training] ✓ Progress successfully sent to server");
+        }
+      } else {
+        let errorMsg = "Unknown error";
+        try {
+          const errorData = JSON.parse(response.responseText);
+          errorMsg = errorData.error || errorMsg;
+        } catch (e) {
+          errorMsg = `HTTP ${response.status}`;
+        }
+        console.error("[AMQ+ Training] ✗ Progress request failed:", response.status, errorMsg);
+        sendSystemMessage(`⚠️ Training error: ${errorMsg}`);
+        // Add to queue for retry
+        trainingState.pendingSync.push(syncData);
+        saveTrainingSettings();
+        processTrainingSyncQueue();
+      }
+    },
+    onerror: function (error) {
+      console.error("[AMQ+ Training] ✗ Progress request error:", error);
+      // Add to queue for retry
+      trainingState.pendingSync.push(syncData);
+      saveTrainingSettings();
+      processTrainingSyncQueue();
+    }
+  });
+}
+
+function processTrainingSyncQueue() {
+  if (trainingState.syncInProgress || trainingState.pendingSync.length === 0) {
+    return;
+  }
+
+  trainingState.syncInProgress = true;
+  const syncItem = trainingState.pendingSync[0];
+
+  GM_xmlhttpRequest({
+    method: "POST",
+    url: `${API_BASE_URL}/api/training/session/${syncItem.sessionId}/progress`,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    data: JSON.stringify({
+      token: trainingState.authToken,
+      songKey: syncItem.songKey,
+      rating: syncItem.rating,
+      success: syncItem.success
+    }),
+    onload: function (response) {
+      if (response.status === 200) {
+        // Remove from queue
+        trainingState.pendingSync.shift();
+        saveTrainingSettings();
+
+        // Show sync success briefly
+        $("#trainingSyncStatus").fadeIn(300).delay(2000).fadeOut(300);
+
+        // Process next item
+        trainingState.syncInProgress = false;
+        if (trainingState.pendingSync.length > 0) {
+          processTrainingSyncQueue();
+        }
+      } else {
+        console.error("[AMQ+ Training] Sync failed:", response.status);
+        trainingState.syncInProgress = false;
+      }
+    },
+    onerror: function (error) {
+      console.error("[AMQ+ Training] Sync error:", error);
+      trainingState.syncInProgress = false;
+
+      // Retry later
+      setTimeout(() => {
+        if (trainingState.pendingSync.length > 0) {
+          processTrainingSyncQueue();
+        }
+      }, 5000);
+    }
+  });
+}
+
+function updateTrainingAccuracy() {
+  if (!trainingState.currentSession || !trainingState.currentSession.sessionId) return;
+
+  const correctCount = trainingState.currentSession.correctCount || 0;
+  const totalRated = trainingState.currentSession.totalRated || 0; // Only count rated songs, not skipped
+
+  let accuracyText;
+  if (totalRated === 0) {
+    accuracyText = "0% accuracy (0/0)";
+  } else {
+    const accuracy = Math.round((correctCount / totalRated) * 100);
+    accuracyText = `${accuracy}% accuracy (${correctCount}/${totalRated})`;
+  }
+
+  $("#trainingSessionProgress").text(accuracyText);
+}
+
+function submitTrainingRating(rating) {
+  if (!trainingState.currentSession.sessionId) return;
+
+  const currentSong = trainingState.currentSession.playlist[trainingState.currentSession.currentIndex];
+  if (!currentSong) {
+    console.warn("[AMQ+ Training] No current song found");
+    return;
+  }
+
+  const songKey = currentSong.songKey; // Proper Artist_SongName format from server
+  const annSongId = currentSong.annSongId; // AMQ song ID
+  const success = rating >= 3; // Good or Easy counts as success
+
+  // Try to get song name from AMQ quiz data if available by matching annSongId
+  let songName = "Unknown";
+  if (typeof quiz !== 'undefined' && quiz.songList) {
+    try {
+      const matchingSong = quiz.songList.find(s => String(s.annSongId) === String(songKey) || String(s.annId) === String(songKey));
+      if (matchingSong) {
+        songName = matchingSong.songName || "Unknown";
+      }
+    } catch (e) {
+      console.warn("[AMQ+ Training] Error finding song name:", e);
     }
   }
 
-  messages.forEach((msg, idx) => {
+  console.log("[AMQ+ Training] Submitting rating:", {
+    rating: rating,
+    songKey: songKey,
+    songName: songName,
+    success: success
+  });
+
+  // Update counters
+  trainingState.currentSession.totalRated++; // Increment total rated count
+  if (success) {
+    trainingState.currentSession.correctCount++;
+  } else {
+    trainingState.currentSession.incorrectCount++;
+  }
+
+  // Report to server immediately
+  reportSongProgress(songKey, annSongId, rating, success);
+
+  // Update UI
+  $("#trainingSessionCorrect").text(trainingState.currentSession.correctCount);
+  $("#trainingSessionIncorrect").text(trainingState.currentSession.incorrectCount);
+
+  // Move to next song
+  trainingState.currentSession.currentIndex++;
+
+  // Update accuracy display
+  updateTrainingAccuracy();
+
+  // Hide rating section (both modal and video container versions)
+  $("#trainingRatingSection").fadeOut(300);
+  $("#trainingRatingContainer").fadeOut(300);
+
+  // Unpause the quiz to continue
+  socket.sendCommand({
+    type: "quiz",
+    command: "quiz unpause"
+  });
+  console.log("[AMQ+ Training] Quiz unpaused, continuing session");
+
+  // Check if session is complete
+  if (trainingState.currentSession.currentIndex >= trainingState.currentSession.playlist.length) {
     setTimeout(() => {
-      socket.sendCommand({
-        type: "lobby",
-        command: "game chat message",
-        data: { msg: msg, teamMessage: false }
-      });
-    }, idx * 100);
+      endTrainingSession();
+    }, 1000);
+  }
+}
+
+function skipTrainingRating() {
+  if (!trainingState.currentSession.sessionId) return;
+
+  const currentSong = trainingState.currentSession.playlist[trainingState.currentSession.currentIndex];
+  const songKey = currentSong.songKey;
+
+  // Try to get song name from AMQ quiz data if available by matching annSongId
+  let songName = "Unknown";
+  if (typeof quiz !== 'undefined' && quiz.songList) {
+    try {
+      const matchingSong = quiz.songList.find(s => String(s.annSongId) === String(songKey) || String(s.annId) === String(songKey));
+      if (matchingSong) {
+        songName = matchingSong.songName || "Unknown";
+      }
+    } catch (e) {
+      console.warn("[AMQ+ Training] Error finding song name:", e);
+    }
+  }
+
+  console.log("[AMQ+ Training] Skipping rating for song:", songName || "unknown");
+  console.log("[AMQ+ Training] No progress will be sent to server for this song");
+
+  // Move to next song without reporting
+  // Note: totalRated is NOT incremented for skipped songs
+  trainingState.currentSession.currentIndex++;
+
+  // Update accuracy display (skipped songs don't affect accuracy)
+  updateTrainingAccuracy();
+
+  // Hide rating section (both modal and video container versions)
+  $("#trainingRatingSection").fadeOut(300);
+  $("#trainingRatingContainer").fadeOut(300);
+
+  // Unpause the quiz to continue
+  socket.sendCommand({
+    type: "quiz",
+    command: "quiz unpause"
+  });
+  console.log("[AMQ+ Training] Quiz unpaused, continuing session (skipped)");
+
+  // Check if session is complete
+  if (trainingState.currentSession.currentIndex >= trainingState.currentSession.playlist.length) {
+    setTimeout(() => {
+      endTrainingSession();
+    }, 1000);
+  }
+}
+
+// Setup answer result listener for training mode
+let trainingAnswerListener = new Listener("answer results", (result) => {
+  if (!trainingState.currentSession || !trainingState.currentSession.sessionId) {
+    console.log("[AMQ+ Training] No active training session, skipping rating UI");
+    return;
+  }
+
+  // Disable training features if current quiz is not a training quiz
+  if (!isCurrentQuizTrainingQuiz()) {
+    console.log("[AMQ+ Training] Current quiz is not a training quiz, skipping rating UI");
+    return;
+  }
+
+  console.log("[AMQ+ Training] Answer results received, showing rating UI");
+
+  // Ensure rating section exists in the video container
+  let ratingContainer = $("#trainingRatingContainer");
+  if (ratingContainer.length === 0) {
+    // Inject rating buttons into video container
+    const videoContainer = $("#qpVideoContainerInner");
+    if (videoContainer.length === 0) {
+      console.error("[AMQ+ Training] Video container not found");
+      return;
+    }
+
+    const ratingHTML = `
+      <div id="trainingRatingContainer" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; display: none; pointer-events: auto;">
+        <div style="display: flex; gap: 8px; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.7); padding: 12px 16px; border-radius: 8px; backdrop-filter: blur(4px);">
+          <button class="trainingRatingBtn btn" data-rating="1" style="min-width: 60px; padding: 8px 12px; background: #dc3545; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+            <i class="fa fa-times" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
+            Again
+          </button>
+          <button class="trainingRatingBtn btn" data-rating="2" style="min-width: 60px; padding: 8px 12px; background: #ffc107; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+            <i class="fa fa-exclamation-triangle" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
+            Hard
+          </button>
+          <button class="trainingRatingBtn btn" data-rating="3" style="min-width: 60px; padding: 8px 12px; background: #10b981; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+            <i class="fa fa-check" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
+            Good
+          </button>
+          <button class="trainingRatingBtn btn" data-rating="4" style="min-width: 60px; padding: 8px 12px; background: #6366f1; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+            <i class="fa fa-star" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
+            Easy
+          </button>
+          <button class="trainingSkipBtn btn" data-skip="true" style="min-width: 50px; padding: 8px 12px; background: #6c757d; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s; margin-left: 4px;">
+            <i class="fa fa-forward" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
+            Skip
+          </button>
+        </div>
+      </div>
+    `;
+    videoContainer.append(ratingHTML);
+    ratingContainer = $("#trainingRatingContainer");
+
+    // Re-attach click handlers for dynamically created buttons
+    $(".trainingRatingBtn").off("click").on("click", function () {
+      const rating = parseInt($(this).data("rating"));
+      submitTrainingRating(rating);
+    });
+
+    // Skip button handler - requires double-click to prevent accidental skips
+    $(".trainingSkipBtn").off("dblclick").on("dblclick", function () {
+      skipTrainingRating();
+    });
+
+    // Add hover effects
+    $(".trainingRatingBtn, .trainingSkipBtn").hover(
+      function () { $(this).css("opacity", "0.8"); },
+      function () { $(this).css("opacity", "1"); }
+    );
+  }
+
+  // Pause the quiz so user can rate their performance
+  socket.sendCommand({
+    type: "quiz",
+    command: "quiz pause"
+  });
+  console.log("[AMQ+ Training] Quiz paused for rating");
+
+  // Show rating buttons
+  ratingContainer.fadeIn(300);
+});
+
+trainingAnswerListener.bindListener();
+
+// ============================================
+// IMPORT OLD TRAINING DATA
+// ============================================
+
+function scanOldTrainingProfiles() {
+  let foundProfiles = [];
+
+  // Check if cslProfiles exists to get the list of profiles
+  try {
+    const profilesData = localStorage.getItem('cslProfiles');
+    if (profilesData) {
+      const profiles = JSON.parse(profilesData);
+      if (Array.isArray(profiles) && profiles.length > 0) {
+        foundProfiles = profiles;
+      }
+    }
+  } catch (e) {
+    console.warn('[AMQ+ Training] Error parsing cslProfiles:', e);
+  }
+
+  // If no profiles found, check for default
+  if (foundProfiles.length === 0) {
+    const defaultData = localStorage.getItem('spacedRepetitionData_default');
+    if (defaultData) {
+      foundProfiles = ['default'];
+    }
+  }
+
+  // Populate dropdown with song counts (one profile at a time)
+  const profileSelect = $("#trainingImportProfileSelect");
+  if (foundProfiles.length === 0) {
+    profileSelect.html('<option value="">No training data found</option>');
+  } else {
+    let html = '<option value="">Select profile to import...</option>';
+    foundProfiles.forEach(profile => {
+      try {
+        const data = localStorage.getItem(`spacedRepetitionData_${profile}`);
+        if (data) {
+          const parsed = JSON.parse(data);
+          const songCount = Object.keys(parsed).length;
+          html += `<option value="${profile}">${profile} (${songCount} songs)</option>`;
+        }
+      } catch (e) {
+        console.warn(`Error reading profile ${profile}:`, e);
+      }
+    });
+    profileSelect.html(html);
+  }
+}
+
+function getOldTrainingData(specificProfile = null) {
+  const oldData = {};
+  let foundProfiles = [];
+
+  // First, check if cslProfiles exists to get the list of profiles
+  try {
+    const profilesData = localStorage.getItem('cslProfiles');
+    if (profilesData) {
+      const profiles = JSON.parse(profilesData);
+      if (Array.isArray(profiles) && profiles.length > 0) {
+        foundProfiles = profiles;
+        console.log(`[AMQ+ Training] Found profiles: ${profiles.join(', ')}`);
+      }
+    }
+  } catch (e) {
+    console.warn('[AMQ+ Training] Error parsing cslProfiles:', e);
+  }
+
+  // Use only the specific profile requested
+  if (specificProfile) {
+    foundProfiles = [specificProfile];
+  } else {
+    // If no profiles found, try common default names
+    if (foundProfiles.length === 0) {
+      foundProfiles = ['default'];
+    }
+  }
+
+  // Try to load data from each profile
+  for (const profile of foundProfiles) {
+    const key = `spacedRepetitionData_${profile}`;
+    try {
+      const stored = localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Validate it has the expected structure
+        if (typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+          const firstKey = Object.keys(parsed)[0];
+          const firstValue = parsed[firstKey];
+          // Check for amqTrainingMode.js properties
+          if (firstValue && typeof firstValue === 'object' &&
+            ('efactor' in firstValue || 'successCount' in firstValue || 'lastFiveTries' in firstValue)) {
+            console.log(`[AMQ+ Training] Found training data in profile: ${profile} (${Object.keys(parsed).length} songs)`);
+
+            // Convert the data to the format expected by the import API
+            // The old format uses songKey as "${artist}_${songName}"
+            // We need to keep this format and add any missing fields
+            for (const [songKey, songData] of Object.entries(parsed)) {
+              oldData[songKey] = {
+                efactor: songData.efactor || 2.5,
+                successCount: songData.successCount || 0,
+                failureCount: songData.failureCount || 0,
+                successStreak: songData.successStreak || 0,
+                failureStreak: songData.failureStreak || 0,
+                date: songData.date || Date.now(),
+                lastReviewDate: songData.lastReviewDate || songData.date || Date.now(),
+                lastFiveTries: songData.lastFiveTries || [],
+                // Note: interval is calculated from weight/efactor in old script
+                // We approximate it from the data we have
+                interval: songData.weight ? Math.max(1, Math.round(songData.weight / 100)) : 1
+              };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[AMQ+ Training] Error parsing localStorage key ${key}:`, e);
+    }
+  }
+
+  return oldData;
+}
+
+function showImportStatus(message, type = "info") {
+  const statusDiv = $("#trainingImportStatus");
+  const colors = {
+    info: "#0dcaf0",
+    success: "#28a745",
+    error: "#dc3545",
+    warning: "#ffc107"
+  };
+
+  statusDiv.html(`
+    <div style="padding: 10px; background: ${colors[type]}15; border-left: 4px solid ${colors[type]}; border-radius: 4px;">
+      <strong style="color: ${colors[type]};">${message}</strong>
+    </div>
+  `).show();
+}
+
+function importOldTrainingData() {
+  const selectedProfile = $("#trainingImportProfileSelect").val();
+
+  if (!selectedProfile) {
+    showImportStatus("Please select a profile to import", "error");
+    return;
+  }
+
+  if (!trainingState.authToken) {
+    showImportStatus("Please link your account first", "error");
+    return;
+  }
+
+  // Get old training data from localStorage
+  const oldData = getOldTrainingData(selectedProfile);
+
+  if (!oldData || Object.keys(oldData).length === 0) {
+    showImportStatus("No training data found for this profile", "warning");
+    return;
+  }
+
+  const songCount = Object.keys(oldData).length;
+  if (!confirm(`Import ${songCount} songs from profile "${selectedProfile}"?\n\nThis will create a new quiz with the imported training data.`)) {
+    return;
+  }
+
+  showImportStatus(`Creating quiz and importing ${songCount} songs...`, "info");
+
+  // Disable button during import
+  $("#trainingImportBtn").prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Importing...');
+
+  // First, create the quiz with the profile name
+  const quizName = `Imported: ${selectedProfile}`;
+
+  GM_xmlhttpRequest({
+    method: "POST",
+    url: `${API_BASE_URL}/api/training/import-with-quiz`,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    data: JSON.stringify({
+      token: trainingState.authToken,
+      localStorageData: oldData,
+      quizName: quizName
+    }),
+    onload: function (response) {
+      // Re-enable button
+      $("#trainingImportBtn").prop("disabled", false).html('<i class="fa fa-upload"></i> Import');
+
+      if (response.status === 200) {
+        const data = JSON.parse(response.responseText);
+        showImportStatus(`✓ Created quiz "${data.quizName}" with ${data.imported} songs!`, "success");
+
+        // Reload quizzes to show the new quiz
+        setTimeout(() => {
+          validateTrainingToken(); // This will refresh the quiz list
+          // Collapse the import section
+          $("#trainingImportContent").slideUp(200);
+          $("#trainingImportChevron").css("transform", "rotate(0deg)");
+        }, 2000);
+      } else {
+        try {
+          const errorData = JSON.parse(response.responseText);
+          showImportStatus(`Import failed: ${errorData.error || 'Unknown error'}`, "error");
+        } catch (e) {
+          showImportStatus(`Import failed: HTTP ${response.status}`, "error");
+        }
+      }
+    },
+    onerror: function () {
+      $("#trainingImportBtn").prop("disabled", false).html('<i class="fa fa-upload"></i> Import');
+      showImportStatus("Connection error. Please try again.", "error");
+    }
   });
 }
+
+console.log("[AMQ+ Training] Training mode initialized");
 
 
