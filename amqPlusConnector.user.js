@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.6
+// @version      1.0.9
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -284,6 +284,7 @@ function setup() {
   setupQuizSavedModalObserver();
   setupQuizCreatorExportButton();
   setupSocketCommandInterceptor();
+  setupGameChatFilter();
   console.log("[AMQ+] Setup complete! Enabled:", amqPlusEnabled);
 }
 
@@ -306,6 +307,53 @@ function setupSocketCommandInterceptor() {
     socket._amqPlusCommandHijacked = true;
     console.log("[AMQ+] Socket command interceptor set up for AMQ+ quizzes");
   }
+}
+
+function setupGameChatFilter() {
+  // Wait for gameChat to be available
+  const checkGameChat = setInterval(() => {
+    if (typeof gameChat !== 'undefined' && gameChat && gameChat.systemMessage) {
+      clearInterval(checkGameChat);
+
+      // Only override once
+      if (gameChat._amqPlusSystemMessageHijacked) {
+        return;
+      }
+
+      const originalSystemMessage = gameChat.systemMessage.bind(gameChat);
+
+      gameChat.systemMessage = function (message) {
+        console.log("[AMQ+ Training] System message received:", message);
+
+        // Check if training mode is active
+        const isTrainingActive = trainingState.currentSession &&
+          trainingState.currentSession.sessionId &&
+          isCurrentQuizTrainingQuiz();
+
+        console.log("[AMQ+ Training] Training active:", isTrainingActive);
+
+        // Filter pause/unpause messages during training mode
+        if (isTrainingActive) {
+          const messageStr = String(message);
+          if (messageStr.includes("has paused the game") || messageStr.includes("has unpaused the game")) {
+            console.log("[AMQ+ Training] 🚫 Blocked pause/unpause system message:", messageStr);
+            return; // Don't call the original function
+          }
+        }
+
+        // Call original for all other messages
+        return originalSystemMessage.call(this, message);
+      };
+
+      gameChat._amqPlusSystemMessageHijacked = true;
+      console.log("[AMQ+] Game chat system message filter set up");
+    }
+  }, 500);
+
+  // Stop checking after 30 seconds
+  setTimeout(() => {
+    clearInterval(checkGameChat);
+  }, 30000);
 }
 
 function setupQuizSavedModalObserver() {
@@ -420,7 +468,7 @@ function createTrainingModalHTML() {
                       <i class="fa fa-link"></i> Play from URL
                     </label>
                     <div style="display: flex; gap: 8px;">
-                      <input type="text" id="trainingUrlInput" class="form-control" placeholder="https://amqplus.moe/play/...)"
+                      <input type="text" id="trainingUrlInput" class="form-control" placeholder="https://amqplus.moe/play/..."
                              style="flex: 1; background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 8px 12px; font-size: 12px;">
                       <button id="trainingLoadFromUrlBtn" class="btn btn-primary" style="background-color: #6366f1; border-color: #6366f1; padding: 8px 16px; white-space: nowrap;">
                         <i class="fa fa-arrow-right"></i> Load
@@ -476,17 +524,55 @@ function createTrainingModalHTML() {
                   <label style="display: block; margin-bottom: 12px; color: #fff; font-size: 14px; font-weight: bold;">Session Settings:</label>
 
                   <div style="display: flex; align-items: flex-end; gap: 20px;">
-                    <div style="flex: 1; display: flex; gap: 15px;">
-                      <div style="min-width: 150px;">
-                        <label style="display: block; margin-bottom: 5px; color: rgba(255,255,255,0.9); font-size: 13px; white-space: nowrap;">Max Songs:</label>
-                        <input type="number" id="trainingSessionLength" class="form-control" value="20" min="5" max="50"
-                               style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 6px 10px; width: 100px;">
+                    <div style="flex: 1;">
+                      <!-- Basic Settings -->
+                      <div style="display: flex; gap: 15px; align-items: flex-end;">
+                        <div style="min-width: 150px;">
+                          <label style="display: block; margin-bottom: 5px; color: rgba(255,255,255,0.9); font-size: 13px; white-space: nowrap;">Max Songs:</label>
+                          <input type="number" id="trainingSessionLength" class="form-control" value="20" min="5" max="100"
+                                 style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 6px 10px; width: 100px;">
+                        </div>
+
+                        <button id="trainingAdvancedToggle" type="button" style="background-color: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px; height: 34px;">
+                          <i class="fa fa-cog"></i> Advanced
+                        </button>
                       </div>
 
-                      <div style="min-width: 150px;">
-                        <label style="display: block; margin-bottom: 5px; color: rgba(255,255,255,0.9); font-size: 13px; white-space: nowrap;">New Songs (%):</label>
-                        <input type="number" id="trainingNewPercentage" class="form-control" value="30" min="0" max="100"
-                               style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 6px 10px; width: 100px;">
+                      <!-- Advanced Settings (Hidden by default) -->
+                      <div id="trainingAdvancedSettings" style="display: none; margin-top: 15px; padding: 12px; background-color: rgba(0,0,0,0.2); border-radius: 4px; border: 1px solid #2d3748;">
+                        <div style="margin-bottom: 10px; color: rgba(255,255,255,0.7); font-size: 12px;">
+                          <i class="fa fa-info-circle"></i> Manual song distribution (leave blank for auto)
+                        </div>
+                        
+                        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                          <div style="flex: 1; min-width: 140px;">
+                            <label style="display: block; margin-bottom: 4px; color: rgba(255,255,255,0.9); font-size: 12px;">
+                              <i class="fa fa-clock" style="color: #f59e0b;"></i> Due Songs:
+                            </label>
+                            <input type="number" id="trainingDueCount" class="form-control" placeholder="Auto" min="0" max="100"
+                                   style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; width: 100%; font-size: 13px;">
+                          </div>
+
+                          <div style="flex: 1; min-width: 140px;">
+                            <label style="display: block; margin-bottom: 4px; color: rgba(255,255,255,0.9); font-size: 12px;">
+                              <i class="fa fa-star" style="color: #a78bfa;"></i> New Songs:
+                            </label>
+                            <input type="number" id="trainingNewCount" class="form-control" placeholder="Auto" min="0" max="100"
+                                   style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; width: 100%; font-size: 13px;">
+                          </div>
+
+                          <div style="flex: 1; min-width: 140px;">
+                            <label style="display: block; margin-bottom: 4px; color: rgba(255,255,255,0.9); font-size: 12px;">
+                              <i class="fa fa-refresh" style="color: #60a5fa;"></i> Revision Songs:
+                            </label>
+                            <input type="number" id="trainingRevisionCount" class="form-control" placeholder="Auto" min="0" max="100"
+                                   style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; width: 100%; font-size: 13px;">
+                          </div>
+                        </div>
+
+                        <div style="margin-top: 10px; font-size: 11px; color: rgba(255,255,255,0.6);">
+                          <i class="fa fa-lightbulb"></i> Tip: Set specific counts or leave blank for automatic FSRS-based distribution
+                        </div>
                       </div>
                     </div>
 
@@ -705,6 +791,13 @@ function createUI() {
   $("#amqPlusTrainingToggle").click(() => {
     console.log("[AMQ+ Training] Training button clicked, opening modal");
     $("#amqPlusTrainingModal").modal("show");
+
+    // Refresh stats for all quizzes when opening the modal
+    if (trainingState.isAuthenticated && trainingState.authToken) {
+      console.log("[AMQ+ Training] Refreshing stats for all quizzes...");
+      refreshAllQuizStats();
+    }
+
     // Show/hide logout button based on auth state
     if (trainingState.isAuthenticated) {
       $("#trainingLogoutBtn").show();
@@ -3852,40 +3945,8 @@ function isCurrentQuizTrainingQuiz() {
   return false;
 }
 
-// Chat filter for training mode - removes pause/unpause messages
-new Listener("game chat update", (payload) => {
-  // Only filter if training mode is active AND current quiz is a training quiz
-  if (!trainingState.currentSession || !trainingState.currentSession.sessionId) {
-    return;
-  }
-
-  // Disable training features if current quiz is not a training quiz
-  if (!isCurrentQuizTrainingQuiz()) {
-    return;
-  }
-
-  for (let message of payload.messages) {
-    const text = message.message || "";
-
-    // Check if this is a pause/unpause message
-    if (text.includes("has paused the game") || text.includes("has unpaused the game")) {
-      console.log("[AMQ+ Training] Filtering pause/unpause message from chat:", text);
-
-      // Remove the message from DOM after it's been added
-      setTimeout(() => {
-        let $message = gameChat.$chatMessageContainer
-          .find(".gcMessage")
-          .last();
-
-        const messageText = $message.text();
-        if (messageText.includes("has paused the game") || messageText.includes("has unpaused the game")) {
-          console.log("[AMQ+ Training] Removed pause/unpause message from chat");
-          $message.parent().remove();
-        }
-      }, 0);
-    }
-  }
-}).bindListener();
+// Note: Pause/unpause system messages are now filtered at the source via setupGameChatFilter()
+// which overrides gameChat.systemMessage() to block these messages during training mode
 
 function attachTrainingModalHandlers() {
   $("#trainingLinkBtn").off("click").on("click", () => {
@@ -3935,6 +3996,20 @@ function attachTrainingModalHandlers() {
     resetUrlQuizSelection();
   });
 
+  // Toggle advanced settings
+  $("#trainingAdvancedToggle").off("click").on("click", () => {
+    const advancedSettings = $("#trainingAdvancedSettings");
+    const isVisible = advancedSettings.is(":visible");
+
+    if (isVisible) {
+      advancedSettings.slideUp(200);
+      $("#trainingAdvancedToggle").html('<i class="fa fa-cog"></i> Advanced');
+    } else {
+      advancedSettings.slideDown(200);
+      $("#trainingAdvancedToggle").html('<i class="fa fa-cog"></i> Hide Advanced');
+    }
+  });
+
   $("#trainingStartBtn").off("click").on("click", () => {
     // Check if a quiz was loaded from URL
     let selectedQuizId = trainingState.urlLoadedQuizId;
@@ -3952,25 +4027,46 @@ function attachTrainingModalHandlers() {
       return;
     }
 
+    // Read basic settings
     const sessionLength = parseInt($("#trainingSessionLength").val()) || 20;
-    if (sessionLength < 5 || sessionLength > 50) {
-      alert("Session length must be between 5 and 50 songs");
+
+    // Validate session length
+    if (sessionLength < 5 || sessionLength > 100) {
+      alert("Session length must be between 5 and 100 songs");
       return;
     }
 
-    const newSongPercentage = parseInt($("#trainingNewPercentage").val()) || 30;
+    // Check if advanced mode is enabled
+    const advancedSettings = $("#trainingAdvancedSettings");
+    const isAdvancedMode = advancedSettings.is(":visible");
 
-    // Validate new song percentage
-    if (newSongPercentage < 0 || newSongPercentage > 100) {
-      alert("New song percentage must be between 0 and 100");
-      return;
+    let settingsConfig;
+
+    if (isAdvancedMode) {
+      // Read manual settings
+      const dueCount = $("#trainingDueCount").val();
+      const newCount = $("#trainingNewCount").val();
+      const revisionCount = $("#trainingRevisionCount").val();
+
+      // Build config with manual values (null means auto)
+      settingsConfig = {
+        mode: 'manual',
+        dueCount: dueCount ? parseInt(dueCount) : null,
+        newCount: newCount ? parseInt(newCount) : null,
+        revisionCount: revisionCount ? parseInt(revisionCount) : null
+      };
+
+      console.log("[AMQ+ Training] Starting with manual settings:", settingsConfig);
+    } else {
+      // Use automatic FSRS-based distribution (70% due, 30% new)
+      settingsConfig = {
+        mode: 'auto',
+        dueSongPercentage: 70
+      };
+
+      console.log("[AMQ+ Training] Starting with auto settings (70% due, 30% new)");
     }
 
-    // Calculate due song percentage (rest of the session)
-    const dueSongPercentage = 100 - newSongPercentage;
-
-    // Save new song preference
-    trainingState.newSongPercentage = newSongPercentage;
     saveTrainingSettings();
 
     // Show loading state
@@ -3978,8 +4074,8 @@ function attachTrainingModalHandlers() {
     const originalHtml = startBtn.html();
     startBtn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Starting...');
 
-    console.log("[AMQ+ Training] Starting session with quizId:", selectedQuizId, "sessionLength:", sessionLength, "newSongs:", newSongPercentage + "%", "dueSongs:", dueSongPercentage + "%");
-    startTrainingSession(selectedQuizId, sessionLength, dueSongPercentage);
+    console.log("[AMQ+ Training] Starting session with quizId:", selectedQuizId, "sessionLength:", sessionLength);
+    startTrainingSession(selectedQuizId, sessionLength, settingsConfig);
   });
 
   $("#trainingEndBtn").off("click").on("click", () => {
@@ -4095,6 +4191,43 @@ function unlinkTrainingAccount() {
   }
 }
 
+/**
+ * Refresh stats for all quizzes - uses same mechanism as initial load
+ */
+function refreshAllQuizStats() {
+  if (!trainingState.authToken) {
+    console.log("[AMQ+ Training] No auth token, cannot refresh stats");
+    return;
+  }
+
+  console.log("[AMQ+ Training] Refreshing all quiz stats via token validation...");
+
+  makeApiRequest({
+    url: `${API_BASE_URL}/api/training/token/validate`,
+    method: 'POST',
+    data: { token: trainingState.authToken },
+    errorPrefix: 'Refresh Stats',
+    onSuccess: (data) => {
+      console.log("[AMQ+ Training] Stats refreshed successfully");
+      console.log("[AMQ+ Training] Received", data.quizzes?.length || 0, "quizzes with updated stats");
+
+      // Update the quiz list with fresh data
+      trainingState.userQuizzes = data.quizzes || [];
+
+      // Log stats for each quiz
+      trainingState.userQuizzes.forEach(quiz => {
+        console.log(`[AMQ+ Training] ${quiz.name}: dueToday=${quiz.stats?.dueToday || 0}, accuracy=${quiz.stats?.accuracy || 0}%`);
+      });
+
+      // Reload the quiz list display
+      loadTrainingQuizzes();
+    },
+    onError: (errorMsg) => {
+      console.error("[AMQ+ Training] Failed to refresh stats:", errorMsg);
+    }
+  });
+}
+
 function loadTrainingQuizzes() {
   const quizListDiv = $("#trainingQuizList");
 
@@ -4112,15 +4245,28 @@ function loadTrainingQuizzes() {
   scanOldTrainingProfiles();
 
   let html = "";
-  trainingState.userQuizzes.forEach(quiz => {
+  console.log("[AMQ+ Training] Rendering quiz list, userQuizzes count:", trainingState.userQuizzes.length);
+
+  trainingState.userQuizzes.forEach((quiz, index) => {
     const stats = quiz.stats || {};
     const hasTrainingData = stats.totalAttempts > 0;
-    const dueColor = stats.dueToday > 10 ? "#ef4444" : stats.dueToday > 5 ? "#ffc107" : "#10b981";
 
-    // Calculate accuracy: successfulAttempts / totalAttempts * 100
-    const accuracy = hasTrainingData && stats.totalAttempts > 0
-      ? Math.round((stats.successfulAttempts / stats.totalAttempts) * 100)
-      : 0;
+    console.log(`[AMQ+ Training] Quiz ${index + 1} - ${quiz.name}:`, {
+      id: quiz.id,
+      hasStats: !!quiz.stats,
+      totalAttempts: stats.totalAttempts,
+      accuracy: stats.accuracy,
+      last10Success: stats.last10Success,
+      last10Total: stats.last10Total,
+      dueToday: stats.dueToday
+    });
+
+    // Use accuracy from API (calculated from last 10 attempts per song, matching website)
+    const accuracy = hasTrainingData ? (stats.accuracy || 0) : 0;
+    const last10Success = stats.last10Success || 0;
+    const last10Total = stats.last10Total || 0;
+    const dueToday = stats.dueToday || 0;
+    const dueColor = dueToday > 10 ? "#ef4444" : dueToday > 5 ? "#ffc107" : "#10b981";
 
     html += `
       <div class="training-quiz-card" data-quiz-id="${quiz.id}" style="
@@ -4137,14 +4283,14 @@ function loadTrainingQuizzes() {
         <h5 style="margin: 0 0 10px 0; color: #fff; font-weight: bold;">${quiz.name}</h5>
         ${hasTrainingData ? `
         <div style="display: flex; gap: 20px; font-size: 13px; color: rgba(255,255,255,0.8);">
-          <div title="Accuracy = (Successful Attempts / Total Attempts) × 100">
+          <div title="Accuracy from last 10 attempts per song">
             <i class="fa fa-chart-line"></i> ${accuracy}% accuracy
             <small style="display: block; font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 2px;">
-              (${stats.successfulAttempts || 0}/${stats.totalAttempts || 0})
+              (${last10Success}/${last10Total}) last 10 per song
             </small>
           </div>
           <div style="color: ${dueColor}; font-weight: bold;">
-            <i class="fa fa-clock"></i> ${stats.dueToday || 0} due today
+            <i class="fa fa-clock"></i> ${dueToday} due today
           </div>
         </div>
         ` : `
@@ -4202,7 +4348,22 @@ function fetchQuizStatsAndDisplay(quizId, quizName) {
     data: { token: trainingState.authToken },
     errorPrefix: 'Fetch Quiz Stats',
     onSuccess: (data) => {
-      console.log("[AMQ+ Training] Fetched stats for quiz:", quizId, data);
+      console.log("[AMQ+ Training] ===== API RESPONSE START =====");
+      console.log("[AMQ+ Training] Fetched stats for quiz:", quizId);
+      console.log("[AMQ+ Training] Full API response:", JSON.stringify(data, null, 2));
+
+      if (data.stats) {
+        console.log("[AMQ+ Training] Stats breakdown:");
+        console.log("  - totalAttempts:", data.stats.totalAttempts);
+        console.log("  - totalSuccess:", data.stats.totalSuccess);
+        console.log("  - accuracy:", data.stats.accuracy);
+        console.log("  - last10Success:", data.stats.last10Success);
+        console.log("  - last10Total:", data.stats.last10Total);
+        console.log("  - dueToday:", data.stats.dueToday);
+        console.log("  - averageDifficulty:", data.stats.averageDifficulty);
+        console.log("  - masteryDistribution:", data.stats.masteryDistribution);
+      }
+      console.log("[AMQ+ Training] ===== API RESPONSE END =====");
 
       // Add quiz to user's quiz list if it has stats
       if (data.stats && data.stats.totalAttempts > 0) {
@@ -4217,12 +4378,14 @@ function fetchQuizStatsAndDisplay(quizId, quizName) {
         if (existingIndex >= 0) {
           // Update existing
           trainingState.userQuizzes[existingIndex] = quizData;
+          console.log("[AMQ+ Training] Updated existing quiz in list at index:", existingIndex);
         } else {
           // Add new
           trainingState.userQuizzes.push(quizData);
+          console.log("[AMQ+ Training] Added new quiz to list, total quizzes:", trainingState.userQuizzes.length);
         }
 
-        console.log("[AMQ+ Training] Added quiz to user's quiz list with stats");
+        console.log("[AMQ+ Training] Current userQuizzes state:", trainingState.userQuizzes);
       }
 
       // Display stats
@@ -4251,7 +4414,11 @@ function getQuizStatsHTML(quizId) {
   // Try to find the quiz in user's private quizzes
   const quiz = trainingState.userQuizzes.find(q => q.id === quizId);
 
+  console.log("[AMQ+ Training] getQuizStatsHTML - quizId:", quizId);
+  console.log("[AMQ+ Training] getQuizStatsHTML - found quiz:", quiz);
+
   if (!quiz || !quiz.stats) {
+    console.log("[AMQ+ Training] getQuizStatsHTML - no quiz or stats found");
     return `
       <div style="font-size: 12px; color: rgba(255,255,255,0.5); font-style: italic;">
         No training data yet. Start a session to begin tracking progress!
@@ -4262,7 +4429,11 @@ function getQuizStatsHTML(quizId) {
   const stats = quiz.stats;
   const hasTrainingData = stats.totalAttempts > 0;
 
+  console.log("[AMQ+ Training] getQuizStatsHTML - stats:", stats);
+  console.log("[AMQ+ Training] getQuizStatsHTML - hasTrainingData:", hasTrainingData);
+
   if (!hasTrainingData) {
+    console.log("[AMQ+ Training] getQuizStatsHTML - no training data (totalAttempts = 0)");
     return `
       <div style="font-size: 12px; color: rgba(255,255,255,0.5); font-style: italic;">
         No training data yet. Start a session to begin tracking progress!
@@ -4270,19 +4441,29 @@ function getQuizStatsHTML(quizId) {
     `;
   }
 
-  const accuracy = Math.round((stats.successfulAttempts / stats.totalAttempts) * 100);
-  const dueColor = stats.dueToday > 10 ? "#ef4444" : stats.dueToday > 5 ? "#ffc107" : "#10b981";
+  // Use accuracy from API (calculated from last 10 attempts per song, matching website)
+  const accuracy = stats.accuracy || 0;
+  const last10Success = stats.last10Success || 0;
+  const last10Total = stats.last10Total || 0;
+  const dueToday = stats.dueToday || 0;
+  const dueColor = dueToday > 10 ? "#ef4444" : dueToday > 5 ? "#ffc107" : "#10b981";
+
+  console.log("[AMQ+ Training] getQuizStatsHTML - Display values:");
+  console.log("  accuracy:", accuracy);
+  console.log("  last10Success:", last10Success);
+  console.log("  last10Total:", last10Total);
+  console.log("  dueToday:", dueToday);
 
   return `
     <div style="display: flex; gap: 20px; font-size: 13px; color: rgba(255,255,255,0.8);">
-      <div title="Accuracy = (Successful Attempts / Total Attempts) × 100">
+      <div title="Accuracy from last 10 attempts per song">
         <i class="fa fa-chart-line"></i> ${accuracy}% accuracy
         <small style="display: block; font-size: 10px; color: rgba(255,255,255,0.5); margin-top: 2px;">
-          (${stats.successfulAttempts || 0}/${stats.totalAttempts || 0})
+          (${last10Success}/${last10Total}) last 10 per song
         </small>
       </div>
       <div style="color: ${dueColor}; font-weight: bold;">
-        <i class="fa fa-clock"></i> ${stats.dueToday || 0} due today
+        <i class="fa fa-clock"></i> ${dueToday} due today
       </div>
     </div>
   `;
@@ -4405,9 +4586,27 @@ function loadTrainingFromUrl() {
   }
 }
 
-function startTrainingSession(quizId, sessionLength, dueSongPercentage) {
+function startTrainingSession(quizId, sessionLength, settingsConfig) {
   showTrainingStatus("Starting training session...", "info");
   isTrainingMode = true; // Set flag to prevent hijacking
+
+  // Build API request based on mode
+  const requestData = {
+    token: trainingState.authToken,
+    quizId: quizId,
+    sessionLength: sessionLength
+  };
+
+  // Add configuration based on mode
+  if (settingsConfig.mode === 'manual') {
+    requestData.mode = 'manual';
+    requestData.dueCount = settingsConfig.dueCount;
+    requestData.newCount = settingsConfig.newCount;
+    requestData.revisionCount = settingsConfig.revisionCount;
+  } else {
+    requestData.mode = 'auto';
+    requestData.dueSongPercentage = settingsConfig.dueSongPercentage || 70;
+  }
 
   GM_xmlhttpRequest({
     method: "POST",
@@ -4415,12 +4614,7 @@ function startTrainingSession(quizId, sessionLength, dueSongPercentage) {
     headers: {
       "Content-Type": "application/json"
     },
-    data: JSON.stringify({
-      token: trainingState.authToken,
-      quizId: quizId,
-      sessionLength: sessionLength,
-      dueSongPercentage: dueSongPercentage
-    }),
+    data: JSON.stringify(requestData),
     onload: function (response) {
       // Reset button states
       const startBtn = $("#trainingStartBtn");
@@ -4460,10 +4654,12 @@ function startTrainingSession(quizId, sessionLength, dueSongPercentage) {
         // Display composition info
         if (data.composition) {
           const comp = data.composition;
+          const poolSize = data.available?.totalPoolSize || 'unknown';
           let compositionMsg = `🎵 Session: ${comp.due} already played (${comp.duePercentage}%), ${comp.new} new (${comp.newPercentage}%)`;
           if (comp.revision > 0) {
             compositionMsg += `, ${comp.revision} revision (${comp.revisionPercentage}%)`;
           }
+          compositionMsg += ` | Pool size: ${poolSize}`;
           sendSystemMessage(compositionMsg);
         }
 
