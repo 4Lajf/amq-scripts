@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.5
+// @version      1.0.6
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -197,6 +197,14 @@ function sendSystemMessage(message) {
   } else {
     console.log("[AMQ+] System message:", message);
   }
+}
+
+function sendGlobalChatMessage(message) {
+  socket.sendCommand({
+    type: "lobby",
+    command: "game chat message",
+    data: { msg: String(message), teamMessage: false }
+  });
 }
 
 /**
@@ -613,9 +621,6 @@ function createModalHTML() {
                                     <button type="button" class="btn btn-sm btn-primary" id="amqPlusSyncBtn" style="background-color: #6366f1; border-color: #6366f1; color: #fff; padding: 4px 12px; font-size: 11px;">
                                         <i class="fa fa-sync" style="margin-right: 4px;"></i>Sync Now
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-success" id="amqPlusManualAddBtn" style="background-color: #10b981; border-color: #10b981; color: #fff; padding: 4px 12px; font-size: 11px;">
-                                        <i class="fa fa-plus" style="margin-right: 4px;"></i>Manual Add
-                                    </button>
                                     <button type="button" class="btn btn-sm" id="amqPlusRandomPreset" style="background-color: #4a5568; border-color: #4a5568; color: #fff; padding: 4px 12px; font-size: 11px;">Random</button>
                                     <button type="button" class="btn btn-sm" id="amqPlusEqualPreset" style="background-color: #4a5568; border-color: #4a5568; color: #fff; padding: 4px 12px; font-size: 11px;">Equal</button>
                                 </div>
@@ -817,10 +822,6 @@ function attachModalHandlers() {
 
   $("#amqPlusSyncBtn").off("click").click(() => {
     handleManualSync();
-  });
-
-  $("#amqPlusManualAddBtn").off("click").click(() => {
-    handleManualAdd();
   });
 
   $("#amqPlusRandomPreset").off("click").click(() => {
@@ -1090,22 +1091,49 @@ function handleManualAdd() {
 
   // Prompt for username
   const username = prompt("Enter player username:");
-  if (!username || username.trim() === '') {
+  if (!username || username.trim() === '' || username.trim() === '-') {
+    if (username && username.trim() === '-') {
+      sendSystemMessage("Cannot add user with username '-' (no list provided)");
+    }
     return;
   }
 
   // Prompt for platform
-  const platform = prompt("Enter platform (anilist or myanimelist):", "anilist");
-  if (!platform || (platform.toLowerCase() !== 'anilist' && platform.toLowerCase() !== 'myanimelist')) {
-    sendSystemMessage("Invalid platform. Please enter 'anilist' or 'myanimelist'");
+  const platform = prompt("Enter platform (anilist or MAL):", "anilist");
+  if (!platform) {
     return;
+  }
+
+  const platformLower = platform.toLowerCase();
+  let normalizedPlatform = null;
+
+  // Accept "anilist", "MAL", or "mal"
+  if (platformLower === 'anilist') {
+    normalizedPlatform = 'anilist';
+  } else if (platformLower === 'mal' || platformLower === 'myanimelist') {
+    normalizedPlatform = 'mal';
+  } else {
+    sendSystemMessage("Invalid platform. Please enter 'anilist' or 'MAL'");
+    return;
+  }
+
+  // Check if user already exists
+  if (cachedPlayerLists) {
+    const existingUser = cachedPlayerLists.find(entry =>
+      entry.username.toLowerCase() === username.trim().toLowerCase() &&
+      entry.platform === normalizedPlatform
+    );
+    if (existingUser) {
+      sendSystemMessage(`User ${username} (${normalizedPlatform}) already exists in the list.`);
+      return;
+    }
   }
 
   // Create a new player entry
   const newEntry = {
     id: `manual_${Date.now()}`,
     username: username.trim(),
-    platform: platform.toLowerCase(),
+    platform: normalizedPlatform,
     songPercentage: {
       random: false,
       value: 100,
@@ -1132,8 +1160,42 @@ function handleManualAdd() {
   // Update the UI
   updatePlayerListsConfigUI();
 
-  sendSystemMessage(`Manually added ${username} (${platform})`);
+  sendSystemMessage(`Manually added ${username} (${normalizedPlatform})`);
   console.log("[AMQ+] Manually added player:", newEntry);
+}
+
+function handleManualRemove() {
+  console.log("[AMQ+] Manual remove button clicked");
+
+  if (!cachedPlayerLists || cachedPlayerLists.length === 0) {
+    sendSystemMessage("No players in the list to remove.");
+    return;
+  }
+
+  // Prompt for username
+  const username = prompt("Enter player username to remove:");
+  if (!username || username.trim() === '') {
+    return;
+  }
+
+  // Find and remove the user
+  const initialLength = cachedPlayerLists.length;
+  cachedPlayerLists = cachedPlayerLists.filter(entry =>
+    entry.username.toLowerCase() !== username.trim().toLowerCase()
+  );
+
+  const removedCount = initialLength - cachedPlayerLists.length;
+
+  if (removedCount === 0) {
+    sendSystemMessage(`User ${username} not found in the list.`);
+    return;
+  }
+
+  // Update the UI
+  updatePlayerListsConfigUI();
+
+  sendSystemMessage(`Removed ${removedCount} entry/entries for ${username}`);
+  console.log("[AMQ+] Manually removed player:", username);
 }
 
 function handleManualSync() {
@@ -1168,23 +1230,29 @@ function handleManualSync() {
     });
 
     // Check for Kitsu platform or no-list entries and send warnings
-    const hasKitsuOrNoList = userEntries.some(entry =>
-      entry.platform === 'kitsu' || entry.username === '-'
-    );
+    const hasKitsuOrNoList = userEntries.some(entry => {
+      const username = entry.username ? entry.username.trim() : '';
+      return entry.platform === 'kitsu' || username === '-' || username === '';
+    });
 
     if (hasKitsuOrNoList) {
       userEntries.forEach((entry, idx) => {
+        const username = entry.username ? entry.username.trim() : '';
         const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx}`;
         if (entry.platform === 'kitsu') {
           sendSystemMessage(`Warning: ${prefix} has a Kitsu list - Kitsu platform is not implemented yet`);
-        } else if (entry.username === '-') {
+        } else if (username === '-' || username === '') {
           sendSystemMessage(`Warning: ${prefix} has no list provided - this will be ignored`);
         }
       });
     }
 
-    // Filter out entries with no list (username === '-') from sync stats
-    const validEntries = userEntries.filter(entry => entry.username !== '-');
+    // Filter out entries with no list (username === '-' or empty) from sync stats
+    // This should already be filtered when gathering, but double-check for safety
+    const validEntries = userEntries.filter(entry => {
+      const username = entry.username ? entry.username.trim() : '';
+      return username !== '' && username !== '-';
+    });
 
     const listMessage = validEntries.map((entry, idx) => {
       const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx + 1}`;
@@ -1229,12 +1297,17 @@ function createPlayerEntryHTML(entry, idx) {
             <div class="amqPlusPlayerEntry" data-entry-idx="${idx}" style="margin-bottom: 12px; padding: 10px; background-color: rgba(255,255,255,0.03); border-radius: 4px; border: 1px solid rgba(255,255,255,0.1);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                     <div style="font-weight: bold; color: #fff; font-size: 13px;">${prefix}: ${entry.username} (${entry.platform})</div>
-                    <div style="display: flex; align-items: center;">
-                        <div class="customCheckbox" style="margin-right: 6px;">
-                            <input type="checkbox" class="amqPlusUseRandom" id="amqPlusUseRandom${idx}" data-entry-idx="${idx}" ${isRandom ? 'checked' : ''}>
-                            <label for="amqPlusUseRandom${idx}"><i class="fa fa-check" aria-hidden="true"></i></label>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <button type="button" class="btn btn-sm btn-danger amqPlusRemoveEntryBtn" data-entry-idx="${idx}" data-username="${entry.username}" style="background-color: #dc3545; border-color: #dc3545; color: #fff; padding: 2px 8px; font-size: 10px; line-height: 1.2;">
+                            <i class="fa fa-times" style="margin-right: 2px;"></i>Remove
+                        </button>
+                        <div style="display: flex; align-items: center;">
+                            <div class="customCheckbox" style="margin-right: 6px;">
+                                <input type="checkbox" class="amqPlusUseRandom" id="amqPlusUseRandom${idx}" data-entry-idx="${idx}" ${isRandom ? 'checked' : ''}>
+                                <label for="amqPlusUseRandom${idx}"><i class="fa fa-check" aria-hidden="true"></i></label>
+                            </div>
+                            <span style="font-size: 12px; color: #e2e8f0;">Random Range</span>
                         </div>
-                        <span style="font-size: 12px; color: #e2e8f0;">Random Range</span>
                     </div>
                 </div>
                 <div style="margin-bottom: 8px; padding: 8px; background-color: rgba(255,255,255,0.02); border-radius: 4px;">
@@ -1298,7 +1371,35 @@ function updatePlayerListsConfigUI() {
   $("#amqPlusPlayerListsConfig").show();
 
   const html = cachedPlayerLists.map((entry, idx) => createPlayerEntryHTML(entry, idx)).join('');
-  $("#amqPlusPlayerListsConfigContent").html(html);
+
+  // Add Manual Add button at the end of the list
+  const manualAddButton = `
+    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+      <button type="button" class="btn btn-sm btn-success" id="amqPlusManualAddBtnInline" style="background-color: #10b981; border-color: #10b981; color: #fff; padding: 6px 16px; font-size: 12px; width: 100%;">
+        <i class="fa fa-plus" style="margin-right: 6px;"></i>Add Player Manually
+      </button>
+    </div>
+  `;
+
+  $("#amqPlusPlayerListsConfigContent").html(html + manualAddButton);
+
+  // Attach remove entry button handlers
+  $('.amqPlusRemoveEntryBtn').off('click').on('click', function () {
+    const idx = $(this).data('entry-idx');
+    const username = $(this).data('username');
+    if (confirm(`Remove ${username} from the list?`)) {
+      if (cachedPlayerLists && cachedPlayerLists[idx]) {
+        cachedPlayerLists.splice(idx, 1);
+        updatePlayerListsConfigUI();
+        sendSystemMessage(`Removed ${username} from the list`);
+      }
+    }
+  });
+
+  // Attach inline Manual Add button handler
+  $("#amqPlusManualAddBtnInline").off('click').on('click', function () {
+    handleManualAdd();
+  });
 
   $('.amqPlusUseRandom').off('change').on('change', function () {
     const idx = $(this).data('entry-idx');
@@ -1535,8 +1636,12 @@ function getConfiguredPlayerLists() {
 function usePlayerLists(userEntries, quizId) {
   const configuredEntries = userEntries === cachedPlayerLists ? getConfiguredPlayerLists() : userEntries;
 
-  // Filter out entries with no list (username === '-') before sending to server
-  const validEntriesForServer = configuredEntries.filter(entry => entry.username !== '-');
+  // Filter out entries with no list (username === '-' or empty) before sending to server
+  // This prevents creating buckets for users whose lists failed to fetch
+  const validEntriesForServer = configuredEntries.filter(entry => {
+    const username = entry.username ? entry.username.trim() : '';
+    return username !== '' && username !== '-';
+  });
 
   const liveNodeData = {
     useEntirePool: false,
@@ -1545,23 +1650,28 @@ function usePlayerLists(userEntries, quizId) {
   };
 
   // Check for Kitsu platform or no-list entries and send warnings
-  const hasKitsuOrNoList = configuredEntries.some(entry =>
-    entry.platform === 'kitsu' || entry.username === '-'
-  );
+  const hasKitsuOrNoList = configuredEntries.some(entry => {
+    const username = entry.username ? entry.username.trim() : '';
+    return entry.platform === 'kitsu' || username === '-' || username === '';
+  });
 
   if (hasKitsuOrNoList) {
     configuredEntries.forEach((entry, idx) => {
+      const username = entry.username ? entry.username.trim() : '';
       const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx + 1}`;
       if (entry.platform === 'kitsu') {
         sendSystemMessage(`Warning: ${prefix} has a Kitsu list - Kitsu platform is not implemented yet`);
-      } else if (entry.username === '-') {
+      } else if (username === '-' || username === '') {
         sendSystemMessage(`Warning: ${prefix} has no list provided - this will be ignored`);
       }
     });
   }
 
-  // Filter out entries with no list (username === '-') from sync stats
-  const validEntries = configuredEntries.filter(entry => entry.username !== '-');
+  // Filter out entries with no list (username === '-' or empty) from sync stats
+  const validEntries = configuredEntries.filter(entry => {
+    const username = entry.username ? entry.username.trim() : '';
+    return username !== '' && username !== '-';
+  });
 
   const listMessage = validEntries.map((entry, idx) => {
     const prefix = entry.id?.includes('self') ? 'You' : `Player ${idx + 1}`;
@@ -2066,7 +2176,7 @@ const STATUS_TO_KEY = {
 
 /**
  * Handle player list management commands from any player
- * Only processes if the user is the host and has a Live Node quiz active
+ * Commands can be sent by any player, but only the host processes them and responds
  */
 function handlePlayerListCommand(message, sender) {
   // Don't process if not a command
@@ -2082,16 +2192,9 @@ function handlePlayerListCommand(message, sender) {
     return;
   }
 
-  // Only process if we're the host (lobby.isHost check)
+  // Only the host processes commands and responds
+  // Other players can send commands (they appear in chat), but only host's client processes them
   if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
-    return;
-  }
-
-  // Only process if we have cached player lists (Live Node quiz is active)
-  if (!cachedPlayerLists || cachedPlayerLists.length === 0) {
-    if (msgLower.startsWith('/add') || msgLower.startsWith('/remove') || msgLower === '/list') {
-      sendSystemMessage(`${sender}: List commands are only available when a Live Node quiz is active. Use /listhelp for more info.`);
-    }
     return;
   }
 
@@ -2101,48 +2204,61 @@ function handlePlayerListCommand(message, sender) {
   const command = parts[0].toLowerCase();
   const args = parts.slice(1).map(arg => arg.toLowerCase());
 
+  // Check if Live Node is configured
+  const isLiveNodeConfigured = cachedPlayerLists && cachedPlayerLists.length > 0;
+
   // Handle different commands
   if (command === '/listhelp') {
-    handleListHelpCommand(sender);
+    handleListHelpCommand(sender, isLiveNodeConfigured);
   } else if (command === '/list') {
-    handleListShowCommand(sender);
+    handleListShowCommand(sender, isLiveNodeConfigured);
   } else if (command === '/add') {
-    handleListAddCommand(sender, args);
+    handleListAddCommand(sender, args, isLiveNodeConfigured);
   } else if (command === '/remove') {
-    handleListRemoveCommand(sender, args);
+    handleListRemoveCommand(sender, args, isLiveNodeConfigured);
   }
 }
 
 /**
  * Show help information for list commands
  */
-function handleListHelpCommand(sender) {
+function handleListHelpCommand(sender, isLiveNodeConfigured) {
   const helpMessages = [
     `@${sender}: Player List Commands Help`,
-    "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-    "/add [status...] - Add list statuses",
-    "/remove [status...] - Remove list statuses",
-    "/list - Show your enabled lists",
-    "/listhelp - Show this help",
-    "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "━━━━━━━━━━━━━━━━━━━━━━━━",
+    "/ add [status...] - Add list statuses",
+    "/ remove [status...] - Remove list statuses",
+    "/ list - Show your enabled lists",
+    "/ listhelp - Show this help",
+    "━━━━━━━━━━━━━━━━━━━━━━━━",
     "Valid statuses: completed, watching, planning, on-hold, dropped",
-    "Example: /add completed watching",
-    "Example: /remove dropped"
+    "Example: / add completed watching",
+    "Example: / remove dropped"
   ];
 
+  if (!isLiveNodeConfigured) {
+    helpMessages.push("━━━━━━━━━━━━━━━━━━━━━━━━");
+    helpMessages.push("⚠️ Note: Live Node is not configured yet. Host needs to sync player lists first.");
+  }
+
   helpMessages.forEach((msg, index) => {
-    setTimeout(() => sendSystemMessage(msg), 100 * index);
+    setTimeout(() => sendGlobalChatMessage(msg), 100 * index);
   });
 }
 
 /**
  * Show current enabled lists for a player
  */
-function handleListShowCommand(sender) {
+function handleListShowCommand(sender, isLiveNodeConfigured) {
+  if (!isLiveNodeConfigured) {
+    sendGlobalChatMessage(`@${sender}: ⚠️ Live Node is not configured yet. Host needs to sync player lists first. Use /listhelp for more info.`);
+    return;
+  }
+
   const playerEntry = findPlayerInCache(sender);
 
   if (!playerEntry) {
-    sendSystemMessage(`${sender}: You are not in the current Live Node configuration. Ask the host to sync or add you manually.`);
+    sendGlobalChatMessage(`@${sender}: You are not in the current Live Node configuration. Ask the host to sync or add you manually.`);
     return;
   }
 
@@ -2156,37 +2272,42 @@ function handleListShowCommand(sender) {
   }
 
   if (enabledLists.length === 0) {
-    sendSystemMessage(`${sender}: No lists enabled (songs will be selected from entire pool)`);
+    sendGlobalChatMessage(`@${sender}: No lists enabled (songs will be selected from entire pool)`);
   } else {
-    sendSystemMessage(`${sender}: Enabled lists: ${enabledLists.join(', ')}`);
+    sendGlobalChatMessage(`@${sender}: Enabled lists: ${enabledLists.join(', ')}`);
   }
 }
 
 /**
  * Add list statuses for a player
  */
-function handleListAddCommand(sender, args) {
+function handleListAddCommand(sender, args, isLiveNodeConfigured) {
   if (args.length === 0) {
-    sendSystemMessage(`${sender}: Usage: /add [status...]. Valid: completed, watching, planning, on-hold, dropped. Use /listhelp for more info.`);
+    sendGlobalChatMessage(`@${sender}: Usage: /add [status...]. Valid: completed, watching, planning, on-hold, dropped. Use /listhelp for more info.`);
+    return;
+  }
+
+  if (!isLiveNodeConfigured) {
+    sendGlobalChatMessage(`@${sender}: ⚠️ Live Node is not configured yet. Host needs to sync player lists first. Use /listhelp for more info.`);
     return;
   }
 
   const playerEntry = findPlayerInCache(sender);
 
   if (!playerEntry) {
-    sendSystemMessage(`${sender}: You are not in the current Live Node configuration. Ask the host to sync or add you manually.`);
+    sendGlobalChatMessage(`@${sender}: You are not in the current Live Node configuration. Ask the host to sync or add you manually.`);
     return;
   }
 
   const { validStatuses, invalidStatuses } = parseStatuses(args);
 
   if (invalidStatuses.length > 0) {
-    sendSystemMessage(`${sender}: Invalid status(es): ${invalidStatuses.join(', ')}. Valid: completed, watching, planning, on-hold, dropped`);
+    sendGlobalChatMessage(`@${sender}: Invalid status(es): ${invalidStatuses.join(', ')}. Valid: completed, watching, planning, on-hold, dropped`);
     return;
   }
 
   if (validStatuses.length === 0) {
-    sendSystemMessage(`${sender}: No valid statuses provided. Use /listhelp for more info.`);
+    sendGlobalChatMessage(`@${sender}: No valid statuses provided. Use /listhelp for more info.`);
     return;
   }
 
@@ -2201,9 +2322,9 @@ function handleListAddCommand(sender, args) {
   });
 
   if (addedStatuses.length === 0) {
-    sendSystemMessage(`${sender}: All specified lists were already enabled.`);
+    sendGlobalChatMessage(`@${sender}: All specified lists were already enabled.`);
   } else {
-    sendSystemMessage(`${sender}: Added lists: ${addedStatuses.join(', ')}`);
+    sendGlobalChatMessage(`@${sender}: Added lists: ${addedStatuses.join(', ')}`);
     updatePlayerListsConfigUI();
   }
 }
@@ -2211,28 +2332,33 @@ function handleListAddCommand(sender, args) {
 /**
  * Remove list statuses for a player
  */
-function handleListRemoveCommand(sender, args) {
+function handleListRemoveCommand(sender, args, isLiveNodeConfigured) {
   if (args.length === 0) {
-    sendSystemMessage(`${sender}: Usage: /remove [status...]. Valid: completed, watching, planning, on-hold, dropped. Use /listhelp for more info.`);
+    sendGlobalChatMessage(`@${sender}: Usage: /remove [status...]. Valid: completed, watching, planning, on-hold, dropped. Use /listhelp for more info.`);
+    return;
+  }
+
+  if (!isLiveNodeConfigured) {
+    sendGlobalChatMessage(`@${sender}: ⚠️ Live Node is not configured yet. Host needs to sync player lists first. Use /listhelp for more info.`);
     return;
   }
 
   const playerEntry = findPlayerInCache(sender);
 
   if (!playerEntry) {
-    sendSystemMessage(`${sender}: You are not in the current Live Node configuration. Ask the host to sync or add you manually.`);
+    sendGlobalChatMessage(`@${sender}: You are not in the current Live Node configuration. Ask the host to sync or add you manually.`);
     return;
   }
 
   const { validStatuses, invalidStatuses } = parseStatuses(args);
 
   if (invalidStatuses.length > 0) {
-    sendSystemMessage(`${sender}: Invalid status(es): ${invalidStatuses.join(', ')}. Valid: completed, watching, planning, on-hold, dropped`);
+    sendGlobalChatMessage(`@${sender}: Invalid status(es): ${invalidStatuses.join(', ')}. Valid: completed, watching, planning, on-hold, dropped`);
     return;
   }
 
   if (validStatuses.length === 0) {
-    sendSystemMessage(`${sender}: No valid statuses provided. Use /listhelp for more info.`);
+    sendGlobalChatMessage(`@${sender}: No valid statuses provided. Use /listhelp for more info.`);
     return;
   }
 
@@ -2247,9 +2373,9 @@ function handleListRemoveCommand(sender, args) {
   });
 
   if (removedStatuses.length === 0) {
-    sendSystemMessage(`${sender}: All specified lists were already disabled.`);
+    sendGlobalChatMessage(`@${sender}: All specified lists were already disabled.`);
   } else {
-    sendSystemMessage(`${sender}: Removed lists: ${removedStatuses.join(', ')}`);
+    sendGlobalChatMessage(`@${sender}: Removed lists: ${removedStatuses.join(', ')}`);
     updatePlayerListsConfigUI();
   }
 }
@@ -3105,7 +3231,7 @@ async function gatherPlayerLists() {
   };
 
   const ownListInfo = getOwnListInfo();
-  if (ownListInfo) {
+  if (ownListInfo && ownListInfo.username && ownListInfo.username.trim() !== '-' && ownListInfo.username.trim() !== '') {
     userEntries.push({
       id: `user-self-${Date.now()}`,
       platform: ownListInfo.platform,
@@ -3114,6 +3240,8 @@ async function gatherPlayerLists() {
       songPercentage: null
     });
     console.log("[AMQ+] Added own list:", ownListInfo);
+  } else if (ownListInfo && ownListInfo.username === '-') {
+    console.log("[AMQ+] Skipped own list - username is '-' (no list provided)");
   }
 
   const lobbyAvatarRows = $('#lobbyAvatarContainer .lobbyAvatarRow');
@@ -3153,7 +3281,7 @@ async function gatherPlayerLists() {
       await new Promise(resolve => setTimeout(resolve, 600));
 
       const listInfo = readPlayerListFromProfile();
-      if (listInfo) {
+      if (listInfo && listInfo.username && listInfo.username.trim() !== '-' && listInfo.username.trim() !== '') {
         userEntries.push({
           id: `user-${i}-${Date.now()}`,
           platform: listInfo.platform,
@@ -3163,7 +3291,11 @@ async function gatherPlayerLists() {
         });
         console.log(`[AMQ+] Added player ${i + 1} list:`, listInfo);
       } else {
-        console.log(`[AMQ+] No list info found for player ${i + 1}`);
+        if (listInfo && listInfo.username === '-') {
+          console.log(`[AMQ+] Skipped player ${i + 1} - username is "-" (no list provided)`);
+        } else {
+          console.log(`[AMQ+] No list info found for player ${i + 1}`);
+        }
       }
 
       // Close profile
