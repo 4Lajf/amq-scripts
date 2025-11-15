@@ -26,8 +26,8 @@ let loadInterval = setInterval(() => {
   }
 }, 500);
 
-const API_BASE_URL = "https://amqplus.moe";
-// const API_BASE_URL = "http://localhost:5173";
+// const API_BASE_URL = "https://amqplus.moe";
+const API_BASE_URL = "http://localhost:5173";
 console.log("[AMQ+] Using API base URL:", API_BASE_URL);
 
 // Settings state
@@ -130,6 +130,20 @@ function loadTrainingSettings() {
       if (state.currentSession && state.currentSession.sessionId) {
         trainingState.currentSession = state.currentSession;
         console.log("[AMQ+ Training] Restored session from localStorage");
+        
+        // Restore quiz info for active training sessions
+        if (state.currentQuizInfo) {
+          currentQuizInfo = state.currentQuizInfo;
+          console.log("[AMQ+ Training] Restored currentQuizInfo:", currentQuizInfo);
+        }
+        if (state.selectedCustomQuizName) {
+          selectedCustomQuizName = state.selectedCustomQuizName;
+          console.log("[AMQ+ Training] Restored selectedCustomQuizName:", selectedCustomQuizName);
+        }
+        if (state.selectedCustomQuizId) {
+          selectedCustomQuizId = state.selectedCustomQuizId;
+          console.log("[AMQ+ Training] Restored selectedCustomQuizId:", selectedCustomQuizId);
+        }
       }
       // Load new song percentage if saved
       if (state.newSongPercentage !== undefined) {
@@ -171,6 +185,17 @@ function saveTrainingSettings() {
 
     if (trainingState.currentSession && trainingState.currentSession.sessionId) {
       stateToSave.currentSession = trainingState.currentSession;
+      
+      // Persist quiz info for active training sessions to restore on page refresh
+      if (currentQuizInfo) {
+        stateToSave.currentQuizInfo = currentQuizInfo;
+      }
+      if (selectedCustomQuizName) {
+        stateToSave.selectedCustomQuizName = selectedCustomQuizName;
+      }
+      if (selectedCustomQuizId) {
+        stateToSave.selectedCustomQuizId = selectedCustomQuizId;
+      }
     }
 
     localStorage.setItem("amqPlusTrainingState", JSON.stringify(stateToSave));
@@ -2632,6 +2657,11 @@ function setupListeners() {
             $(this).remove();
           });
           $("#trainingRatingSection").fadeOut(300);
+        } else {
+          // Save quiz info for training quiz to persist across page refreshes
+          if (trainingState.currentSession && trainingState.currentSession.sessionId) {
+            saveTrainingSettings();
+          }
         }
       } else {
         console.log("[AMQ+] Quiz name does not start with 'AMQ+', not storing quiz info. Name:", quizDesc.name);
@@ -2716,6 +2746,11 @@ function setupListeners() {
           $(this).remove();
         });
         $("#trainingRatingSection").fadeOut(300);
+      } else {
+        // Save quiz info for training quiz to persist across page refreshes
+        if (trainingState.currentSession && trainingState.currentSession.sessionId) {
+          saveTrainingSettings();
+        }
       }
 
       if (!selectedCustomQuizName.startsWith("AMQ+")) {
@@ -3941,6 +3976,28 @@ function isCurrentQuizTrainingQuiz() {
   // Also check selectedCustomQuizName for training quizzes
   if (selectedCustomQuizName && selectedCustomQuizName.includes("Training")) {
     return true;
+  }
+  // Check persisted quiz info from training session (for page refresh scenarios)
+  if (trainingState.currentSession && trainingState.currentSession.sessionId) {
+    // Check if session has quiz name that indicates training
+    if (trainingState.currentSession.quizName && trainingState.currentSession.quizName.includes("Training")) {
+      return true;
+    }
+    // Also check if we have persisted quiz info that indicates training
+    const savedState = localStorage.getItem("amqPlusTrainingState");
+    if (savedState) {
+      try {
+        const state = JSON.parse(savedState);
+        if (state.currentQuizInfo && state.currentQuizInfo.description && state.currentQuizInfo.description.includes("Training session")) {
+          return true;
+        }
+        if (state.selectedCustomQuizName && state.selectedCustomQuizName.includes("Training")) {
+          return true;
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
   }
   return false;
 }
