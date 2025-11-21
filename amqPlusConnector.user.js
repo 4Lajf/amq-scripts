@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.9
+// @version      1.0.10
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -328,7 +328,7 @@ function setupGameChatFilter() {
         // Check if training mode is active
         const isTrainingActive = trainingState.currentSession &&
           trainingState.currentSession.sessionId &&
-          isCurrentQuizTrainingQuiz();
+          isTrainingMode;
 
         console.log("[AMQ+ Training] Training active:", isTrainingActive);
 
@@ -361,7 +361,7 @@ function setupQuizSavedModalObserver() {
     const savedModal = document.querySelector(".swal2-popup.swal2-show");
     if (savedModal) {
       const title = savedModal.querySelector(".swal2-title");
-      if (title && title.textContent === "Quiz Saved") {
+      if (title && (title.textContent === "Quiz Saved" || title.textContent === "Save Failed")) {
         setTimeout(() => {
           const okButton = savedModal.querySelector(".swal2-confirm");
           if (okButton) {
@@ -458,6 +458,22 @@ function createTrainingModalHTML() {
             <!-- Quiz Selection Tab -->
             <div id="trainingQuizTab" style="display: none;">
               <div style="padding: 15px;">
+                <!-- Training Mode Toggle -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label style="display: flex; align-items: center; cursor: pointer;">
+                    <div class="customCheckbox" style="margin-right: 10px;">
+                      <input type="checkbox" id="trainingModeToggle">
+                      <label for="trainingModeToggle">
+                        <i class="fa fa-check" aria-hidden="true"></i>
+                      </label>
+                    </div>
+                    <span style="font-size: 16px; font-weight: bold;">Enable Training Mode</span>
+                  </label>
+                  <small class="form-text text-muted">
+                    When enabled, training features like rating buttons will be active during quiz sessions
+                  </small>
+                </div>
+
                 <h4 style="margin-bottom: 15px; font-weight: bold;">Select a Quiz to Practice</h4>
 
                 <!-- Play from URL Section -->
@@ -543,7 +559,7 @@ function createTrainingModalHTML() {
                         <div style="margin-bottom: 10px; color: rgba(255,255,255,0.7); font-size: 12px;">
                           <i class="fa fa-info-circle"></i> Manual song distribution (leave blank for auto)
                         </div>
-                        
+
                         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                           <div style="flex: 1; min-width: 140px;">
                             <label style="display: block; margin-bottom: 4px; color: rgba(255,255,255,0.9); font-size: 12px;">
@@ -790,6 +806,11 @@ function createUI() {
   $("#lobbyPage .topMenuBar").append(`<div id="amqPlusTrainingToggle" class="clickAble topMenuButton topMenuMediumButton"><h3>Training</h3></div>`);
   $("#amqPlusTrainingToggle").click(() => {
     console.log("[AMQ+ Training] Training button clicked, opening modal");
+
+    // Reset training mode checkbox to unchecked when opening modal
+    $("#trainingModeToggle").prop("checked", false);
+    isTrainingMode = false;
+
     $("#amqPlusTrainingModal").modal("show");
 
     // Refresh stats for all quizzes when opening the modal
@@ -2622,34 +2643,13 @@ function setupListeners() {
           creatorUsername: quizDesc.creatorName || null
         };
         console.log("[AMQ+] Stored quiz info for AMQ+ quiz:", currentQuizInfo);
-
-        // Check if this is a training quiz - if not, disable training features
-        const isTrainingQuiz = quizDesc.description && quizDesc.description.includes("Training session");
-        if (!isTrainingQuiz) {
-          console.log("[AMQ+ Training] Non-training quiz displayed, disabling training features");
-          // Hide and remove training rating UI if it exists
-          $("#trainingRatingContainer").fadeOut(300, function () {
-            $(this).remove();
-          });
-          $("#trainingRatingSection").fadeOut(300);
-        }
       } else {
         console.log("[AMQ+] Quiz name does not start with 'AMQ+', not storing quiz info. Name:", quizDesc.name);
         currentQuizInfo = null;
-        // Disable training features for non-AMQ+ quizzes
-        $("#trainingRatingContainer").fadeOut(300, function () {
-          $(this).remove();
-        });
-        $("#trainingRatingSection").fadeOut(300);
       }
     } else {
       console.warn("[AMQ+] No quiz description found in payload");
       currentQuizInfo = null;
-      // Disable training features if no quiz description
-      $("#trainingRatingContainer").fadeOut(300, function () {
-        $(this).remove();
-      });
-      $("#trainingRatingSection").fadeOut(300);
     }
   }).bindListener();
 
@@ -2707,28 +2707,12 @@ function setupListeners() {
         currentQuizInfo = null;
       }
 
-      // Check if this is a training quiz - if not, disable training features
-      const isTrainingQuiz = quizDesc.description && quizDesc.description.includes("Training session");
-      if (!isTrainingQuiz) {
-        console.log("[AMQ+ Training] Non-training quiz selected, disabling training features");
-        // Hide and remove training rating UI if it exists
-        $("#trainingRatingContainer").fadeOut(300, function () {
-          $(this).remove();
-        });
-        $("#trainingRatingSection").fadeOut(300);
-      }
-
       if (!selectedCustomQuizName.startsWith("AMQ+")) {
         amqPlusCreditsSent = false;
       }
     } else {
       console.warn("[AMQ+] Custom quiz selected event missing quizDescription:", payload);
       currentQuizInfo = null;
-      // If no quiz description, assume non-training and disable training features
-      $("#trainingRatingContainer").fadeOut(300, function () {
-        $(this).remove();
-      });
-      $("#trainingRatingSection").fadeOut(300);
     }
   }).bindListener();
 
@@ -2771,17 +2755,15 @@ function setupListeners() {
 
       amqPlusCreditsSent = false;
 
-      // Check if this is a training quiz by checking description
-      // Training quizzes are handled by their own listener in startTrainingSession
-      const isTrainingQuiz = payload.quizSave?.description?.includes("Training session") ||
-        currentQuizData?.command?.data?.quizSave?.description?.includes("Training session");
-
-      if (!isTrainingQuiz) {
+      // Only auto-apply quiz to lobby if not in training mode
+      // Training mode sessions handle quiz application themselves
+      if (!isTrainingMode) {
         applyQuizToLobby(newQuizId, quizName);
       }
     } else {
       console.error("[AMQ+] Save quiz command failed:", payload);
-      showError("Failed to save quiz");
+      updateModalStatus(null);
+      messageDisplayer.displayMessage("Quiz Save Failed", "The quiz failed to save. This is likely due to insufficient community quiz slots (need at least 1). Please delete an old quiz and try again.");
     }
   }).bindListener();
 
@@ -3876,7 +3858,7 @@ function sendQuizMetadataAsMessages(quiz) {
       ];
 
       songTypeFormatters.forEach(formatter => {
-        const msg = formatter();
+        const msg = formatMetadataWithCountOrPercentage(formatter.label, formatter.icon, formatter.data);
         if (msg) messages.push(msg);
       });
     }
@@ -3932,23 +3914,23 @@ function sendQuizMetadataAsMessages(quiz) {
 // TRAINING MODE FUNCTIONS
 // ============================================
 
-// Helper function to check if the current quiz is a training quiz
-function isCurrentQuizTrainingQuiz() {
-  // Check if current quiz info has training description
-  if (currentQuizInfo && currentQuizInfo.description && currentQuizInfo.description.includes("Training session")) {
-    return true;
-  }
-  // Also check selectedCustomQuizName for training quizzes
-  if (selectedCustomQuizName && selectedCustomQuizName.includes("Training")) {
-    return true;
-  }
-  return false;
-}
+// Note: Training mode is now controlled by the checkbox in the training modal
+// No automatic detection based on quiz characteristics
 
 // Note: Pause/unpause system messages are now filtered at the source via setupGameChatFilter()
 // which overrides gameChat.systemMessage() to block these messages during training mode
 
 function attachTrainingModalHandlers() {
+  // Training mode toggle checkbox handler
+  $("#trainingModeToggle").off("change").on("change", function () {
+    isTrainingMode = $(this).is(":checked");
+    console.log("[AMQ+ Training] Training mode", isTrainingMode ? "enabled" : "disabled");
+  });
+
+  // Initialize checkbox state (unchecked by default)
+  $("#trainingModeToggle").prop("checked", false);
+  isTrainingMode = false;
+
   $("#trainingLinkBtn").off("click").on("click", () => {
     const token = $("#trainingTokenField").val().trim();
     if (!token || token.length !== 64) {
@@ -4588,6 +4570,8 @@ function loadTrainingFromUrl() {
 
 function startTrainingSession(quizId, sessionLength, settingsConfig) {
   showTrainingStatus("Starting training session...", "info");
+  // Check the training mode checkbox and update flag
+  $("#trainingModeToggle").prop("checked", true);
   isTrainingMode = true; // Set flag to prevent hijacking
 
   // Build API request based on mode
@@ -4702,7 +4686,7 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
                     }
 
                     sendSystemMessage(`Training quiz started: ${quizName}`);
-                    isTrainingMode = false; // Reset flag after starting
+                    // Keep training mode enabled during session
                   }, 500);
                 }
               });
@@ -4714,12 +4698,16 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
 
         console.log("[AMQ+ Training] Session started:", data);
       } else {
+        // Uncheck training mode on error
+        $("#trainingModeToggle").prop("checked", false);
         isTrainingMode = false; // Reset flag on error
         const errorData = JSON.parse(response.responseText);
         showTrainingStatus(errorData.error || "Failed to start session. Please try again.", "error");
       }
     },
     onerror: function () {
+      // Uncheck training mode on error
+      $("#trainingModeToggle").prop("checked", false);
       isTrainingMode = false; // Reset flag on error
       // Reset button states on error
       const startBtn = $("#trainingStartBtn");
@@ -4735,6 +4723,10 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
 
 function endTrainingSession() {
   if (!trainingState.currentSession.sessionId) return;
+
+  // Uncheck training mode checkbox
+  $("#trainingModeToggle").prop("checked", false);
+  isTrainingMode = false;
 
   // Hide and remove rating UI if it exists
   $("#trainingRatingContainer").fadeOut(300, function () {
@@ -5074,9 +5066,9 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     return;
   }
 
-  // Disable training features if current quiz is not a training quiz
-  if (!isCurrentQuizTrainingQuiz()) {
-    console.log("[AMQ+ Training] Current quiz is not a training quiz, skipping rating UI");
+  // Only show rating UI if training mode is enabled via checkbox
+  if (!isTrainingMode) {
+    console.log("[AMQ+ Training] Training mode disabled, skipping rating UI");
     return;
   }
 
