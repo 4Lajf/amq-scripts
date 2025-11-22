@@ -45,11 +45,6 @@ Gameified version of Bob's [amqBuzzer](https://files.catbox.moe/lipeqk.js)
 --- 
 
 ## Obsolete becuase of amqplus.moe
-### amqSongListUIWithAniListExport.user.js
-A fork [TheJoseph98](https://github.com/TheJoseph98)'s [amqSongListUI](https://github.com/TheJoseph98/AMQ-Scripts/blob/master/amqSongListUI.user.js)
-- Let's you export your wrong guessed anime to AniList so you can use them in your next game
-- Everything else that the base script offers
----
 
 ### amqTrainingMode.user.js
 Extended version of [kempanator](https://github.com/kempanator)'s[Custom Song List Game](https://github.com/kempanator/amq-scripts/blob/main/amqCustomSongListGame.user.js)
