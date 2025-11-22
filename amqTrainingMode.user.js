@@ -1576,10 +1576,10 @@ function validateTrainingStart() {
     }
     let passesAnimeTypeFilter =
       (tv && song.animeType === "TV") ||
-      (movie && song.animeType === "Movie") ||
+      (movie && (song.animeType === "Movie" || song.animeType === "movie")) ||
       (ova && song.animeType === "OVA") ||
       (ona && song.animeType === "ONA") ||
-      (special && song.animeType === "Special");
+      (special && (song.animeType === "Special" || song.animeType === "special"));
     return (
       passesTypeFilter &&
       passesAnimeTypeFilter &&
@@ -3655,10 +3655,10 @@ function validateStart() {
     }
     let passesAnimeTypeFilter =
       (tv && song.animeType === "TV") ||
-      (movie && song.animeType === "Movie") ||
+      (movie && (song.animeType === "Movie" || song.animeType === "movie")) ||
       (ova && song.animeType === "OVA") ||
       (ona && song.animeType === "ONA") ||
-      (special && song.animeType === "Special");
+      (special && (song.animeType === "Special" || song.animeType === "special"));
     return (
       passesTypeFilter &&
       passesAnimeTypeFilter &&
