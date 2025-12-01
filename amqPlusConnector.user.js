@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.13
+// @version      1.0.14
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -4729,11 +4729,25 @@ function loadTrainingFromUrl() {
   }
 }
 
+// Store the previous auto skip replay state to restore after training
+let savedAutoSkipReplayState = null;
+
 function startTrainingSession(quizId, sessionLength, settingsConfig) {
   showTrainingStatus("Starting training session...", "info");
   // Check the training mode checkbox and update flag
   $("#trainingModeToggle").prop("checked", true);
   isTrainingMode = true; // Set flag to prevent hijacking
+
+  // Disable auto skip replay during training mode
+  // Save the current state first
+  if (typeof options !== 'undefined' && options.$AUTO_VOTE_REPLAY) {
+    savedAutoSkipReplayState = options.$AUTO_VOTE_REPLAY.prop("checked");
+    if (savedAutoSkipReplayState) {
+      console.log("[AMQ+ Training] Disabling auto skip replay for training mode");
+      options.$AUTO_VOTE_REPLAY.prop("checked", false);
+      options.updateAutoVoteSkipReplay();
+    }
+  }
 
   // Build API request based on mode
   const requestData = {
@@ -4889,11 +4903,18 @@ function endTrainingSession() {
   $("#trainingModeToggle").prop("checked", false);
   isTrainingMode = false;
 
+  // Restore auto skip replay state if it was previously enabled
+  if (savedAutoSkipReplayState !== null && typeof options !== 'undefined' && options.$AUTO_VOTE_REPLAY) {
+    if (savedAutoSkipReplayState) {
+      console.log("[AMQ+ Training] Restoring auto skip replay state");
+      options.$AUTO_VOTE_REPLAY.prop("checked", true);
+      options.updateAutoVoteSkipReplay();
+    }
+    savedAutoSkipReplayState = null;
+  }
+
   // Hide and remove rating UI if it exists
   $("#trainingRatingContainer").fadeOut(300, function () {
-    $(this).remove();
-  });
-  $("#trainingUnpauseContainer").fadeOut(300, function () {
     $(this).remove();
   });
   $("#trainingRatingSection").fadeOut(300);
@@ -5160,12 +5181,13 @@ function submitTrainingRating(rating) {
   $("#trainingRatingSection").fadeOut(300);
   $("#trainingRatingContainer").fadeOut(300);
 
-  // Unpause the quiz to continue
+  // Send skip vote to advance to next phase now that user has rated
   socket.sendCommand({
     type: "quiz",
-    command: "quiz unpause"
+    command: "skip vote",
+    data: { skipVote: true }
   });
-  console.log("[AMQ+ Training] Quiz unpaused, continuing session");
+  console.log("[AMQ+ Training] Rating submitted, skip vote sent to advance");
 
   // Check if session is complete
   if (trainingState.currentSession.currentIndex >= trainingState.currentSession.playlist.length) {
@@ -5208,12 +5230,13 @@ function skipTrainingRating() {
   $("#trainingRatingSection").fadeOut(300);
   $("#trainingRatingContainer").fadeOut(300);
 
-  // Unpause the quiz to continue
+  // Send skip vote to advance to next phase now that user has skipped rating
   socket.sendCommand({
     type: "quiz",
-    command: "quiz unpause"
+    command: "skip vote",
+    data: { skipVote: true }
   });
-  console.log("[AMQ+ Training] Quiz unpaused, continuing session (skipped)");
+  console.log("[AMQ+ Training] Rating skipped, skip vote sent to advance");
 
   // Check if session is complete
   if (trainingState.currentSession.currentIndex >= trainingState.currentSession.playlist.length) {
@@ -5304,35 +5327,11 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
 
   // Ensure rating section exists in the video container
   let ratingContainer = $("#trainingRatingContainer");
-  let unpauseContainer = $("#trainingUnpauseContainer");
 
   const videoContainer = $("#qpVideoContainerInner");
   if (videoContainer.length === 0) {
     console.error("[AMQ+ Training] Video container not found");
     return;
-  }
-
-  // Create Unpause Button (Persistent)
-  if (unpauseContainer.length === 0) {
-    const unpauseHTML = `
-      <div id="trainingUnpauseContainer" style="position: absolute; top: 10px; right: 10px; z-index: 1000; pointer-events: auto;">
-        <button class="trainingUnpauseBtn btn" style="min-width: 60px; padding: 8px 12px; background: #17a2b8; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">
-          <i class="fa fa-play" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
-          Unpause
-        </button>
-      </div>
-    `;
-    videoContainer.append(unpauseHTML);
-    unpauseContainer = $("#trainingUnpauseContainer");
-
-    // Unpause button handler - force unpause the quiz
-    $(".trainingUnpauseBtn").off("click").on("click", function () {
-      socket.sendCommand({
-        type: "quiz",
-        command: "quiz unpause"
-      });
-      console.log("[AMQ+ Training] Quiz force unpause requested");
-    });
   }
 
   // Create Rating Buttons (Transient/Fadable)
@@ -5378,24 +5377,48 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     });
 
     // Add hover effects
-    $(".trainingRatingBtn, .trainingSkipBtn, .trainingUnpauseBtn").hover(
+    $(".trainingRatingBtn, .trainingSkipBtn").hover(
       function () { $(this).css("opacity", "0.8"); },
       function () { $(this).css("opacity", "1"); }
     );
   }
 
-  // Pause the quiz so user can rate their performance
-  socket.sendCommand({
-    type: "quiz",
-    command: "quiz pause"
-  });
-  console.log("[AMQ+ Training] Quiz paused for rating");
-
-  // Show rating buttons
+  // Show rating buttons - skip vote will be sent when user clicks a rating
   ratingContainer.fadeIn(300);
+  console.log("[AMQ+ Training] Rating buttons shown, waiting for user input");
 });
 
 trainingAnswerListener.bindListener();
+
+// Listen for "quiz skipping to next phase" command from server to hide rating buttons
+// Set up socket listener once the socket is available
+function setupTrainingSocketListener() {
+  if (typeof socket === 'undefined' || !socket._socket) {
+    console.log("[AMQ+ Training] Socket not available yet, retrying in 1s...");
+    setTimeout(setupTrainingSocketListener, 1000);
+    return;
+  }
+
+  console.log("[AMQ+ Training] Setting up socket command listener");
+  socket._socket.on("command", (payload) => {
+    if (!isTrainingMode) return;
+
+    // Check for quiz skipping to next phase (handle possible typos in server message)
+    if (payload && (
+      payload.command === "quiz skipping to next phase" ||
+      payload.command === "quiz skpping to next phase"
+    )) {
+      console.log("[AMQ+ Training] Quiz skipping to next phase detected, hiding rating buttons");
+      // Immediately hide rating buttons since we're moving to next round
+      $("#trainingRatingSection").fadeOut(100);
+      $("#trainingRatingContainer").fadeOut(100);
+    }
+  });
+  console.log("[AMQ+ Training] Socket command listener registered");
+}
+
+// Initialize the socket listener
+setupTrainingSocketListener();
 
 // ============================================
 // IMPORT OLD TRAINING DATA
