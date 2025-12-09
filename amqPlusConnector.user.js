@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.14
+// @version      1.0.15
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -359,7 +359,6 @@ function setup() {
   setupQuizSavedModalObserver();
   setupQuizCreatorExportButton();
   setupSocketCommandInterceptor();
-  setupGameChatFilter();
   console.log("[AMQ+] Setup complete! Enabled:", amqPlusEnabled);
 }
 
@@ -382,53 +381,6 @@ function setupSocketCommandInterceptor() {
     socket._amqPlusCommandHijacked = true;
     console.log("[AMQ+] Socket command interceptor set up for AMQ+ quizzes");
   }
-}
-
-function setupGameChatFilter() {
-  // Wait for gameChat to be available
-  const checkGameChat = setInterval(() => {
-    if (typeof gameChat !== 'undefined' && gameChat && gameChat.systemMessage) {
-      clearInterval(checkGameChat);
-
-      // Only override once
-      if (gameChat._amqPlusSystemMessageHijacked) {
-        return;
-      }
-
-      const originalSystemMessage = gameChat.systemMessage.bind(gameChat);
-
-      gameChat.systemMessage = function (message) {
-        console.log("[AMQ+ Training] System message received:", message);
-
-        // Check if training mode is active
-        const isTrainingActive = trainingState.currentSession &&
-          trainingState.currentSession.sessionId &&
-          isTrainingMode;
-
-        console.log("[AMQ+ Training] Training active:", isTrainingActive);
-
-        // Filter pause/unpause messages during training mode
-        if (isTrainingActive) {
-          const messageStr = String(message);
-          if (messageStr.includes("has paused the game") || messageStr.includes("has unpaused the game")) {
-            console.log("[AMQ+ Training] 🚫 Blocked pause/unpause system message:", messageStr);
-            return; // Don't call the original function
-          }
-        }
-
-        // Call original for all other messages
-        return originalSystemMessage.call(this, message);
-      };
-
-      gameChat._amqPlusSystemMessageHijacked = true;
-      console.log("[AMQ+] Game chat system message filter set up");
-    }
-  }, 500);
-
-  // Stop checking after 30 seconds
-  setTimeout(() => {
-    clearInterval(checkGameChat);
-  }, 30000);
 }
 
 function setupQuizSavedModalObserver() {
