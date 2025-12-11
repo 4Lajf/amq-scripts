@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.15
+// @version      1.0.16
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -586,7 +586,7 @@ function createTrainingModalHTML() {
                         <div style="margin-bottom: 10px; color: rgba(255,255,255,0.7); font-size: 12px;">
                           <i class="fa fa-info-circle"></i> Manual song distribution (leave blank for auto)
                         </div>
-                        
+
                         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                           <div style="flex: 1; min-width: 140px;">
                             <label style="display: block; margin-bottom: 4px; color: rgba(255,255,255,0.9); font-size: 12px;">
@@ -788,6 +788,7 @@ function createModalHTML() {
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus sync</strong> - Sync player lists manually</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus info</strong> - Display quiz metadata in chat</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus sources</strong> - Toggle song source messages</div>
+                                <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus distribution</strong> (or <strong style="color: #fff;">/amqplus dist</strong>) - Toggle song distribution output</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus [url]</strong> - Fetch quiz from URL</div>
                                 <div style="margin-top: 10px; margin-bottom: 6px; color: #10b981; font-weight: bold;">Player List Commands (Live Node):</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/add [status...]</strong> - Add list statuses</div>
@@ -1897,7 +1898,7 @@ function fetchQuiz(quizId, liveNodeData = null) {
     console.log("[AMQ+] API URL:", apiUrl);
 
     const requestConfig = {
-      method: liveNodeData ? "POST" : "GET",
+      method: (liveNodeData || lobby?.gameId) ? "POST" : "GET",
       url: apiUrl,
       onload: function (response) {
         console.log("[AMQ+] Server response status:", response.status);
@@ -1954,11 +1955,28 @@ function fetchQuiz(quizId, liveNodeData = null) {
       }
     };
 
-    if (liveNodeData) {
+    if (liveNodeData || lobby?.gameId) {
       requestConfig.headers = {
         "Content-Type": "application/json"
       };
-      requestConfig.data = JSON.stringify({ liveNodeData: liveNodeData });
+
+      const payload = {};
+      if (liveNodeData) {
+        payload.liveNodeData = liveNodeData;
+      }
+      if (lobby?.gameId) {
+        payload.roomId = String(lobby.gameId);
+        console.log("[AMQ+] Including roomId in request:", payload.roomId);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/2fbe1aae-e005-43ec-9225-34585230a3a9', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'amqplusconnector.js:1970', message: 'RoomId added to payload', data: { roomId: payload.roomId, gameId: lobby.gameId, hasLobby: !!lobby, payloadKeys: Object.keys(payload) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
+        // #endregion
+      } else {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/2fbe1aae-e005-43ec-9225-34585230a3a9', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'amqplusconnector.js:1975', message: 'No roomId in payload', data: { hasLobby: !!lobby, lobbyGameId: lobby?.gameId, lobbyInLobby: lobby?.inLobby }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
+        // #endregion
+      }
+
+      requestConfig.data = JSON.stringify(payload);
     }
 
     GM_xmlhttpRequest(requestConfig);
@@ -2436,8 +2454,11 @@ function handlePlayerListCommand(message, sender) {
   }
 }
 
+// Distribution Output Logic
+let distributionOutputEnabled = false;
+
 /**
- * Show help information for list commands
+ * Handle listhelp command
  */
 function handleListHelpCommand(sender, isLiveNodeConfigured) {
   const helpMessages = [
@@ -2690,6 +2711,10 @@ function handleChatCommand(msg) {
     songSourceMessagesEnabled = !songSourceMessagesEnabled;
     saveSettings();
     sendSystemMessage("Song source messages " + (songSourceMessagesEnabled ? "enabled" : "disabled"));
+  } else if (parts[1] === "distribution" || parts[1] === "dist") {
+    console.log("[AMQ+] Distribution command received");
+    distributionOutputEnabled = !distributionOutputEnabled;
+    sendSystemMessage("Song distribution output " + (distributionOutputEnabled ? "enabled" : "disabled"));
   } else if (parts.length > 1) {
     const url = parts.slice(1).join(" ");
     console.log("[AMQ+] URL command received:", url);
@@ -2895,6 +2920,52 @@ function setupListeners() {
       } else if (typeof lobby !== 'undefined' && !lobby.isHost) {
         console.log("[AMQ+] Not the host, skipping play count");
       }
+
+      // Send song distribution summary if enabled and songSourceMap is available
+      if (distributionOutputEnabled && songSourceMap && songSourceMap.size > 0) {
+        console.log("[AMQ+] Game starting, calculating song distribution...");
+
+        const distribution = new Map();
+        let totalMapped = 0;
+
+        songSourceMap.forEach((info) => {
+          const formatted = formatSourceInfo(info);
+          // Use text instead of fullInfo to group properly
+          let key = formatted.text;
+
+          // Clean up key for better display
+          if (key.startsWith('from list - ')) {
+            key = key.substring(12); // Remove "from list - " prefix
+          }
+
+          distribution.set(key, (distribution.get(key) || 0) + 1);
+          totalMapped++;
+        });
+
+        if (totalMapped > 0) {
+          const sortedDist = Array.from(distribution.entries()).sort((a, b) => b[1] - a[1]);
+
+          setTimeout(() => {
+            // Header message
+            socket.sendCommand({
+              type: "lobby",
+              command: "game chat message",
+              data: { msg: "📊 Song distribution:", teamMessage: false }
+            });
+
+            // Individual member messages
+            sortedDist.forEach(([name, count], index) => {
+              setTimeout(() => {
+                socket.sendCommand({
+                  type: "lobby",
+                  command: "game chat message",
+                  data: { msg: `${name}: ${count} song${count !== 1 ? 's' : ''}`, teamMessage: false }
+                });
+              }, 100 * (index + 1));
+            });
+          }, 1500); // Delay slightly after credits message
+        }
+      }
     }
     // Reset song tracking (preserve songSourceMap - it's built from quiz data and needed during game)
     currentSongNumber = 0;
@@ -3011,8 +3082,9 @@ function setupListeners() {
 }
 
 function fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMainButtonEvent) {
+  console.log("[AMQ+] fetchQuizForReRoll called - quizId:", quizId, "hasLiveNodeData:", !!liveNodeData, "lobbyExists:", typeof lobby !== 'undefined', "lobbyGameId:", typeof lobby !== 'undefined' ? lobby.gameId : 'N/A');
   const requestConfig = {
-    method: liveNodeData ? "POST" : "GET",
+    method: (liveNodeData || (typeof lobby !== 'undefined' && lobby.gameId)) ? "POST" : "GET",
     url: `${API_BASE_URL}/play/${quizId}`,
     onload: function (response) {
       console.log("[AMQ+] Re-roll response status:", response.status);
@@ -3072,13 +3144,22 @@ function fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMai
     }
   };
 
-  if (liveNodeData) {
+  if (liveNodeData || (typeof lobby !== 'undefined' && lobby.gameId)) {
     requestConfig.headers = {
       "Content-Type": "application/json"
     };
-    requestConfig.data = JSON.stringify({ liveNodeData: liveNodeData });
+    const payload = {};
+    if (liveNodeData) {
+      payload.liveNodeData = liveNodeData;
+    }
+    if (typeof lobby !== 'undefined' && lobby.gameId) {
+      payload.roomId = String(lobby.gameId);
+      console.log("[AMQ+] Including roomId in re-roll request:", payload.roomId);
+    }
+    requestConfig.data = JSON.stringify(payload);
   }
 
+  console.log("[AMQ+] Re-roll request config - method:", requestConfig.method, "hasData:", !!requestConfig.data, "dataPreview:", requestConfig.data ? requestConfig.data.substring(0, 100) : 'N/A');
   GM_xmlhttpRequest(requestConfig);
 }
 
@@ -3883,44 +3964,33 @@ function handleMetadataCommand() {
   });
 }
 
-function formatMetadataWithCountOrPercentage(label, icon, data) {
+function formatBadgeMetadata(label, icon, data, mode = 'count', color = null) {
   if (!data?.enabled) return null;
 
-  // Always display the count, which is now the allocated value
-  if (data.count !== undefined) {
-    return `${icon} ${label} ${data.count}`;
-  }
+  let text = '';
 
-  // Fallback for older metadata formats or if count is missing
-  if (data.minCount !== undefined && data.maxCount !== undefined) {
-    return `${icon} ${label} ${data.minCount}-${data.maxCount}`;
-  } else {
-    const percent = data.percentage || 0;
-    if (data.random) {
-      return `${icon} ${label} ${percent}% (${data.minPercentage || 0}-${data.maxPercentage || 0})`;
+  // Count mode
+  if (mode === 'count') {
+    if (data.random && data.minCount !== undefined && data.maxCount !== undefined && data.minCount < data.maxCount) {
+      text = `${data.minCount}-${data.maxCount}`;
+    } else if (data.count !== undefined) {
+      text = `${data.count}`;
+    } else {
+      // Fallback if count is missing but enabled
+      text = '0';
     }
-    return `${icon} ${label} ${percent}%`;
   }
-}
-
-function formatSongTypeMetadata(label, icon, data) {
-  if (!data?.enabled) return null;
-
-  // Always display the count, which is now the allocated value
-  if (data.count !== undefined) {
-    return `${icon} ${label} ${data.count}`;
-  }
-
-  // Fallback for older metadata formats or if count is missing
-  if (data.minCount !== undefined && data.maxCount !== undefined) {
-    return `${icon} ${label} ${data.minCount}-${data.maxCount}`;
-  } else {
-    const percent = data.percentage || 0;
+  // Percentage mode
+  else {
+    text = `${data.percentage || 0}%`;
     if (data.random) {
-      return `${icon} ${label} ${percent}% (${data.minPercentage || 0}-${data.maxPercentage || 0})`;
+      text += ` (${data.minPercentage || 0}-${data.maxPercentage || 0})`;
     }
-    return `${icon} ${label} ${percent}%`;
   }
+
+  // Construct final message
+  // Using simplified formatting for chat: "Icon Label Value"
+  return `${icon} ${label} ${text}`;
 }
 
 function sendQuizMetadataAsMessages(quiz) {
@@ -3928,56 +3998,52 @@ function sendQuizMetadataAsMessages(quiz) {
   if (quiz.quiz_metadata) {
     const meta = quiz.quiz_metadata;
 
+    // 1. Estimated Songs
     if (meta.estimatedSongs) {
       if (meta.estimatedSongs.min === 'unknown') {
-        messages.push(`🎶 Songs: Unknown`);
+        messages.push(`🎶 Unknown songs`);
       } else if (meta.estimatedSongs.min === meta.estimatedSongs.max) {
-        messages.push(`🎶 Songs: ${meta.estimatedSongs.min}`);
+        messages.push(`🎶 ${meta.estimatedSongs.min} songs`);
       } else {
-        messages.push(`🎶 Songs: ${meta.estimatedSongs.min}-${meta.estimatedSongs.max}`);
+        messages.push(`🎶 ${meta.estimatedSongs.min}-${meta.estimatedSongs.max} songs`);
       }
     }
 
-    // Add guess time information
-    if (meta.guessTime) {
-      const gt = meta.guessTime.guessTime;
-      const egt = meta.guessTime.extraGuessTime;
-      let guessTimeMsg = '⏱️ Guess Time: ';
-
-      if (gt.useRange) {
-        guessTimeMsg += `${gt.min}-${gt.max}s`;
-      } else {
-        guessTimeMsg += `${gt.staticValue}s`;
-      }
-
-      // Add extra guess time if present and non-zero
-      if (egt && ((egt.useRange && (egt.min > 0 || egt.max > 0)) || (!egt.useRange && egt.staticValue > 0))) {
-        guessTimeMsg += ' + ';
-        if (egt.useRange) {
-          guessTimeMsg += `${egt.min}-${egt.max}s`;
-        } else {
-          guessTimeMsg += `${egt.staticValue}s`;
-        }
-      }
-
-      messages.push(guessTimeMsg);
-    }
-
+    // 2. Song Types
     if (meta.songTypes) {
+      const songTypesMode = (
+        meta.songTypes.openings?.count !== undefined ||
+        meta.songTypes.openings?.minCount !== undefined ||
+        meta.songTypes.endings?.count !== undefined ||
+        meta.songTypes.endings?.minCount !== undefined ||
+        meta.songTypes.inserts?.count !== undefined ||
+        meta.songTypes.inserts?.minCount !== undefined
+      ) ? 'count' : 'percentage';
+
       const songTypeFormatters = [
-        { data: meta.songTypes.openings, label: 'OP', icon: '🎵' },
-        { data: meta.songTypes.endings, label: 'ED', icon: '🎵' },
-        { data: meta.songTypes.inserts, label: 'IN', icon: '🎵' }
+        { data: meta.songTypes.openings, label: 'OP' },
+        { data: meta.songTypes.endings, label: 'ED' },
+        { data: meta.songTypes.inserts, label: 'IN' }
       ];
 
       songTypeFormatters.forEach(formatter => {
-        const msg = formatMetadataWithCountOrPercentage(formatter.label, formatter.icon, formatter.data);
+        const msg = formatBadgeMetadata(formatter.label, '🎵', formatter.data, songTypesMode);
         if (msg) messages.push(msg);
       });
     }
 
+    // 3. Difficulty
     if (meta.difficulty) {
       if (meta.difficulty.mode === 'basic') {
+        const difficultyMode = (
+          meta.difficulty.levels.easy?.count !== undefined ||
+          meta.difficulty.levels.easy?.minCount !== undefined ||
+          meta.difficulty.levels.medium?.count !== undefined ||
+          meta.difficulty.levels.medium?.minCount !== undefined ||
+          meta.difficulty.levels.hard?.count !== undefined ||
+          meta.difficulty.levels.hard?.minCount !== undefined
+        ) ? 'count' : 'percentage';
+
         const difficultyLevels = [
           { data: meta.difficulty.levels.easy, label: 'Easy' },
           { data: meta.difficulty.levels.medium, label: 'Medium' },
@@ -3985,30 +4051,105 @@ function sendQuizMetadataAsMessages(quiz) {
         ];
 
         difficultyLevels.forEach(({ data, label }) => {
-          const formatted = formatMetadataWithCountOrPercentage(label, '⭐', data);
-          if (formatted) messages.push(formatted);
+          const msg = formatBadgeMetadata(label, '⭐', data, difficultyMode);
+          if (msg) messages.push(msg);
         });
       } else if (meta.difficulty.mode === 'advanced') {
         if (meta.difficulty.ranges && meta.difficulty.ranges.length > 0) {
           meta.difficulty.ranges.forEach(range => {
-            messages.push(`⭐ ${range.from}-${range.to} (${range.count})`);
+            if (range.count) {
+              messages.push(`⭐ ${range.from}-${range.to} (${range.count})`);
+            }
           });
         }
       }
     }
 
+    // 4. Vintage
+    if (meta.vintage && meta.vintage.ranges && meta.vintage.ranges.length > 0) {
+      const mode = meta.vintage.mode || 'percentage';
+      const isPercentage = mode === 'percentage';
+
+      meta.vintage.ranges.forEach(range => {
+        let rangeInfo = `📅 ${range.from.season} ${range.from.year}-${range.to.season} ${range.to.year}`;
+
+        if (range.type === 'advanced') {
+          if (isPercentage) {
+            if (range.percentage !== undefined) {
+              rangeInfo += ` (${range.percentage}%)`;
+            }
+          } else {
+            if (range.count !== undefined) {
+              rangeInfo += ` (${range.count})`;
+            }
+          }
+        } else {
+          rangeInfo += ` (Random)`;
+        }
+
+        messages.push(rangeInfo);
+      });
+    }
+
+    // 5. Song Selection
     if (meta.songSelection) {
-      const randomMsg = formatMetadataWithCountOrPercentage('Random', '🎲', meta.songSelection.random);
+      const songSelectionMode = (
+        meta.songSelection.random?.count !== undefined ||
+        meta.songSelection.random?.minCount !== undefined ||
+        meta.songSelection.watched?.count !== undefined ||
+        meta.songSelection.watched?.minCount !== undefined
+      ) ? 'count' : 'percentage';
+
+      const randomMsg = formatBadgeMetadata('Random', '🎲', meta.songSelection.random, songSelectionMode);
       if (randomMsg) messages.push(randomMsg);
-      const watchedMsg = formatMetadataWithCountOrPercentage('Watched', '👁️', meta.songSelection.watched);
+
+      const watchedMsg = formatBadgeMetadata('Watched', '👁️', meta.songSelection.watched, songSelectionMode);
       if (watchedMsg) messages.push(watchedMsg);
     }
 
-    // Advanced difficulty ranges
-    if (meta.difficulty && meta.difficulty.mode === 'advanced' && meta.difficulty.ranges) {
-      meta.difficulty.ranges.forEach(range => {
-        messages.push(`⭐ ${range.from}-${range.to} (${range.count})`);
-      });
+    // 6. Live Node / List Mode
+    if (meta.sourceNodes) {
+      const liveNode = meta.sourceNodes.find(n => n.type === 'liveNode');
+      const batchUserListNode = meta.sourceNodes.find(n => n.type === 'batchUserList');
+      const sourceNodeWithMode = liveNode || batchUserListNode;
+
+      if (liveNode) {
+        messages.push('🔴 Live Node');
+      }
+
+      if (sourceNodeWithMode?.songSelectionMode) {
+        const modeNames = {
+          default: 'Random',
+          'many-lists': 'All Shared',
+          'few-lists': 'No Shared'
+        };
+        const modeName = modeNames[sourceNodeWithMode.songSelectionMode] || sourceNodeWithMode.songSelectionMode;
+        messages.push(`📊 ${modeName}`);
+      }
+    }
+
+    // 7. Guess Time
+    if (meta.guessTime) {
+      const gt = meta.guessTime.guessTime;
+      const egt = meta.guessTime.extraGuessTime;
+      let guessTimeMsg = '⏱️ ';
+
+      if (gt.useRange) {
+        guessTimeMsg += `${gt.min}-${gt.max}s`;
+      } else {
+        guessTimeMsg += `${gt.staticValue !== undefined ? gt.staticValue : (gt.min || 0)}s`;
+      }
+
+      if (egt && ((egt.useRange && (egt.min > 0 || egt.max > 0)) || (!egt.useRange && (egt.staticValue !== undefined ? egt.staticValue > 0 : egt.min > 0)))) {
+        guessTimeMsg += ' + ';
+        if (egt.useRange) {
+          guessTimeMsg += `${egt.min}-${egt.max}s`;
+        } else {
+          guessTimeMsg += `${egt.staticValue !== undefined ? egt.staticValue : egt.min}s`;
+        }
+      }
+
+      messages.push(guessTimeMsg);
     }
 
     if (messages.length > 0) {
