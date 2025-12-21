@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.20
+// @version      1.0.21
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -69,6 +69,7 @@ let trainingState = {
   userQuizzes: [],
   newSongPercentage: 30,
   urlLoadedQuizId: null,
+  urlLoadedQuizToken: null, // Store play token for URL-loaded quizzes
   urlLoadedQuizName: null,
   urlLoadedQuizSongCount: null,
   currentSession: {
@@ -149,6 +150,7 @@ function loadTrainingSettings() {
       // Load URL-loaded quiz info if saved
       if (state.urlLoadedQuizId) {
         trainingState.urlLoadedQuizId = state.urlLoadedQuizId;
+        trainingState.urlLoadedQuizToken = state.urlLoadedQuizToken;
         trainingState.urlLoadedQuizName = state.urlLoadedQuizName;
         trainingState.urlLoadedQuizSongCount = state.urlLoadedQuizSongCount;
         console.log("[AMQ+ Training] Restored URL-loaded quiz:", state.urlLoadedQuizName);
@@ -176,6 +178,7 @@ function saveTrainingSettings() {
     const stateToSave = {
       newSongPercentage: trainingState.newSongPercentage,
       urlLoadedQuizId: trainingState.urlLoadedQuizId,
+      urlLoadedQuizToken: trainingState.urlLoadedQuizToken,
       urlLoadedQuizName: trainingState.urlLoadedQuizName,
       urlLoadedQuizSongCount: trainingState.urlLoadedQuizSongCount
     };
@@ -544,6 +547,20 @@ function createTrainingModalHTML() {
 
                 <div id="trainingQuizList" style="max-height: 400px; overflow-y: auto;"></div>
 
+                <!-- JSON Import Section -->
+                <div style="margin-top: 15px; padding: 10px 12px; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <i class="fa fa-file-code-o" style="color: #6366f1; font-size: 16px;"></i>
+                    <div>
+                      <div style="color: #fff; font-size: 13px; font-weight: bold;">Import from JSON</div>
+                      <div style="color: rgba(255,255,255,0.6); font-size: 11px;">Import songs from a JSON file</div>
+                    </div>
+                  </div>
+                  <button id="trainingJsonImportBtn" class="btn btn-sm btn-primary" style="background-color: #6366f1; border-color: #6366f1; padding: 5px 15px; font-size: 12px; font-weight: bold;">
+                    <i class="fa fa-upload"></i> Import
+                  </button>
+                </div>
+
                 <!-- Import from Old Script Section -->
                 <div style="margin-top: 20px; padding: 8px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;">
                   <div id="trainingImportToggle" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 4px 0;">
@@ -687,6 +704,50 @@ function createTrainingModalHTML() {
                   <i class="fa fa-check-circle"></i> <span>Progress synced successfully</span>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function createJsonImportInstructionsModalHTML() {
+  const baseUrl = API_BASE_URL;
+  return `
+    <div class="modal fade" id="amqPlusJsonImportInstructionsModal" tabindex="-1" role="dialog">
+      <div class="modal-dialog" role="document" style="width: 550px; max-width: 95%;">
+        <div class="modal-content" style="background-color: #1a1a2e; color: #e2e8f0; border: 1px solid #4a5568;">
+          <div class="modal-header" style="border-bottom: 1px solid #2d3748; padding: 15px 20px;">
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close" style="color: #fff; opacity: 0.8;">
+              <span aria-hidden="true">&times;</span>
+            </button>
+            <h4 class="modal-title" style="font-weight: bold; color: #fff;">
+              <i class="fa fa-info-circle" style="color: #6366f1; margin-right: 8px;"></i>
+              JSON Import Moved
+            </h4>
+          </div>
+          <div class="modal-body" style="padding: 20px;">
+            <p style="margin-bottom: 20px; font-size: 14px; line-height: 1.5;">
+              The JSON import feature has been moved to the AMQ+ website to provide a better experience and more features.
+            </p>
+            
+            <div style="background: rgba(99, 102, 241, 0.1); border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.3); padding: 15px; margin-bottom: 20px;">
+              <h5 style="color: #fff; font-weight: bold; margin-top: 0; margin-bottom: 15px; font-size: 15px;">Steps to import:</h5>
+              <ol style="padding-left: 20px; margin: 0; font-size: 13px; line-height: 1.8;">
+                <li>Go to <a href="${baseUrl}/songlist/create" target="_blank" style="color: #6366f1; text-decoration: underline; font-weight: bold;">${baseUrl}/songlist/create</a></li>
+                <li>Choose <strong>"Provider Import"</strong> and upload your JSON file</li>
+                <li>Go to <a href="${baseUrl}/quizzes" target="_blank" style="color: #6366f1; text-decoration: underline; font-weight: bold;">${baseUrl}/quizzes</a> and click <strong>"Create Quiz"</strong></li>
+                <li>In the <strong>"Song List"</strong> node settings, set the source to <strong>"Saved Lists"</strong></li>
+                <li>Select your imported list from the dropdown</li>
+                <li><i class="fa fa-lightbulb-o" style="color: #f59e0b;"></i> <strong>Tip:</strong> Optionally check <strong>"Use the entire pool"</strong> to prevent the app from filtering your list (insert songs are off by default for example).</li>
+              </ol>
+            </div>
+
+            <div style="text-align: center;">
+              <button class="btn btn-primary" data-dismiss="modal" style="background-color: #6366f1; border-color: #6366f1; padding: 8px 30px; font-weight: bold;">
+                Got it!
+              </button>
             </div>
           </div>
         </div>
@@ -868,6 +929,7 @@ function createUI() {
 
   const modal = $(createModalHTML());
   const trainingModal = $(createTrainingModalHTML());
+  const instructionsModal = $(createJsonImportInstructionsModalHTML());
   const gameContainer = $("#gameContainer");
   if (gameContainer.length > 0) {
     if ($("#amqPlusModal").length === 0) {
@@ -887,6 +949,10 @@ function createUI() {
       console.log("[AMQ+ Training] Training modal already exists");
       attachTrainingModalHandlers();
     }
+
+    if ($("#amqPlusJsonImportInstructionsModal").length === 0) {
+      gameContainer.append(instructionsModal);
+    }
   } else {
     console.warn("[AMQ+] GameContainer not found, appending to body as fallback");
     if ($("#amqPlusModal").length === 0) {
@@ -901,6 +967,10 @@ function createUI() {
       attachTrainingModalHandlers();
     } else {
       attachTrainingModalHandlers();
+    }
+
+    if ($("#amqPlusJsonImportInstructionsModal").length === 0) {
+      $("body").append(instructionsModal);
     }
   }
 }
@@ -4224,6 +4294,10 @@ function attachTrainingModalHandlers() {
     importOldTrainingData();
   });
 
+  $("#trainingJsonImportBtn").off("click").on("click", () => {
+    $("#amqPlusJsonImportInstructionsModal").modal("show");
+  });
+
   // Handle loading from URL
   $("#trainingLoadFromUrlBtn").off("click").on("click", () => {
     loadTrainingFromUrl();
@@ -4256,8 +4330,8 @@ function attachTrainingModalHandlers() {
   });
 
   $("#trainingStartBtn").off("click").on("click", () => {
-    // Check if a quiz was loaded from URL
-    let selectedQuizId = trainingState.urlLoadedQuizId;
+    // Check if a quiz was loaded from URL (use token if available, otherwise ID)
+    let selectedQuizId = trainingState.urlLoadedQuizToken || trainingState.urlLoadedQuizId;
 
     // If no URL quiz, check if a quiz card was selected
     if (!selectedQuizId) {
@@ -4561,6 +4635,7 @@ function loadTrainingQuizzes() {
 function resetUrlQuizSelection() {
   console.log("[AMQ+ Training] Resetting URL quiz selection");
   trainingState.urlLoadedQuizId = null;
+  trainingState.urlLoadedQuizToken = null;
   trainingState.urlLoadedQuizName = null;
   trainingState.urlLoadedQuizSongCount = null;
   saveTrainingSettings(); // Save the reset state
@@ -4720,8 +4795,9 @@ function restoreUrlQuizDisplay() {
     console.log("[AMQ+ Training] Restoring URL quiz display:", trainingState.urlLoadedQuizName);
     $("#trainingUrlQuizName").text(trainingState.urlLoadedQuizName);
 
-    // Update stats display
-    $("#trainingUrlQuizStats").html(getQuizStatsHTML(trainingState.urlLoadedQuizId));
+    // Update stats display - use token if available, otherwise ID
+    const quizIdentifier = trainingState.urlLoadedQuizToken || trainingState.urlLoadedQuizId;
+    $("#trainingUrlQuizStats").html(getQuizStatsHTML(quizIdentifier));
 
     $("#trainingUrlInputSection").hide();
     $("#trainingUrlQuizDetails").show();
@@ -4771,13 +4847,10 @@ function loadTrainingFromUrl() {
     const loadBtn = $("#trainingLoadFromUrlBtn");
     loadBtn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Loading...');
 
-    // Determine if this is a play token (contains hyphens) or a quiz ID
-    const isPlayToken = identifier.includes('-');
-    const apiUrl = isPlayToken
-      ? `${API_BASE_URL}/api/quiz/play/${identifier}`
-      : `${API_BASE_URL}/api/quiz/${identifier}`;
+    // Always treat identifier as a play token for URL-based fetching
+    const apiUrl = `${API_BASE_URL}/api/quiz/play/${identifier}`;
 
-    console.log("[AMQ+ Training] Fetching quiz info from:", apiUrl, isPlayToken ? "(play token)" : "(quiz ID)");
+    console.log("[AMQ+ Training] Fetching quiz info from:", apiUrl, "(play token)");
 
     // Fetch quiz details from server using helper
     makeApiRequest({
@@ -4787,9 +4860,11 @@ function loadTrainingFromUrl() {
       onSuccess: (quizData) => {
         console.log("[AMQ+ Training] Quiz loaded:", quizData);
 
-        // Store quiz info in training state (use actual quiz ID from response if it's a token)
+        // Store quiz info in training state (use token for API calls, ID for matching)
         const quizId = quizData.id || identifier;
+        const quizToken = quizData.token || identifier; // Use token from response or fallback to identifier
         trainingState.urlLoadedQuizId = quizId;
+        trainingState.urlLoadedQuizToken = quizToken;
         trainingState.urlLoadedQuizName = quizData.name;
         trainingState.urlLoadedQuizSongCount = quizData.songCount || 0;
         saveTrainingSettings(); // Save URL quiz info
@@ -4808,12 +4883,12 @@ function loadTrainingFromUrl() {
           $("#trainingUrlQuizDetails").show();
           $(".training-quiz-card").removeClass("selected");
         } else {
-          // Quiz not in list, fetch stats from server
-          console.log("[AMQ+ Training] Quiz not in list, fetching stats from server");
-          fetchQuizStatsAndDisplay(quizId, quizData.name);
+          // Quiz not in list, fetch stats from server using token
+          console.log("[AMQ+ Training] Quiz not in list, fetching stats from server using token:", quizToken);
+          fetchQuizStatsAndDisplay(quizToken, quizData.name);
         }
 
-        console.log("[AMQ+ Training] Quiz details displayed for:", quizData.name, "(ID:", quizId + ")");
+        console.log("[AMQ+ Training] Quiz details displayed for:", quizData.name, "(ID:", quizId, "Token:", quizToken + ")");
       },
       onError: (errorMsg) => {
         errorDiv.html('<i class="fa fa-exclamation-triangle"></i> ' + errorMsg).show();
