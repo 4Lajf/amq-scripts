@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.18
+// @version      1.0.19
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -4476,6 +4476,9 @@ function refreshAllQuizStats() {
 function loadTrainingQuizzes() {
   const quizListDiv = $("#trainingQuizList");
 
+  // Populate profile dropdown (always do this, even if user has no quizzes yet)
+  scanOldTrainingProfiles();
+
   if (!trainingState.userQuizzes || trainingState.userQuizzes.length === 0) {
     quizListDiv.html(`
       <div style="text-align: center; padding: 40px; color: rgba(255,255,255,0.6);">
@@ -4485,9 +4488,6 @@ function loadTrainingQuizzes() {
     `);
     return;
   }
-
-  // Populate profile dropdown
-  scanOldTrainingProfiles();
 
   let html = "";
   console.log("[AMQ+ Training] Rendering quiz list, userQuizzes count:", trainingState.userQuizzes.length);
@@ -5544,39 +5544,57 @@ setupTrainingSocketListener();
 // ============================================
 
 function scanOldTrainingProfiles() {
+  console.log("[AMQ+ Training] Scanning for old training profiles...");
+
+  // Log all localStorage keys for debugging
+  const allKeys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    allKeys.push(localStorage.key(i));
+  }
+  console.log("[AMQ+ Training] All localStorage keys:", allKeys);
+
   let foundProfiles = new Set();
 
   // 1. Pattern-based discovery from localStorage (Most reliable)
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
+  for (const key of allKeys) {
     if (key && key.startsWith('spacedRepetitionData_')) {
       const profileName = key.replace('spacedRepetitionData_', '');
       if (profileName) {
+        console.log(`[AMQ+ Training] Discovered profile via pattern: ${profileName}`);
         foundProfiles.add(profileName);
       }
     }
   }
 
-  // 2. Legacy check: cslProfiles array
-  try {
-    const profilesData = localStorage.getItem('cslProfiles');
-    if (profilesData) {
-      const profiles = JSON.parse(profilesData);
-      if (Array.isArray(profiles)) {
-        profiles.forEach(p => {
-          if (p) foundProfiles.add(p);
-        });
+  // 2. Legacy check: cslProfiles/CSLProfiles array
+  const legacyProfileKeys = ['cslProfiles', 'CSLProfiles'];
+  for (const profileKey of legacyProfileKeys) {
+    try {
+      const profilesData = localStorage.getItem(profileKey);
+      if (profilesData) {
+        console.log(`[AMQ+ Training] Found ${profileKey} in localStorage, parsing...`);
+        const profiles = JSON.parse(profilesData);
+        if (Array.isArray(profiles)) {
+          profiles.forEach(p => {
+            if (p) {
+              console.log(`[AMQ+ Training] Discovered profile via ${profileKey}: ${p}`);
+              foundProfiles.add(p);
+            }
+          });
+        }
       }
+    } catch (e) {
+      console.warn(`[AMQ+ Training] Error parsing ${profileKey}:`, e);
     }
-  } catch (e) {
-    console.warn('[AMQ+ Training] Error parsing cslProfiles:', e);
   }
 
   // Populate dropdown with song counts (one profile at a time)
   const profileSelect = $("#trainingImportProfileSelect");
   if (foundProfiles.size === 0) {
+    console.log("[AMQ+ Training] No legacy training profiles found.");
     profileSelect.html('<option value="">No training data found</option>');
   } else {
+    console.log(`[AMQ+ Training] Total profiles found: ${foundProfiles.size}`);
     let html = '<option value="">Select profile to import...</option>';
     // Convert Set back to Array for sorted display
     Array.from(foundProfiles).sort().forEach(profile => {
@@ -5585,7 +5603,10 @@ function scanOldTrainingProfiles() {
         if (data) {
           const parsed = JSON.parse(data);
           const songCount = Object.keys(parsed).length;
+          console.log(`[AMQ+ Training] Profile "${profile}" has ${songCount} songs.`);
           html += `<option value="${profile}">${profile} (${songCount} songs)</option>`;
+        } else {
+          console.log(`[AMQ+ Training] Profile "${profile}" has no data in localStorage.`);
         }
       } catch (e) {
         console.warn(`Error reading profile ${profile}:`, e);
@@ -5596,6 +5617,15 @@ function scanOldTrainingProfiles() {
 }
 
 function getOldTrainingData(specificProfile = null) {
+  console.log(`[AMQ+ Training] Getting old training data${specificProfile ? ` for profile: ${specificProfile}` : ''}...`);
+
+  // Log all localStorage keys for debugging
+  const allKeys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    allKeys.push(localStorage.key(i));
+  }
+  // console.log("[AMQ+ Training] All localStorage keys:", allKeys); // Already logged in scanOldTrainingProfiles
+
   const oldData = {};
   let foundProfiles = new Set();
 
@@ -5604,29 +5634,32 @@ function getOldTrainingData(specificProfile = null) {
     foundProfiles.add(specificProfile);
   } else {
     // 1. Pattern-based discovery
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
+    for (const key of allKeys) {
       if (key && key.startsWith('spacedRepetitionData_')) {
         const profileName = key.replace('spacedRepetitionData_', '');
         if (profileName) foundProfiles.add(profileName);
       }
     }
 
-    // 2. Legacy check
-    try {
-      const profilesData = localStorage.getItem('cslProfiles');
-      if (profilesData) {
-        const profiles = JSON.parse(profilesData);
-        if (Array.isArray(profiles)) {
-          profiles.forEach(p => {
-            if (p) foundProfiles.add(p);
-          });
+    // 2. Legacy check: cslProfiles/CSLProfiles array
+    const legacyProfileKeys = ['cslProfiles', 'CSLProfiles'];
+    for (const profileKey of legacyProfileKeys) {
+      try {
+        const profilesData = localStorage.getItem(profileKey);
+        if (profilesData) {
+          const profiles = JSON.parse(profilesData);
+          if (Array.isArray(profiles)) {
+            profiles.forEach(p => {
+              if (p) foundProfiles.add(p);
+            });
+          }
         }
-      }
-    } catch (e) { }
+      } catch (e) { }
+    }
 
     // Fallback to default if nothing found
     if (foundProfiles.size === 0) {
+      console.log("[AMQ+ Training] No profiles found, falling back to 'default'");
       foundProfiles.add('default');
     }
 
@@ -5637,6 +5670,7 @@ function getOldTrainingData(specificProfile = null) {
   for (const profile of foundProfiles) {
     const key = `spacedRepetitionData_${profile}`;
     try {
+      console.log(`[AMQ+ Training] Attempting to load data from key: ${key}`);
       const stored = localStorage.getItem(key);
       if (stored) {
         const parsed = JSON.parse(stored);
@@ -5647,11 +5681,12 @@ function getOldTrainingData(specificProfile = null) {
           // Check for amqTrainingMode.js properties
           if (firstValue && typeof firstValue === 'object' &&
             ('efactor' in firstValue || 'successCount' in firstValue || 'lastFiveTries' in firstValue)) {
-            console.log(`[AMQ+ Training] Found training data in profile: ${profile} (${Object.keys(parsed).length} songs)`);
+            console.log(`[AMQ+ Training] Found valid training data in profile: ${profile} (${Object.keys(parsed).length} songs)`);
 
             // Convert the data to the format expected by the import API
             // The old format uses songKey as "${artist}_${songName}"
             // We need to keep this format and add any missing fields
+            let convertedCount = 0;
             for (const [songKey, songData] of Object.entries(parsed)) {
               oldData[songKey] = {
                 efactor: songData.efactor || 2.5,
@@ -5666,15 +5701,24 @@ function getOldTrainingData(specificProfile = null) {
                 // We approximate it from the data we have
                 interval: songData.weight ? Math.max(1, Math.round(songData.weight / 100)) : 1
               };
+              convertedCount++;
             }
+            console.log(`[AMQ+ Training] Successfully converted ${convertedCount} songs from profile: ${profile}`);
+          } else {
+            console.warn(`[AMQ+ Training] Data in profile ${profile} does not match expected training format (first key check failed).`);
           }
+        } else {
+          console.warn(`[AMQ+ Training] Data in profile ${profile} is empty or not an object.`);
         }
+      } else {
+        console.log(`[AMQ+ Training] No data found in localStorage for profile: ${profile}`);
       }
     } catch (e) {
       console.warn(`[AMQ+ Training] Error parsing localStorage key ${key}:`, e);
     }
   }
 
+  console.log(`[AMQ+ Training] Total songs collected for import: ${Object.keys(oldData).length}`);
   return oldData;
 }
 
@@ -5755,6 +5799,7 @@ function updateImportProgress(data) {
 
 function importOldTrainingData() {
   const selectedProfile = $("#trainingImportProfileSelect").val();
+  console.log(`[AMQ+ Training] Initializing import for profile: ${selectedProfile || 'none'}`);
 
   if (!selectedProfile) {
     showImportStatus("Please select a profile to import", "error");
@@ -5762,6 +5807,7 @@ function importOldTrainingData() {
   }
 
   if (!trainingState.authToken) {
+    console.warn("[AMQ+ Training] Import aborted: No auth token found.");
     showImportStatus("Please link your account first", "error");
     return;
   }
@@ -5770,12 +5816,15 @@ function importOldTrainingData() {
   const oldData = getOldTrainingData(selectedProfile);
 
   if (!oldData || Object.keys(oldData).length === 0) {
+    console.warn(`[AMQ+ Training] Import aborted: No training data found for profile "${selectedProfile}"`);
     showImportStatus("No training data found for this profile", "warning");
     return;
   }
 
   const songCount = Object.keys(oldData).length;
+  console.log(`[AMQ+ Training] Preparing to import ${songCount} songs.`);
   if (!confirm(`Import ${songCount} songs from profile "${selectedProfile}"?\n\nThis will create a new quiz with the imported training data.\n\nNote: This process will take approximately ${songCount} seconds.`)) {
+    console.log("[AMQ+ Training] Import cancelled by user.");
     return;
   }
 
@@ -5787,6 +5836,7 @@ function importOldTrainingData() {
 
   // First, create the quiz with the profile name
   const quizName = `Imported: ${selectedProfile}`;
+  console.log(`[AMQ+ Training] Creating quiz: ${quizName}`);
 
   GM_xmlhttpRequest({
     method: "POST",
