@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.17
+// @version      1.0.18
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -188,6 +188,8 @@ function saveTrainingSettings() {
 
     if (trainingState.pendingSync.length > 0) {
       localStorage.setItem("amqPlusTrainingSyncQueue", JSON.stringify(trainingState.pendingSync));
+    } else {
+      localStorage.removeItem("amqPlusTrainingSyncQueue");
     }
   } catch (e) {
     console.error("[AMQ+ Training] Failed to save training settings:", e);
@@ -5096,10 +5098,12 @@ function reportSongProgress(annSongId, rating, success, answerDetails = {}) {
 
 function sendProgressToServer(syncData) {
   console.log("[AMQ+ Training] Sending progress request to server:", syncData);
+  const url = `${API_BASE_URL}/api/training/session/${syncData.sessionId}/progress`;
+  console.log("[AMQ+ Training] URL:", url);
 
   GM_xmlhttpRequest({
     method: "POST",
-    url: `${API_BASE_URL}/api/training/session/${syncData.sessionId}/progress`,
+    url: url,
     headers: {
       "Content-Type": "application/json"
     },
@@ -5167,16 +5171,20 @@ function processTrainingSyncQueue() {
 
   trainingState.syncInProgress = true;
   const syncItem = trainingState.pendingSync[0];
+  const url = `${API_BASE_URL}/api/training/session/${syncItem.sessionId}/progress`;
+  console.log("[AMQ+ Training] Syncing item from queue:", syncItem);
+  console.log("[AMQ+ Training] Sync URL:", url);
 
   GM_xmlhttpRequest({
     method: "POST",
-    url: `${API_BASE_URL}/api/training/session/${syncItem.sessionId}/progress`,
+    url: url,
     headers: {
       "Content-Type": "application/json"
     },
     data: JSON.stringify({
       token: trainingState.authToken,
       songKey: syncItem.songKey,
+      annSongId: syncItem.annSongId, // Ensure annSongId is included
       rating: syncItem.rating,
       success: syncItem.success,
       userAnswer: syncItem.userAnswer,
@@ -5196,9 +5204,20 @@ function processTrainingSyncQueue() {
         if (trainingState.pendingSync.length > 0) {
           processTrainingSyncQueue();
         }
-      } else {
-        console.error("[AMQ+ Training] Sync failed:", response.status);
+      } else if (response.status === 404 || response.status === 410 || response.status === 400) {
+        // Discard items that will never succeed (404 Not Found, 410 Gone, 400 Bad Request)
+        console.warn(`[AMQ+ Training] Discarding sync item due to ${response.status}:`, response.responseText);
+        trainingState.pendingSync.shift();
+        saveTrainingSettings();
         trainingState.syncInProgress = false;
+        if (trainingState.pendingSync.length > 0) {
+          processTrainingSyncQueue();
+        }
+      } else {
+        console.error("[AMQ+ Training] Sync failed:", response.status, response.responseText);
+        trainingState.syncInProgress = false;
+        // Don't shift, it will stay in queue and potentially be retried on next refresh
+        // or when a new item is added.
       }
     },
     onerror: function (error) {
@@ -5525,36 +5544,42 @@ setupTrainingSocketListener();
 // ============================================
 
 function scanOldTrainingProfiles() {
-  let foundProfiles = [];
+  let foundProfiles = new Set();
 
-  // Check if cslProfiles exists to get the list of profiles
+  // 1. Pattern-based discovery from localStorage (Most reliable)
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('spacedRepetitionData_')) {
+      const profileName = key.replace('spacedRepetitionData_', '');
+      if (profileName) {
+        foundProfiles.add(profileName);
+      }
+    }
+  }
+
+  // 2. Legacy check: cslProfiles array
   try {
     const profilesData = localStorage.getItem('cslProfiles');
     if (profilesData) {
       const profiles = JSON.parse(profilesData);
-      if (Array.isArray(profiles) && profiles.length > 0) {
-        foundProfiles = profiles;
+      if (Array.isArray(profiles)) {
+        profiles.forEach(p => {
+          if (p) foundProfiles.add(p);
+        });
       }
     }
   } catch (e) {
     console.warn('[AMQ+ Training] Error parsing cslProfiles:', e);
   }
 
-  // If no profiles found, check for default
-  if (foundProfiles.length === 0) {
-    const defaultData = localStorage.getItem('spacedRepetitionData_default');
-    if (defaultData) {
-      foundProfiles = ['default'];
-    }
-  }
-
   // Populate dropdown with song counts (one profile at a time)
   const profileSelect = $("#trainingImportProfileSelect");
-  if (foundProfiles.length === 0) {
+  if (foundProfiles.size === 0) {
     profileSelect.html('<option value="">No training data found</option>');
   } else {
     let html = '<option value="">Select profile to import...</option>';
-    foundProfiles.forEach(profile => {
+    // Convert Set back to Array for sorted display
+    Array.from(foundProfiles).sort().forEach(profile => {
       try {
         const data = localStorage.getItem(`spacedRepetitionData_${profile}`);
         if (data) {
@@ -5572,30 +5597,40 @@ function scanOldTrainingProfiles() {
 
 function getOldTrainingData(specificProfile = null) {
   const oldData = {};
-  let foundProfiles = [];
+  let foundProfiles = new Set();
 
-  // First, check if cslProfiles exists to get the list of profiles
-  try {
-    const profilesData = localStorage.getItem('cslProfiles');
-    if (profilesData) {
-      const profiles = JSON.parse(profilesData);
-      if (Array.isArray(profiles) && profiles.length > 0) {
-        foundProfiles = profiles;
-        console.log(`[AMQ+ Training] Found profiles: ${profiles.join(', ')}`);
+  // Use only the specific profile requested or discover all
+  if (specificProfile) {
+    foundProfiles.add(specificProfile);
+  } else {
+    // 1. Pattern-based discovery
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('spacedRepetitionData_')) {
+        const profileName = key.replace('spacedRepetitionData_', '');
+        if (profileName) foundProfiles.add(profileName);
       }
     }
-  } catch (e) {
-    console.warn('[AMQ+ Training] Error parsing cslProfiles:', e);
-  }
 
-  // Use only the specific profile requested
-  if (specificProfile) {
-    foundProfiles = [specificProfile];
-  } else {
-    // If no profiles found, try common default names
-    if (foundProfiles.length === 0) {
-      foundProfiles = ['default'];
+    // 2. Legacy check
+    try {
+      const profilesData = localStorage.getItem('cslProfiles');
+      if (profilesData) {
+        const profiles = JSON.parse(profilesData);
+        if (Array.isArray(profiles)) {
+          profiles.forEach(p => {
+            if (p) foundProfiles.add(p);
+          });
+        }
+      }
+    } catch (e) { }
+
+    // Fallback to default if nothing found
+    if (foundProfiles.size === 0) {
+      foundProfiles.add('default');
     }
+
+    console.log(`[AMQ+ Training] Discovered profiles: ${Array.from(foundProfiles).join(', ')}`);
   }
 
   // Try to load data from each profile
