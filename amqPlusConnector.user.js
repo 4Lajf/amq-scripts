@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.21
+// @version      1.0.22
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -736,7 +736,7 @@ function createJsonImportInstructionsModalHTML() {
               <h5 style="color: #fff; font-weight: bold; margin-top: 0; margin-bottom: 15px; font-size: 15px;">Steps to import:</h5>
               <ol style="padding-left: 20px; margin: 0; font-size: 13px; line-height: 1.8;">
                 <li>Go to <a href="${baseUrl}/songlist/create" target="_blank" style="color: #6366f1; text-decoration: underline; font-weight: bold;">${baseUrl}/songlist/create</a></li>
-                <li>Choose <strong>"Provider Import"</strong> and upload your JSON file</li>
+                <li>Scroll to <strong>"Provider Import"</strong> section and upload your JSON file (format will be auto-detected)</li>
                 <li>Go to <a href="${baseUrl}/quizzes" target="_blank" style="color: #6366f1; text-decoration: underline; font-weight: bold;">${baseUrl}/quizzes</a> and click <strong>"Create Quiz"</strong></li>
                 <li>In the <strong>"Song List"</strong> node settings, set the source to <strong>"Saved Lists"</strong></li>
                 <li>Select your imported list from the dropdown</li>
@@ -3363,8 +3363,8 @@ function exportQuizToAMQPlus() {
       `To import this quiz:<br>` +
       `1. Go to https://amqplus.moe/songlist/create<br>` +
       `2. Scroll to "Provider Import" section<br>` +
-      `3. Select "AMQ Official Export" as provider type<br>` +
-      `4. Click "Choose File" and select the downloaded JSON file<br>` +
+      `3. Click "Choose File" and select the downloaded JSON file<br>` +
+      `4. The format will be automatically detected<br>` +
       `5. Click "Add All Provider Songs" to import the songs`
     );
 
@@ -3391,8 +3391,8 @@ function replaceOkButtonWithDownload() {
       `To import this quiz:<br>` +
       `1. Go to https://amqplus.moe/songlist/create<br>` +
       `2. Scroll to "Provider Import" section<br>` +
-      `3. Select "AMQ Official Export" as provider type<br>` +
-      `4. Click "Choose File" and select the downloaded JSON file<br>` +
+      `3. Click "Choose File" and select the downloaded JSON file<br>` +
+      `4. The format will be automatically detected<br>` +
       `5. Click "Add All Provider Songs" to import the songs`;
     contentArea.innerHTML = messageHtml;
   }
