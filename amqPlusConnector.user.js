@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.16
+// @version      1.0.17
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -2288,6 +2288,15 @@ function handleQuizListResponse(payload) {
   let existingQuiz = null;
   if (quizName) {
     existingQuiz = quizzes.find(q => q.name === quizName);
+
+    // If no exact match and the new quiz starts with "AMQ+ ",
+    // look for ANY quiz starting with "AMQ+ " to overwrite to save space
+    if (!existingQuiz && quizName.startsWith("AMQ+ ")) {
+      existingQuiz = quizzes.find(q => q.name.startsWith("AMQ+ "));
+      if (existingQuiz) {
+        console.log("[AMQ+] No exact match, but found another AMQ+ quiz to overwrite:", existingQuiz.name);
+      }
+    }
   }
 
   if (existingQuiz) {
@@ -3082,7 +3091,6 @@ function setupListeners() {
 }
 
 function fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMainButtonEvent) {
-  console.log("[AMQ+] fetchQuizForReRoll called - quizId:", quizId, "hasLiveNodeData:", !!liveNodeData, "lobbyExists:", typeof lobby !== 'undefined', "lobbyGameId:", typeof lobby !== 'undefined' ? lobby.gameId : 'N/A');
   const requestConfig = {
     method: (liveNodeData || (typeof lobby !== 'undefined' && lobby.gameId)) ? "POST" : "GET",
     url: `${API_BASE_URL}/play/${quizId}`,
@@ -3159,7 +3167,6 @@ function fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMai
     requestConfig.data = JSON.stringify(payload);
   }
 
-  console.log("[AMQ+] Re-roll request config - method:", requestConfig.method, "hasData:", !!requestConfig.data, "dataPreview:", requestConfig.data ? requestConfig.data.substring(0, 100) : 'N/A');
   GM_xmlhttpRequest(requestConfig);
 }
 
@@ -5652,6 +5659,65 @@ function showImportStatus(message, type = "info") {
   `).show();
 }
 
+function updateImportProgress(data) {
+  const statusDiv = $("#trainingImportStatus");
+  const type = data.type === 'error' ? 'error' : 'info';
+  const colors = {
+    info: "#0dcaf0",
+    success: "#28a745",
+    error: "#dc3545",
+    warning: "#ffc107"
+  };
+
+  if (data.type === 'progress') {
+    const percent = Math.round((data.current / data.total) * 100);
+    const elapsed = (Date.now() - (window._importStartTime || Date.now())) / 1000;
+    const rate = data.current / elapsed;
+    const remaining = data.total - data.current;
+    const etaSeconds = rate > 0 ? Math.round(remaining / rate) : 0;
+
+    const hours = Math.floor(etaSeconds / 3600);
+    const minutes = Math.floor((etaSeconds % 3600) / 60);
+    const seconds = etaSeconds % 60;
+
+    let etaParts = [];
+    if (hours > 0) etaParts.push(`${hours}h`);
+    if (minutes > 0 || hours > 0) etaParts.push(`${minutes}m`);
+    etaParts.push(`${seconds}s`);
+    const etaStr = etaParts.join(" ");
+
+    statusDiv.html(`
+      <div style="padding: 10px; background: ${colors.info}15; border-left: 4px solid ${colors.info}; border-radius: 4px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+          <strong style="color: ${colors.info};">${data.status || 'Reconstructing songs...'}</strong>
+          <span style="font-size: 12px; color: #666;">ETA: ${etaStr}</span>
+        </div>
+        <div style="width: 100%; height: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; overflow: hidden; margin-bottom: 5px;">
+          <div style="width: ${percent}%; height: 100%; background: ${colors.info}; transition: width 0.3s ease;"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666;">
+          <span>${data.current} / ${data.total} songs</span>
+          <span>${percent}%</span>
+        </div>
+        <div style="font-size: 11px; color: #888; margin-top: 4px;">
+          Found: ${data.reconstructed} | Failed: ${data.failed}
+        </div>
+      </div>
+    `).show();
+  } else if (data.type === 'status') {
+    const strong = statusDiv.find('strong');
+    if (strong.length > 0) {
+      strong.text(data.message);
+    } else {
+      showImportStatus(data.message, "info");
+    }
+  } else if (data.type === 'error') {
+    showImportStatus(data.message, "error");
+  } else if (data.type === 'complete') {
+    showImportStatus(`✓ Created quiz "${data.quizName}" with ${data.imported} songs!`, "success");
+  }
+}
+
 function importOldTrainingData() {
   const selectedProfile = $("#trainingImportProfileSelect").val();
 
@@ -5674,11 +5740,12 @@ function importOldTrainingData() {
   }
 
   const songCount = Object.keys(oldData).length;
-  if (!confirm(`Import ${songCount} songs from profile "${selectedProfile}"?\n\nThis will create a new quiz with the imported training data.`)) {
+  if (!confirm(`Import ${songCount} songs from profile "${selectedProfile}"?\n\nThis will create a new quiz with the imported training data.\n\nNote: This process will take approximately ${songCount} seconds.`)) {
     return;
   }
 
-  showImportStatus(`Creating quiz and importing ${songCount} songs...`, "info");
+  window._importStartTime = Date.now();
+  showImportStatus(`Starting import for ${songCount} songs...`, "info");
 
   // Disable button during import
   $("#trainingImportBtn").prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Importing...');
@@ -5729,5 +5796,4 @@ function importOldTrainingData() {
 }
 
 console.log("[AMQ+ Training] Training mode initialized");
-
 
