@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.19
+// @version      1.0.20
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -5822,14 +5822,38 @@ function importOldTrainingData() {
   }
 
   const songCount = Object.keys(oldData).length;
-  console.log(`[AMQ+ Training] Preparing to import ${songCount} songs.`);
-  if (!confirm(`Import ${songCount} songs from profile "${selectedProfile}"?\n\nThis will create a new quiz with the imported training data.\n\nNote: This process will take approximately ${songCount} seconds.`)) {
+  const estimatedSeconds = Math.ceil(songCount * 1.5);
+  console.log(`[AMQ+ Training] Preparing to import ${songCount} songs. Estimated time: ${estimatedSeconds}s`);
+  if (!confirm(`Import ${songCount} songs from profile "${selectedProfile}"?\n\nThis will create a new quiz with the imported training data.\n\nNote: This process will take approximately ${estimatedSeconds} seconds. PLEASE DO NOT REFRESH THE PAGE DURING IMPORT.`)) {
     console.log("[AMQ+ Training] Import cancelled by user.");
     return;
   }
 
   window._importStartTime = Date.now();
-  showImportStatus(`Starting import for ${songCount} songs...`, "info");
+
+  // Setup countdown timer
+  if (window._importCountdownTimer) clearInterval(window._importCountdownTimer);
+  let remainingSeconds = estimatedSeconds;
+
+  const updateStatusWithCountdown = () => {
+    if (remainingSeconds > 0) {
+      const mins = Math.floor(remainingSeconds / 60);
+      const secs = remainingSeconds % 60;
+      const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      showImportStatus(`Importing ${songCount} songs... ETA: ${timeStr}. PLEASE DO NOT REFRESH THE PAGE.`, "info");
+    } else {
+      showImportStatus(`Processing import... This may take a while. PLEASE DO NOT REFRESH THE PAGE.`, "info");
+    }
+  };
+
+  updateStatusWithCountdown();
+  window._importCountdownTimer = setInterval(() => {
+    remainingSeconds--;
+    updateStatusWithCountdown();
+    if (remainingSeconds <= -300) { // Stop updating after 5 minutes past estimate
+      clearInterval(window._importCountdownTimer);
+    }
+  }, 1000);
 
   // Disable button during import
   $("#trainingImportBtn").prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Importing...');
@@ -5841,6 +5865,7 @@ function importOldTrainingData() {
   GM_xmlhttpRequest({
     method: "POST",
     url: `${API_BASE_URL}/api/training/import-with-quiz`,
+    timeout: 43200000, // 12 hours
     headers: {
       "Content-Type": "application/json"
     },
@@ -5850,6 +5875,7 @@ function importOldTrainingData() {
       quizName: quizName
     }),
     onload: function (response) {
+      if (window._importCountdownTimer) clearInterval(window._importCountdownTimer);
       // Re-enable button
       $("#trainingImportBtn").prop("disabled", false).html('<i class="fa fa-upload"></i> Import');
 
@@ -5874,8 +5900,14 @@ function importOldTrainingData() {
       }
     },
     onerror: function () {
+      if (window._importCountdownTimer) clearInterval(window._importCountdownTimer);
       $("#trainingImportBtn").prop("disabled", false).html('<i class="fa fa-upload"></i> Import');
       showImportStatus("Connection error. Please try again.", "error");
+    },
+    ontimeout: function () {
+      if (window._importCountdownTimer) clearInterval(window._importCountdownTimer);
+      $("#trainingImportBtn").prop("disabled", false).html('<i class="fa fa-upload"></i> Import');
+      showImportStatus("Import timed out. Large imports can still be processing on the server, please check back in a few minutes.", "warning");
     }
   });
 }
