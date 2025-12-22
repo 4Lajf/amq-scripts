@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.22
+// @version      1.0.24
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -72,6 +72,9 @@ let trainingState = {
   urlLoadedQuizToken: null, // Store play token for URL-loaded quizzes
   urlLoadedQuizName: null,
   urlLoadedQuizSongCount: null,
+  selectedQuizId: null,
+  selectedQuizToken: null,
+  requireDoubleClick: false, // Require double-click for rating buttons
   currentSession: {
     sessionId: null,
     quizId: null,
@@ -155,6 +158,18 @@ function loadTrainingSettings() {
         trainingState.urlLoadedQuizSongCount = state.urlLoadedQuizSongCount;
         console.log("[AMQ+ Training] Restored URL-loaded quiz:", state.urlLoadedQuizName);
       }
+
+      // Load selected quiz if saved
+      if (state.selectedQuizId) {
+        trainingState.selectedQuizId = state.selectedQuizId;
+        trainingState.selectedQuizToken = state.selectedQuizToken;
+        console.log("[AMQ+ Training] Restored selected quiz ID:", state.selectedQuizId);
+      }
+      // Load double-click preference if saved
+      if (state.requireDoubleClick !== undefined) {
+        trainingState.requireDoubleClick = state.requireDoubleClick;
+        console.log("[AMQ+ Training] Loaded double-click mode:", trainingState.requireDoubleClick);
+      }
       console.log("[AMQ+ Training] Loaded new song percentage:", trainingState.newSongPercentage, "%");
     }
 
@@ -180,7 +195,10 @@ function saveTrainingSettings() {
       urlLoadedQuizId: trainingState.urlLoadedQuizId,
       urlLoadedQuizToken: trainingState.urlLoadedQuizToken,
       urlLoadedQuizName: trainingState.urlLoadedQuizName,
-      urlLoadedQuizSongCount: trainingState.urlLoadedQuizSongCount
+      urlLoadedQuizSongCount: trainingState.urlLoadedQuizSongCount,
+      selectedQuizId: trainingState.selectedQuizId,
+      selectedQuizToken: trainingState.selectedQuizToken,
+      requireDoubleClick: trainingState.requireDoubleClick
     };
 
     if (trainingState.currentSession && trainingState.currentSession.sessionId) {
@@ -503,6 +521,22 @@ function createTrainingModalHTML() {
                   </label>
                   <small class="form-text text-muted">
                     When enabled, training features like rating buttons will be active during quiz sessions
+                  </small>
+                </div>
+
+                <!-- Double-Click Mode Toggle -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label style="display: flex; align-items: center; cursor: pointer;">
+                    <div class="customCheckbox" style="margin-right: 10px;">
+                      <input type="checkbox" id="trainingDoubleClickToggle">
+                      <label for="trainingDoubleClickToggle">
+                        <i class="fa fa-check" aria-hidden="true"></i>
+                      </label>
+                    </div>
+                    <span style="font-size: 14px;">Require Double-Click for Rating Buttons</span>
+                  </label>
+                  <small class="form-text text-muted">
+                    When enabled, all rating buttons (Good/Bad/Easy/Hard/Skip) require double-click to prevent accidental ratings
                   </small>
                 </div>
 
@@ -4150,7 +4184,8 @@ function sendQuizMetadataAsMessages(quiz) {
       const isPercentage = mode === 'percentage';
 
       meta.vintage.ranges.forEach(range => {
-        let rangeInfo = `📅 ${range.from.season} ${range.from.year}-${range.to.season} ${range.to.year}`;
+        const toDisplay = range.to.present ? 'Present' : `${range.to.season} ${range.to.year}`;
+        let rangeInfo = `📅 ${range.from.season} ${range.from.year}-${toDisplay}`;
 
         if (range.type === 'advanced') {
           if (isPercentage) {
@@ -4264,6 +4299,16 @@ function attachTrainingModalHandlers() {
   $("#trainingModeToggle").prop("checked", false);
   isTrainingMode = false;
 
+  // Double-click mode toggle checkbox handler
+  $("#trainingDoubleClickToggle").off("change").on("change", function () {
+    trainingState.requireDoubleClick = $(this).is(":checked");
+    console.log("[AMQ+ Training] Double-click mode", trainingState.requireDoubleClick ? "enabled" : "disabled");
+    saveTrainingSettings();
+  });
+
+  // Initialize double-click checkbox state from saved settings
+  $("#trainingDoubleClickToggle").prop("checked", trainingState.requireDoubleClick || false);
+
   $("#trainingLinkBtn").off("click").on("click", () => {
     const token = $("#trainingTokenField").val().trim();
     if (!token || token.length !== 64) {
@@ -4331,17 +4376,17 @@ function attachTrainingModalHandlers() {
 
   $("#trainingStartBtn").off("click").on("click", () => {
     // Check if a quiz was loaded from URL (use token if available, otherwise ID)
-    let selectedQuizId = trainingState.urlLoadedQuizToken || trainingState.urlLoadedQuizId;
+    let selectedQuizToken = trainingState.urlLoadedQuizToken;
 
     // If no URL quiz, check if a quiz card was selected
-    if (!selectedQuizId) {
+    if (!selectedQuizToken) {
       const selectedCard = $("#trainingQuizList .training-quiz-card.selected");
-      selectedQuizId = selectedCard.data("quiz-id");
+      selectedQuizToken = selectedCard.data("play-token");
     }
 
-    console.log("[AMQ+ Training] Start button clicked, selectedQuizId:", selectedQuizId);
+    console.log("[AMQ+ Training] Start button clicked, selectedQuizToken:", selectedQuizToken);
 
-    if (!selectedQuizId) {
+    if (!selectedQuizToken) {
       alert("Please select a quiz to practice or load one from URL");
       return;
     }
@@ -4393,8 +4438,8 @@ function attachTrainingModalHandlers() {
     const originalHtml = startBtn.html();
     startBtn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Starting...');
 
-    console.log("[AMQ+ Training] Starting session with quizId:", selectedQuizId, "sessionLength:", sessionLength);
-    startTrainingSession(selectedQuizId, sessionLength, settingsConfig);
+    console.log("[AMQ+ Training] Starting session with quizToken:", selectedQuizToken, "sessionLength:", sessionLength);
+    startTrainingSession(selectedQuizToken, sessionLength, settingsConfig);
   });
 
   $("#trainingEndBtn").off("click").on("click", () => {
@@ -4403,6 +4448,8 @@ function attachTrainingModalHandlers() {
     }
   });
 
+  // Note: These handlers are for the static modal buttons (will be overridden by dynamic overlay buttons during training)
+  // The actual double-click logic is handled in the dynamic button creation in showTrainingRatingButtons()
   $(".trainingRatingBtn").off("click").on("click", function () {
     const rating = parseInt($(this).data("rating"));
     submitTrainingRating(rating);
@@ -4413,10 +4460,19 @@ function attachTrainingModalHandlers() {
     e.stopPropagation();
     $(".training-quiz-card").removeClass("selected");
     $(this).addClass("selected");
-    console.log("[AMQ+ Training] Quiz selected:", $(this).data("quiz-id"));
+
+    const quizId = $(this).data("quiz-id");
+    const playToken = $(this).data("play-token");
+
+    trainingState.selectedQuizId = quizId;
+    trainingState.selectedQuizToken = playToken;
+    console.log("[AMQ+ Training] Quiz selected - ID:", quizId, "Play Token:", playToken);
 
     // Reset URL selection when a quiz card is selected
     resetUrlQuizSelection();
+
+    // Save settings so it's remembered
+    saveTrainingSettings();
   });
 }
 
@@ -4473,6 +4529,13 @@ function validateTrainingToken() {
 
         // Restore URL quiz display if saved
         restoreUrlQuizDisplay();
+
+        // Refresh stats for URL-loaded quiz if it exists
+        if (trainingState.urlLoadedQuizId && trainingState.urlLoadedQuizName) {
+          console.log("[AMQ+ Training] Refreshing stats for URL-loaded quiz:", trainingState.urlLoadedQuizName);
+          const quizIdentifier = trainingState.urlLoadedQuizToken || trainingState.urlLoadedQuizId;
+          fetchQuizStatsAndDisplay(quizIdentifier, trainingState.urlLoadedQuizName);
+        }
       }, 1000);
 
       // Process any pending sync queue
@@ -4540,6 +4603,13 @@ function refreshAllQuizStats() {
 
       // Reload the quiz list display
       loadTrainingQuizzes();
+
+      // Also refresh stats for URL-loaded quiz if it exists
+      if (trainingState.urlLoadedQuizId && trainingState.urlLoadedQuizName) {
+        console.log("[AMQ+ Training] Refreshing stats for URL-loaded quiz:", trainingState.urlLoadedQuizName);
+        const quizIdentifier = trainingState.urlLoadedQuizToken || trainingState.urlLoadedQuizId;
+        fetchQuizStatsAndDisplay(quizIdentifier, trainingState.urlLoadedQuizName);
+      }
     },
     onError: (errorMsg) => {
       console.error("[AMQ+ Training] Failed to refresh stats:", errorMsg);
@@ -4572,6 +4642,7 @@ function loadTrainingQuizzes() {
 
     console.log(`[AMQ+ Training] Quiz ${index + 1} - ${quiz.name}:`, {
       id: quiz.id,
+      playToken: quiz.playToken,
       hasStats: !!quiz.stats,
       totalAttempts: stats.totalAttempts,
       accuracy: stats.accuracy,
@@ -4588,7 +4659,7 @@ function loadTrainingQuizzes() {
     const dueColor = dueToday > 10 ? "#ef4444" : dueToday > 5 ? "#ffc107" : "#10b981";
 
     html += `
-      <div class="training-quiz-card" data-quiz-id="${quiz.id}" style="
+      <div class="training-quiz-card" data-quiz-id="${quiz.id}" data-play-token="${quiz.playToken}" style="
         padding: 15px;
         margin-bottom: 10px;
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -4622,6 +4693,15 @@ function loadTrainingQuizzes() {
   });
 
   quizListDiv.html(html);
+
+  // Apply saved selection if it exists
+  if (trainingState.selectedQuizId) {
+    const savedCard = quizListDiv.find(`.training-quiz-card[data-quiz-id="${trainingState.selectedQuizId}"]`);
+    if (savedCard.length) {
+      savedCard.addClass("selected");
+      console.log("[AMQ+ Training] Applied saved quiz selection:", trainingState.selectedQuizId);
+    }
+  }
 
   // Add selected style - darker selection color
   if (!$("#trainingQuizCardStyles").length) {
@@ -4867,6 +4947,11 @@ function loadTrainingFromUrl() {
         trainingState.urlLoadedQuizToken = quizToken;
         trainingState.urlLoadedQuizName = quizData.name;
         trainingState.urlLoadedQuizSongCount = quizData.songCount || 0;
+
+        // Clear card selection when loading from URL
+        trainingState.selectedQuizId = null;
+        trainingState.selectedQuizToken = null;
+
         saveTrainingSettings(); // Save URL quiz info
 
         // Update UI to show quiz details
@@ -5336,7 +5421,7 @@ function submitTrainingRating(rating) {
   }
 
   const annSongId = currentSong.annSongId; // AMQ song ID - primary identifier
-  const success = rating >= 3; // Good or Easy counts as success
+  const success = rating >= 2; // Hard, Good or Easy counts as success
 
   console.log("[AMQ+ Training] Submitting rating:", {
     rating: rating,
@@ -5559,16 +5644,29 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     videoContainer.append(ratingHTML);
     ratingContainer = $("#trainingRatingContainer");
 
-    // Re-attach click handlers for dynamically created buttons
-    $(".trainingRatingBtn").off("click").on("click", function () {
-      const rating = parseInt($(this).data("rating"));
-      submitTrainingRating(rating);
-    });
+    // Re-attach handlers for dynamically created buttons
+    // Check if double-click mode is enabled
+    if (trainingState.requireDoubleClick) {
+      // Use double-click for all buttons (rating and skip)
+      $(".trainingRatingBtn").off("click dblclick").on("dblclick", function () {
+        const rating = parseInt($(this).data("rating"));
+        submitTrainingRating(rating);
+      });
 
-    // Skip button handler - requires double-click to prevent accidental skips
-    $(".trainingSkipBtn").off("dblclick").on("dblclick", function () {
-      skipTrainingRating();
-    });
+      $(".trainingSkipBtn").off("click dblclick").on("dblclick", function () {
+        skipTrainingRating();
+      });
+    } else {
+      // Use single-click for rating buttons, double-click for skip button
+      $(".trainingRatingBtn").off("click dblclick").on("click", function () {
+        const rating = parseInt($(this).data("rating"));
+        submitTrainingRating(rating);
+      });
+
+      $(".trainingSkipBtn").off("click dblclick").on("dblclick", function () {
+        skipTrainingRating();
+      });
+    }
 
     // Add hover effects
     $(".trainingRatingBtn, .trainingSkipBtn").hover(
