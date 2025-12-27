@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.24
+// @version      1.0.26
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -68,6 +68,8 @@ let trainingState = {
   username: null,
   userQuizzes: [],
   newSongPercentage: 30,
+  dueSongPercentage: 70,
+  revisionSongPercentage: 0,
   urlLoadedQuizId: null,
   urlLoadedQuizToken: null, // Store play token for URL-loaded quizzes
   urlLoadedQuizName: null,
@@ -150,6 +152,12 @@ function loadTrainingSettings() {
       if (state.newSongPercentage !== undefined) {
         trainingState.newSongPercentage = state.newSongPercentage;
       }
+      if (state.dueSongPercentage !== undefined) {
+        trainingState.dueSongPercentage = state.dueSongPercentage;
+      }
+      if (state.revisionSongPercentage !== undefined) {
+        trainingState.revisionSongPercentage = state.revisionSongPercentage;
+      }
       // Load URL-loaded quiz info if saved
       if (state.urlLoadedQuizId) {
         trainingState.urlLoadedQuizId = state.urlLoadedQuizId;
@@ -192,6 +200,8 @@ function saveTrainingSettings() {
     // Save state including new song percentage and URL-loaded quiz
     const stateToSave = {
       newSongPercentage: trainingState.newSongPercentage,
+      dueSongPercentage: trainingState.dueSongPercentage,
+      revisionSongPercentage: trainingState.revisionSongPercentage,
       urlLoadedQuizId: trainingState.urlLoadedQuizId,
       urlLoadedQuizToken: trainingState.urlLoadedQuizToken,
       urlLoadedQuizName: trainingState.urlLoadedQuizName,
@@ -637,37 +647,37 @@ function createTrainingModalHTML() {
                       <!-- Advanced Settings (Hidden by default) -->
                       <div id="trainingAdvancedSettings" style="display: none; margin-top: 15px; padding: 12px; background-color: rgba(0,0,0,0.2); border-radius: 4px; border: 1px solid #2d3748;">
                         <div style="margin-bottom: 10px; color: rgba(255,255,255,0.7); font-size: 12px;">
-                          <i class="fa fa-info-circle"></i> Manual song distribution (leave blank for auto)
+                          <i class="fa fa-info-circle"></i> Manual song distribution percentages
                         </div>
 
                         <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                           <div style="flex: 1; min-width: 140px;">
                             <label style="display: block; margin-bottom: 4px; color: rgba(255,255,255,0.9); font-size: 12px;">
-                              <i class="fa fa-clock" style="color: #f59e0b;"></i> Due Songs:
+                              <i class="fa fa-clock" style="color: #f59e0b;"></i> Due Songs %:
                             </label>
-                            <input type="number" id="trainingDueCount" class="form-control" placeholder="Auto" min="0" max="100"
+                            <input type="number" id="trainingDuePercentage" class="form-control" value="70" min="0" max="100"
                                    style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; width: 100%; font-size: 13px;">
                           </div>
 
                           <div style="flex: 1; min-width: 140px;">
                             <label style="display: block; margin-bottom: 4px; color: rgba(255,255,255,0.9); font-size: 12px;">
-                              <i class="fa fa-star" style="color: #a78bfa;"></i> New Songs:
+                              <i class="fa fa-star" style="color: #a78bfa;"></i> New Songs %:
                             </label>
-                            <input type="number" id="trainingNewCount" class="form-control" placeholder="Auto" min="0" max="100"
+                            <input type="number" id="trainingNewPercentage" class="form-control" value="30" min="0" max="100"
                                    style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; width: 100%; font-size: 13px;">
                           </div>
 
                           <div style="flex: 1; min-width: 140px;">
                             <label style="display: block; margin-bottom: 4px; color: rgba(255,255,255,0.9); font-size: 12px;">
-                              <i class="fa fa-refresh" style="color: #60a5fa;"></i> Revision Songs:
+                              <i class="fa fa-refresh" style="color: #60a5fa;"></i> Revision Songs %:
                             </label>
-                            <input type="number" id="trainingRevisionCount" class="form-control" placeholder="Auto" min="0" max="100"
+                            <input type="number" id="trainingRevisionPercentage" class="form-control" value="0" min="0" max="100"
                                    style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; width: 100%; font-size: 13px;">
                           </div>
                         </div>
 
                         <div style="margin-top: 10px; font-size: 11px; color: rgba(255,255,255,0.6);">
-                          <i class="fa fa-lightbulb"></i> Tip: Set specific counts or leave blank for automatic FSRS-based distribution
+                          <i class="fa fa-lightbulb"></i> Tip: These percentages are applied to the total song count.
                         </div>
                       </div>
                     </div>
@@ -4393,6 +4403,16 @@ function attachTrainingModalHandlers() {
 
     // Read basic settings
     const sessionLength = parseInt($("#trainingSessionLength").val()) || 20;
+    
+    // Read percentages (both modes)
+    const newSongPercentage = parseInt($("#trainingNewPercentage").val());
+    const dueSongPercentage = parseInt($("#trainingDuePercentage").val());
+    const revisionSongPercentage = parseInt($("#trainingRevisionPercentage").val());
+    
+    // Save percentages to state
+    if (!isNaN(newSongPercentage)) trainingState.newSongPercentage = Math.max(0, Math.min(100, newSongPercentage));
+    if (!isNaN(dueSongPercentage)) trainingState.dueSongPercentage = Math.max(0, Math.min(100, dueSongPercentage));
+    if (!isNaN(revisionSongPercentage)) trainingState.revisionSongPercentage = Math.max(0, Math.min(100, revisionSongPercentage));
 
     // Validate session length
     if (sessionLength < 5 || sessionLength > 100) {
@@ -4407,28 +4427,24 @@ function attachTrainingModalHandlers() {
     let settingsConfig;
 
     if (isAdvancedMode) {
-      // Read manual settings
-      const dueCount = $("#trainingDueCount").val();
-      const newCount = $("#trainingNewCount").val();
-      const revisionCount = $("#trainingRevisionCount").val();
-
-      // Build config with manual values (null means auto)
+      // Build config with manual percentages
       settingsConfig = {
         mode: 'manual',
-        dueCount: dueCount ? parseInt(dueCount) : null,
-        newCount: newCount ? parseInt(newCount) : null,
-        revisionCount: revisionCount ? parseInt(revisionCount) : null
+        dueSongPercentage: trainingState.dueSongPercentage,
+        newSongPercentage: trainingState.newSongPercentage,
+        revisionSongPercentage: trainingState.revisionSongPercentage
       };
 
       console.log("[AMQ+ Training] Starting with manual settings:", settingsConfig);
     } else {
-      // Use automatic FSRS-based distribution (70% due, 30% new)
+      // Use automatic FSRS-based distribution (using configured percentage)
+      const autoDuePercentage = 100 - (isNaN(newSongPercentage) ? 30 : newSongPercentage);
       settingsConfig = {
         mode: 'auto',
-        dueSongPercentage: 70
+        dueSongPercentage: Math.max(0, Math.min(100, autoDuePercentage))
       };
 
-      console.log("[AMQ+ Training] Starting with auto settings (70% due, 30% new)");
+      console.log(`[AMQ+ Training] Starting with auto settings (${settingsConfig.dueSongPercentage}% due, ${100 - settingsConfig.dueSongPercentage}% new)`);
     }
 
     saveTrainingSettings();
@@ -4524,8 +4540,10 @@ function validateTrainingToken() {
         $("#trainingQuizTab").show();
         loadTrainingQuizzes();
 
-        // Restore saved new song percentage
+        // Restore saved distribution percentages
+        $("#trainingDuePercentage").val(trainingState.dueSongPercentage);
         $("#trainingNewPercentage").val(trainingState.newSongPercentage);
+        $("#trainingRevisionPercentage").val(trainingState.revisionSongPercentage);
 
         // Restore URL quiz display if saved
         restoreUrlQuizDisplay();
@@ -5021,9 +5039,9 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
   // Add configuration based on mode
   if (settingsConfig.mode === 'manual') {
     requestData.mode = 'manual';
-    requestData.dueCount = settingsConfig.dueCount;
-    requestData.newCount = settingsConfig.newCount;
-    requestData.revisionCount = settingsConfig.revisionCount;
+    requestData.dueSongPercentage = settingsConfig.dueSongPercentage;
+    requestData.newSongPercentage = settingsConfig.newSongPercentage;
+    requestData.revisionSongPercentage = settingsConfig.revisionSongPercentage;
   } else {
     requestData.mode = 'auto';
     requestData.dueSongPercentage = settingsConfig.dueSongPercentage || 70;
