@@ -95,6 +95,8 @@ let trainingState = {
 
 let trainingSyncTimeout = null;
 const TRAINING_SYNC_DEBOUNCE = 500; // 500ms debounce for sync
+let trainingRatingLocked = false;
+let trainingRatingDelay = 500; // 500ms of delay before allowing a new submitrating call
 
 function loadSettings() {
   const saved = localStorage.getItem("amqPlusConnector");
@@ -5543,6 +5545,20 @@ function skipTrainingRating() {
   }
 }
 
+function withTrainingLock(fn) {
+  return function () {
+    if (trainingRatingLocked) return;
+
+    trainingRatingLocked = true;
+    fn.apply(this, arguments);
+
+    // Unlock after short delay
+    setTimeout(() => {
+      trainingRatingLocked = false;
+    }, trainingRatingDelay);
+  };
+}
+
 // Setup player answer listener to capture text
 let trainingPlayerAnswerListener = new Listener("player answers", (payload) => {
   if (!isTrainingMode) return;
@@ -5666,24 +5682,24 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     // Check if double-click mode is enabled
     if (trainingState.requireDoubleClick) {
       // Use double-click for all buttons (rating and skip)
-      $(".trainingRatingBtn").off("click dblclick").on("dblclick", function () {
+      $(".trainingRatingBtn").off("click dblclick").on("dblclick", withTrainingLock(function () {
         const rating = parseInt($(this).data("rating"));
         submitTrainingRating(rating);
-      });
+      }));
 
       $(".trainingSkipBtn").off("click dblclick").on("dblclick", function () {
         skipTrainingRating();
       });
     } else {
       // Use single-click for rating buttons, double-click for skip button
-      $(".trainingRatingBtn").off("click dblclick").on("click", function () {
+      $(".trainingRatingBtn").off("click dblclick").on("click", withTrainingLock(function () {
         const rating = parseInt($(this).data("rating"));
         submitTrainingRating(rating);
-      });
+      }));
 
-      $(".trainingSkipBtn").off("click dblclick").on("dblclick", function () {
+      $(".trainingSkipBtn").off("click dblclick").on("dblclick", withTrainingLock(function () {
         skipTrainingRating();
-      });
+      }));
     }
 
     // Add hover effects
