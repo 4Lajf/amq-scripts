@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.26
+// @version      1.0.27
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -6120,4 +6120,5 @@ function importOldTrainingData() {
 }
 
 console.log("[AMQ+ Training] Training mode initialized");
+
 
