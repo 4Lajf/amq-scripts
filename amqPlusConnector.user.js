@@ -26,9 +26,32 @@ let loadInterval = setInterval(() => {
   }
 }, 500);
 
-const API_BASE_URL = "https://amqplus.moe";
-// const API_BASE_URL = "http://localhost:5173";
+// const API_BASE_URL = "https://amqplus.moe";
+const API_BASE_URL = "http://localhost:5173";
 console.log("[AMQ+] Using API base URL:", API_BASE_URL);
+
+/**
+ * Check if script should be disabled based on game mode
+ * Disables script in Jam, Ranked, or Themed modes
+ */
+function shouldDisableScript() {
+  // Check if we're in a restricted game mode
+  if (typeof lobby !== 'undefined' && lobby.inLobby && lobby.settings) {
+    const gameMode = lobby.settings.gameMode;
+    if (gameMode === "Jam" || gameMode === "Ranked" || gameMode === "Themed") {
+      return true;
+    }
+  }
+
+  if (typeof quiz !== 'undefined' && quiz.inQuiz && quiz.gameMode) {
+    const gameMode = quiz.gameMode;
+    if (gameMode === "Jam" || gameMode === "Ranked" || gameMode === "Themed") {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 // Settings state
 let amqPlusEnabled = false; // Always start disabled on page refresh
@@ -453,6 +476,10 @@ function setupRoomSettingsHijackOnLobbyEnter() {
   new Listener("Join Game", (data) => {
     console.log("[AMQ+] Joined lobby, setting up Room Settings hijacking...");
     setTimeout(() => {
+      if (shouldDisableScript()) {
+        console.log("[AMQ+] Script disabled: Jam, Ranked, or Themed mode detected");
+        return;
+      }
       if (amqPlusEnabled) {
         hijackRoomSettings();
       }
@@ -461,6 +488,9 @@ function setupRoomSettingsHijackOnLobbyEnter() {
 
   // Also try to hijack when new player joins (ensures button exists)
   new Listener("New Player", (data) => {
+    if (shouldDisableScript()) {
+      return;
+    }
     if (amqPlusEnabled) {
       hijackRoomSettings();
 
@@ -902,6 +932,11 @@ function setupSocketCommandInterceptor() {
   if (!socket._amqPlusCommandHijacked) {
     const originalSendCommand = socket.sendCommand.bind(socket);
     socket.sendCommand = function (command) {
+      // Disable script in restricted modes (Jam, Ranked, Themed)
+      if (shouldDisableScript()) {
+        return originalSendCommand.call(this, command);
+      }
+
       // Intercept like state command for AMQ+ quizzes
       if (command.command === "update custom quiz like state" && command.type === "quizCreator") {
         console.log("[AMQ+] Intercepted like state command:", command);
@@ -915,7 +950,8 @@ function setupSocketCommandInterceptor() {
       }
 
       // Intercept "change game settings" command when in basic settings mode
-      if (command.command === "change game settings" && command.type === "lobby" && basicSettingsMode) {
+      // IMPORTANT: Must also check amqPlusEnabled to avoid interfering when AMQ+ is disabled
+      if (command.command === "change game settings" && command.type === "lobby" && amqPlusEnabled && basicSettingsMode) {
         console.log("[AMQ+] Intercepted change game settings in basic mode:", command);
 
         // Skip if this is just a community mode toggle (no actual settings changes)
@@ -1110,7 +1146,7 @@ function fetchAndApplyRoomSettingsQuiz(playToken) {
   const liveNodeData = {
     useEntirePool: false,
     userEntries: validLists,
-    songSelectionMode: liveNodeSongSelectionMode
+    songSelectionMode: basicSettingsMode ? 'default' : liveNodeSongSelectionMode
   };
 
   const requestBody = {
@@ -2387,7 +2423,7 @@ function scorePairForSong(pair, annSongId) {
   // If the disadvantaged player is at max wins, add bonus to make this round more attractive
   // If advantaged player has more wins, add penalty
   let unfairBonus = 0;
-  
+
   if (disadvantagedWins > advantagedWins) {
     // Good: disadvantage goes to player with more wins
     unfairBonus = 0.5;
@@ -3490,14 +3526,22 @@ function displayDuelFinalStandings() {
   sendSystemMessage("━━━━━━━━━━━━━━━━━━━━");
   sendSystemMessage("🏆 DUEL MODE FINAL STANDINGS 🏆");
 
-  standings.forEach(([player, wins], index) => {
-    const rank = index + 1;
-    let medal = '';
-    if (rank === 1) medal = '🥇';
-    else if (rank === 2) medal = '🥈';
-    else if (rank === 3) medal = '🥉';
+  let currentRank = 1;
+  let previousWins = null;
 
-    sendSystemMessage(`${medal} ${rank}. ${player}: ${wins} win${wins !== 1 ? 's' : ''}`);
+  standings.forEach(([player, wins], index) => {
+    // Only increment rank when wins change (handles ties)
+    if (previousWins !== null && wins !== previousWins) {
+      currentRank = index + 1;
+    }
+    previousWins = wins;
+
+    let medal = '';
+    if (currentRank === 1) medal = '🥇';
+    else if (currentRank === 2) medal = '🥈';
+    else if (currentRank === 3) medal = '🥉';
+
+    sendSystemMessage(`${medal} ${currentRank}. ${player}: ${wins} win${wins !== 1 ? 's' : ''}`);
   });
 
   sendSystemMessage("━━━━━━━━━━━━━━━━━━━━");
@@ -3522,7 +3566,17 @@ function updateFinalDuelScoreboard(standings) {
     // Update each standing item based on duel wins
     const $items = $container.find('.qpStandingItem');
 
+    // Calculate tied ranks
+    let currentRank = 1;
+    let previousWins = null;
+
     standings.forEach(([playerName, wins], index) => {
+      // Only increment rank when wins change (handles ties)
+      if (previousWins !== null && wins !== previousWins) {
+        currentRank = index + 1;
+      }
+      previousWins = wins;
+
       // Find the item for this player
       $items.each(function () {
         const $item = $(this);
@@ -3530,10 +3584,10 @@ function updateFinalDuelScoreboard(standings) {
         const itemPlayerName = $playerName.text().trim();
 
         if (itemPlayerName === playerName) {
-          // Update the rank number
+          // Update the rank number (using tied rank)
           const $rankNum = $item.find('.qpScoreBoardNumber');
           if ($rankNum.length) {
-            $rankNum.text(index + 1);
+            $rankNum.text(currentRank);
           }
 
           // Update the score to show wins
@@ -3542,7 +3596,7 @@ function updateFinalDuelScoreboard(standings) {
             $score.text(`${wins}W`);
           }
 
-          // Update position based on new rank
+          // Update position based on index (visual order)
           $item.css('transform', `translateY(${index * 30}px)`);
         }
       });
@@ -3862,9 +3916,10 @@ function updateUsersListsModalContent() {
  * Create HTML for a single user entry in Users' Lists modal
  */
 function createUsersListsEntryHTML(entry, idx) {
-  const username = entry.username || '-';
+  const animeListUsername = entry.username || '-';
   const platform = entry.platform || 'unknown';
-  const isInvalid = !username || username === '-' || platform === 'kitsu';
+  const amqUsername = entry.amqUsername || animeListUsername || 'Unknown';
+  const isInvalid = !animeListUsername || animeListUsername === '-' || platform === 'kitsu';
 
   const selectedLists = entry.selectedLists || {
     completed: true,
@@ -3873,6 +3928,9 @@ function createUsersListsEntryHTML(entry, idx) {
     on_hold: false,
     dropped: false
   };
+
+  // Show mapping if AMQ username differs from anime list username
+  const showMapping = amqUsername !== animeListUsername && !isInvalid;
 
   return `
     <div class="amqPlusUsersListsEntry" data-idx="${idx}" style="
@@ -3883,14 +3941,29 @@ function createUsersListsEntryHTML(entry, idx) {
       border-radius: 8px;
     ">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <div>
-          <strong style="color: ${isInvalid ? '#ef4444' : '#fff'};">
-            ${isInvalid ? '⚠️ ' : ''}${username}
-          </strong>
-          <span style="color: rgba(255,255,255,0.6); font-size: 11px; margin-left: 8px;">
-            (${platform})
-          </span>
-          ${isInvalid ? '<span style="color: #ef4444; font-size: 11px; margin-left: 8px;">- No valid list</span>' : ''}
+        <div style="flex: 1;">
+          <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px;">
+            <strong style="color: ${isInvalid ? '#ef4444' : '#fff'}; font-size: 14px;">
+              ${isInvalid ? '⚠️ ' : ''}${amqUsername}
+            </strong>
+            <span style="color: rgba(255,255,255,0.5); font-size: 11px;">
+              (AMQ)
+            </span>
+            ${showMapping ? `
+              <span style="color: rgba(255,255,255,0.4); font-size: 11px; margin: 0 4px;">→</span>
+              <span style="color: rgba(255,255,255,0.7); font-size: 12px;">
+                ${animeListUsername}
+              </span>
+              <span style="color: rgba(255,255,255,0.5); font-size: 11px;">
+                (${platform})
+              </span>
+            ` : !isInvalid ? `
+              <span style="color: rgba(255,255,255,0.5); font-size: 11px;">
+                (${platform})
+              </span>
+            ` : ''}
+            ${isInvalid ? '<span style="color: #ef4444; font-size: 11px; margin-left: 8px;">- No valid list</span>' : ''}
+          </div>
         </div>
         <button class="btn btn-xs btn-danger amqPlusUsersListsRemoveBtn" data-idx="${idx}" style="padding: 2px 8px;">
           <i class="fa fa-times"></i>
@@ -3931,7 +4004,8 @@ function attachUsersListsEntryHandlers() {
     const idx = $(this).data("idx");
     if (cachedPlayerLists && cachedPlayerLists[idx]) {
       const removed = cachedPlayerLists.splice(idx, 1)[0];
-      sendSystemMessage(`Removed ${removed.username || 'player'} from list`);
+      const displayName = removed.amqUsername || removed.username || 'player';
+      sendSystemMessage(`Removed ${displayName} from list`);
       updateUsersListsModalContent();
     }
   });
@@ -3977,6 +4051,14 @@ function attachModalHandlers() {
 
 
   $("#amqPlusEnableToggle").off("change").change(function () {
+    // Disable script in restricted modes (Jam, Ranked, Themed)
+    if (shouldDisableScript()) {
+      sendSystemMessage("⚠️ AMQ+ is disabled in Jam, Ranked, and Themed modes.");
+      $(this).prop("checked", false); // Keep it disabled
+      amqPlusEnabled = false;
+      return;
+    }
+
     // Only host can toggle AMQ+
     if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
       sendSystemMessage("⚠️ Only the room host can enable or configure AMQ+.");
@@ -4055,6 +4137,13 @@ function attachModalHandlers() {
 
 function updateToggleButton() {
   console.log("[AMQ+] Updating toggle button, enabled:", amqPlusEnabled);
+
+  // Disable AMQ+ if in restricted modes
+  if (shouldDisableScript()) {
+    amqPlusEnabled = false;
+    console.log("[AMQ+] AMQ+ disabled due to restricted mode (Jam/Ranked/Themed)");
+  }
+
   if (amqPlusEnabled) {
     $("#amqPlusToggle").css({
       "background-color": "rgba(46, 125, 50, 1)",
@@ -4070,6 +4159,12 @@ function updateToggleButton() {
   }
   if ($("#amqPlusEnableToggle").length > 0) {
     $("#amqPlusEnableToggle").prop("checked", amqPlusEnabled);
+    // Disable the toggle checkbox if in restricted mode
+    if (shouldDisableScript()) {
+      $("#amqPlusEnableToggle").prop("disabled", true);
+    } else {
+      $("#amqPlusEnableToggle").prop("disabled", false);
+    }
   }
 
   // Update Users' Lists button visibility
@@ -4248,7 +4343,7 @@ function fetchQuizFromUrl() {
     liveNodeData = {
       useEntirePool: false,
       userEntries: configuredEntries,
-      songSelectionMode: liveNodeSongSelectionMode
+      songSelectionMode: basicSettingsMode ? 'default' : liveNodeSongSelectionMode
     };
   }
 
@@ -4292,7 +4387,7 @@ function checkAndHandleLiveNode(quizId, options = {}) {
                   const liveNodeData = {
                     useEntirePool: false,
                     userEntries: configuredEntries,
-                    songSelectionMode: liveNodeSongSelectionMode
+                    songSelectionMode: basicSettingsMode ? 'default' : liveNodeSongSelectionMode
                   };
                   fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMainButtonEvent);
                 } else {
@@ -4308,7 +4403,7 @@ function checkAndHandleLiveNode(quizId, options = {}) {
                     const liveNodeData = {
                       useEntirePool: false,
                       userEntries: configuredEntries,
-                      songSelectionMode: liveNodeSongSelectionMode
+                      songSelectionMode: basicSettingsMode ? 'default' : liveNodeSongSelectionMode
                     };
                     fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMainButtonEvent);
                   } else {
@@ -4570,12 +4665,27 @@ function createPlayerEntryHTML(entry, idx) {
     dropped: false
   };
 
+  const animeListUsername = entry.username || '-';
+  const platform = entry.platform || 'unknown';
+  const amqUsername = entry.amqUsername || animeListUsername || 'Unknown';
+  const showMapping = amqUsername !== animeListUsername && animeListUsername !== '-';
+
   return `
             <div class="amqPlusPlayerEntry" data-entry-idx="${idx}" style="margin-bottom: 12px; padding: 10px; background-color: rgba(255,255,255,0.03); border-radius: 4px; border: 1px solid rgba(255,255,255,0.1);">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <div style="font-weight: bold; color: #fff; font-size: 13px;">${prefix}: ${entry.username} (${entry.platform})</div>
+                    <div style="font-weight: bold; color: #fff; font-size: 13px;">
+                      ${prefix}: ${amqUsername}
+                      <span style="color: rgba(255,255,255,0.5); font-size: 11px; margin-left: 4px;">(AMQ)</span>
+                      ${showMapping ? `
+                        <span style="color: rgba(255,255,255,0.4); font-size: 11px; margin: 0 4px;">→</span>
+                        <span style="color: rgba(255,255,255,0.7); font-size: 12px;">${animeListUsername}</span>
+                        <span style="color: rgba(255,255,255,0.5); font-size: 11px;">(${platform})</span>
+                      ` : animeListUsername !== '-' ? `
+                        <span style="color: rgba(255,255,255,0.5); font-size: 11px; margin-left: 4px;">(${platform})</span>
+                      ` : ''}
+                    </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                        <button type="button" class="btn btn-sm btn-danger amqPlusRemoveEntryBtn" data-entry-idx="${idx}" data-username="${entry.username}" style="background-color: #dc3545; border-color: #dc3545; color: #fff; padding: 2px 8px; font-size: 10px; line-height: 1.2;">
+                        <button type="button" class="btn btn-sm btn-danger amqPlusRemoveEntryBtn" data-entry-idx="${idx}" data-username="${amqUsername}" style="background-color: #dc3545; border-color: #dc3545; color: #fff; padding: 2px 8px; font-size: 10px; line-height: 1.2;">
                             <i class="fa fa-times" style="margin-right: 2px;"></i>Remove
                         </button>
                         <div style="display: flex; align-items: center;">
@@ -4965,7 +5075,7 @@ function usePlayerLists(userEntries, quizId) {
   const liveNodeData = {
     useEntirePool: false,
     userEntries: validEntriesForServer,
-    songSelectionMode: liveNodeSongSelectionMode
+    songSelectionMode: basicSettingsMode ? 'default' : liveNodeSongSelectionMode
   };
 
   // Check for Kitsu platform or no-list entries and send warnings
@@ -5823,8 +5933,13 @@ function handleListRemoveCommand(sender, args, isLiveNodeConfigured) {
 function findPlayerInCache(playerName) {
   if (!cachedPlayerLists) return null;
 
-  // Try to find by exact username match
-  let player = cachedPlayerLists.find(entry => entry.username === playerName);
+  // First try to find by AMQ username (since commands come from AMQ usernames)
+  let player = cachedPlayerLists.find(entry => entry.amqUsername === playerName);
+
+  // If not found, try to find by anime list username (for backwards compatibility)
+  if (!player) {
+    player = cachedPlayerLists.find(entry => entry.username === playerName);
+  }
 
   // If not found and playerName is selfName, try to find by id containing 'self'
   if (!player && playerName === selfName) {
@@ -5922,6 +6037,16 @@ function handleChatCommand(msg) {
 
   if (parts[1] === "toggle") {
     console.log("[AMQ+] Toggle command received");
+
+    // Disable script in restricted modes (Jam, Ranked, Themed)
+    if (shouldDisableScript()) {
+      sendSystemMessage("⚠️ AMQ+ is disabled in Jam, Ranked, and Themed modes.");
+      amqPlusEnabled = false;
+      saveSettings();
+      updateToggleButton();
+      return;
+    }
+
     // Only host can toggle AMQ+ via command
     if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
       sendSystemMessage("⚠️ Only the room host can enable or configure AMQ+.");
@@ -6180,6 +6305,12 @@ function setupListeners() {
   }).bindListener();
 
   new Listener("Game Starting", (payload) => {
+    // Disable script in restricted modes
+    if (shouldDisableScript()) {
+      console.log("[AMQ+] Script disabled: Jam, Ranked, or Themed mode detected");
+      return;
+    }
+
     // Reset quiz fetched flag when game starts (allows re-roll for next game)
     quizFetchedBeforeGameStart = false;
     console.log("[AMQ+] Game starting, reset quiz fetched flag");
@@ -6204,8 +6335,8 @@ function setupListeners() {
           sendSystemMessage("━━━━━━━━━━━━━━━━━━━━━━━━");
           sendSystemMessage("🎯 1v1 Duel Mode - How to Play:");
           sendSystemMessage("Each song, you'll be paired with an opponent.");
-          sendSystemMessage("The player who answers correctly wins the round.");
-          sendSystemMessage("If both answer correctly or both wrong, it's a tie.");
+          sendSystemMessage("Points are gained when you answer correctly AND your opponent answers wrong.");
+          sendSystemMessage("If both answer correctly or both wrong, it's a tie (no points gained).");
           sendSystemMessage("Your target opponent is marked with a red 'Target' badge.");
           sendSystemMessage("Other players show 'Pair X' badges for their matchups.");
           sendSystemMessage("Win the most rounds to be the champion!");
@@ -6563,6 +6694,12 @@ function hijackStartButton() {
 
       // Only check for "Start" button, not "Ready" or other states
       if (buttonText !== "Start") {
+        return; // Let normal behavior proceed
+      }
+
+      // Disable script in restricted modes (Jam, Ranked, Themed)
+      if (shouldDisableScript()) {
+        console.log("[AMQ+] Script disabled: Jam, Ranked, or Themed mode detected");
         return; // Let normal behavior proceed
       }
 
