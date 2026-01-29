@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.1.0
+// @version      1.1.1
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -120,6 +120,9 @@ let duelState = {
 
 // Debug toggle for duel mode messages
 let duelDebugEnabled = false;
+
+// Toggle for duel result messages (wins/losses/ties)
+let duelResultMessagesEnabled = true;
 
 // Quick Sync / Basic Settings Mode state
 let basicSettingsMode = false; // Track if Quick Sync basic mode is active
@@ -467,7 +470,7 @@ function setupRoomSettingsHijackOnLobbyEnter() {
         if (playerName && typeof lobby !== 'undefined' && lobby.inLobby && lobby.isHost) {
           const isLiveNodeConfigured = cachedPlayerLists && cachedPlayerLists.length > 0;
           // Send a personalized message to the new player
-          sendGlobalChatMessage(`@${playerName}: Welcome! You can change what Anime is taken from your list using the "listhelp" command for more info.`);
+          sendGlobalChatMessage(`@${playerName}: Welcome! You can change what Anime is taken from your list using the "/ listhelp" command for more info (no space).`);
         }
       }, 1000);
     }
@@ -2342,9 +2345,10 @@ function playerHasAnimeForSong(playerName, annSongId) {
 
 /**
  * Score a pair for a given song based on familiarity fairness
+ * When unfair, prefers to give disadvantage to player with most wins
  * @param {Array<string>} pair - [playerA, playerB]
  * @param {number} annSongId - Song ID
- * @returns {number} Score: +1 for fair (both know or both don't), -1 for unfair
+ * @returns {number} Score: +1 for fair (both know or both don't), -1 for unfair (adjusted by wins)
  */
 function scorePairForSong(pair, annSongId) {
   const [playerA, playerB] = pair;
@@ -2358,19 +2362,50 @@ function scorePairForSong(pair, annSongId) {
   const aKnows = playerHasAnimeForSong(playerA, annSongId);
   const bKnows = playerHasAnimeForSong(playerB, annSongId);
 
-  const score = (aKnows === bKnows) ? 1 : -1;
   const fairness = (aKnows === bKnows) ? 'FAIR' : 'UNFAIR';
   const status = `(${playerA}: ${aKnows ? 'watched' : 'not watched'}, ${playerB}: ${bKnows ? 'watched' : 'not watched'})`;
 
-  console.log(`[AMQ+ Duel DEBUG] scorePairForSong: ${fairness} ${status}, annSongId=${annSongId}, score=${score}`);
-
   // Fair if both know or both don't know
   if (aKnows === bKnows) {
+    console.log(`[AMQ+ Duel DEBUG] scorePairForSong: ${fairness} ${status}, annSongId=${annSongId}, score=1`);
     return 1;
   }
 
-  // Unfair if only one knows
-  return -1;
+  // Unfair matchup - determine who is disadvantaged (doesn't know the song)
+  // The disadvantaged player is at a disadvantage because their opponent knows the song
+  const disadvantagedPlayer = aKnows ? playerB : playerA;
+  const advantagedPlayer = aKnows ? playerA : playerB;
+
+  // Get current wins for both players
+  const disadvantagedWins = duelState.wins[disadvantagedPlayer] || 0;
+  const advantagedWins = duelState.wins[advantagedPlayer] || 0;
+
+  // Find the maximum wins among all players
+  const maxWins = Math.max(...Object.values(duelState.wins || {}), 0);
+
+  // Calculate bonus: prefer to give disadvantage to players with most wins
+  // If the disadvantaged player is at max wins, add bonus to make this round more attractive
+  // If advantaged player has more wins, add penalty
+  let unfairBonus = 0;
+  
+  if (disadvantagedWins > advantagedWins) {
+    // Good: disadvantage goes to player with more wins
+    unfairBonus = 0.5;
+    console.log(`[AMQ+ Duel DEBUG] scorePairForSong: Unfair bonus +0.5 (${disadvantagedPlayer} has more wins: ${disadvantagedWins} vs ${advantagedWins})`);
+  } else if (disadvantagedWins < advantagedWins) {
+    // Bad: disadvantage goes to player with fewer wins
+    unfairBonus = -0.5;
+    console.log(`[AMQ+ Duel DEBUG] scorePairForSong: Unfair penalty -0.5 (${disadvantagedPlayer} has fewer wins: ${disadvantagedWins} vs ${advantagedWins})`);
+  } else if (disadvantagedWins === maxWins && maxWins > 0) {
+    // Tied but at max wins - add small random tiebreaker
+    unfairBonus = 0.25 + Math.random() * 0.1;
+    console.log(`[AMQ+ Duel DEBUG] scorePairForSong: Unfair tied-at-max bonus +${unfairBonus.toFixed(3)} (both at ${maxWins} wins, random tiebreaker)`);
+  }
+
+  const finalScore = -1 + unfairBonus;
+  console.log(`[AMQ+ Duel DEBUG] scorePairForSong: ${fairness} ${status}, annSongId=${annSongId}, base=-1, unfairBonus=${unfairBonus}, finalScore=${finalScore}`);
+
+  return finalScore;
 }
 
 /**
@@ -3069,8 +3104,8 @@ function updateDuelAvatarVisibility() {
   }
 
   // If BYE round, show a message
-  if (isBye) {
-    sendSystemMessage("🎯 This round: You have a BYE (no opponent)");
+  if (isBye && duelResultMessagesEnabled) {
+    sendSystemMessage(`[${duelState.currentRound}] This round: You have a BYE (no opponent)`);
   }
 }
 
@@ -3187,7 +3222,44 @@ function removeDuelTargetBadge(player) {
 }
 
 /**
- * Add Pair badge to player (purple with pair number)
+ * Get a unique color for each pair number
+ * @param {number} pairNumber - The pair number
+ * @returns {string} RGBA color string
+ */
+function getPairColor(pairNumber) {
+  // const colors = [
+  //   'rgba(147, 51, 234, 0.8)',  // Purple
+  //   'rgba(59, 130, 246, 0.8)',  // Blue
+  //   'rgba(16, 185, 129, 0.8)',  // Green
+  //   'rgba(245, 158, 11, 0.8)',  // Orange
+  //   'rgba(236, 72, 153, 0.8)',  // Pink
+  //   'rgba(139, 92, 246, 0.8)',  // Indigo
+  //   'rgba(20, 184, 166, 0.8)',  // Teal
+  //   'rgba(251, 146, 60, 0.8)',  // Amber
+  //   'rgba(244, 63, 94, 0.8)',   // Rose
+  //   'rgba(14, 165, 233, 0.8)'   // Sky blue
+  // ];
+
+  const colors = [
+    'rgba(147, 51, 234, 0.8)',  // Purple
+    'rgba(147, 51, 234, 0.8)',  // Purple
+    'rgba(147, 51, 234, 0.8)',  // Purple
+    'rgba(147, 51, 234, 0.8)',  // Purple
+    'rgba(147, 51, 234, 0.8)',  // Purple
+    'rgba(147, 51, 234, 0.8)',  // Purple
+    'rgba(147, 51, 234, 0.8)',  // Purple
+    'rgba(147, 51, 234, 0.8)',  // Purple
+    'rgba(147, 51, 234, 0.8)',  // Purple
+    'rgba(147, 51, 234, 0.8)',  // Purple
+  ];
+
+
+  // Cycle through colors if we have more pairs than colors
+  return colors[(pairNumber - 1) % colors.length];
+}
+
+/**
+ * Add Pair badge to player (with unique color per pair)
  * @param {Object} player - Quiz player object
  * @param {number} pairNumber - The pair number (e.g., 1, 2, 3)
  */
@@ -3201,10 +3273,13 @@ function addPairBadge(player, pairNumber) {
   // Remove existing badge first
   $levelBar.find('.qpAvatarDuelPairIcon').remove();
 
-  // Create pair badge with purple background
+  // Get unique color for this pair
+  const pairColor = getPairColor(pairNumber);
+
+  // Create pair badge with unique background color
   const $pairBadge = $(`
     <div class="qpAvatarDuelPairIcon text-center" style="
-      background-color: rgba(147, 51, 234, 0.8);
+      background-color: ${pairColor};
       color: white;
       padding: 2px 6px;
       border-radius: 3px;
@@ -3225,7 +3300,7 @@ function addPairBadge(player, pairNumber) {
     $levelBar.append($pairBadge);
   }
 
-  console.log(`[AMQ+ Duel] Added Pair ${pairNumber} badge to ${player._name}`);
+  console.log(`[AMQ+ Duel] Added Pair ${pairNumber} badge to ${player._name} with color ${pairColor}`);
 }
 
 /**
@@ -3336,15 +3411,15 @@ function processDuelAnswerResults(data) {
     r.playerA === selfName || r.playerB === selfName
   );
 
-  if (myResult) {
+  if (myResult && duelResultMessagesEnabled) {
     if (myResult.result === 'bye') {
       // BYE message already sent in updateDuelAvatarVisibility
     } else if (myResult.winner === selfName) {
-      sendSystemMessage(`🎯 You won this round vs ${duelState.myTarget}! (Wins: ${duelState.wins[selfName] || 0})`);
+      sendSystemMessage(`[${duelState.currentRound}] You won this round vs ${duelState.myTarget}! (Wins: ${duelState.wins[selfName] || 0})`);
     } else if (myResult.winner) {
-      sendSystemMessage(`🎯 ${duelState.myTarget} won this round. (Your wins: ${duelState.wins[selfName] || 0})`);
+      sendSystemMessage(`[${duelState.currentRound}] ${duelState.myTarget} won this round. (Your wins: ${duelState.wins[selfName] || 0})`);
     } else {
-      sendSystemMessage(`🎯 Tie with ${duelState.myTarget}. (Your wins: ${duelState.wins[selfName] || 0})`);
+      sendSystemMessage(`[${duelState.currentRound}] Tie with ${duelState.myTarget}. (Your wins: ${duelState.wins[selfName] || 0})`);
     }
   }
 
@@ -3591,6 +3666,12 @@ function hijackRoomSettings() {
 
   // Handler for Users' Lists button
   usersListsBtn.off("click").on("click", () => {
+    // Only host can use this button
+    if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
+      sendSystemMessage("⚠️ Only the room host can access Users' Lists or Load Quiz.");
+      return;
+    }
+
     const isAdvancedMode = amqPlusEnabled && !basicSettingsMode;
 
     if (isAdvancedMode) {
@@ -5014,19 +5095,10 @@ function fetchQuiz(quizId, liveNodeData = null) {
       }
       if (lobby?.gameId) {
         payload.roomId = String(lobby.gameId);
-        console.log("[AMQ+] Including roomId in request:", payload.roomId);
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/2fbe1aae-e005-43ec-9225-34585230a3a9', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'amqplusconnector.js:1970', message: 'RoomId added to payload', data: { roomId: payload.roomId, gameId: lobby.gameId, hasLobby: !!lobby, payloadKeys: Object.keys(payload) }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
-        // #endregion
-      } else {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/2fbe1aae-e005-43ec-9225-34585230a3a9', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'amqplusconnector.js:1975', message: 'No roomId in payload', data: { hasLobby: !!lobby, lobbyGameId: lobby?.gameId, lobbyInLobby: lobby?.inLobby }, timestamp: Date.now(), sessionId: 'debug-session', runId: 'run1', hypothesisId: 'B' }) }).catch(() => { });
-        // #endregion
       }
 
       requestConfig.data = JSON.stringify(payload);
     }
-
     GM_xmlhttpRequest(requestConfig);
   });
 }
@@ -5813,12 +5885,29 @@ function handle1v1DebugCommand() {
   }
 }
 
+/**
+ * Handle /1v1results command - toggle duel result messages (wins/losses/ties)
+ */
+function handle1v1ResultsCommand() {
+  duelResultMessagesEnabled = !duelResultMessagesEnabled;
+  sendSystemMessage(`1v1 Result Messages ${duelResultMessagesEnabled ? 'ENABLED' : 'DISABLED'}`);
+  if (!duelResultMessagesEnabled) {
+    sendSystemMessage("Round result messages will be hidden. Use /1v1results to show them again.");
+  }
+}
+
 function handleChatCommand(msg) {
   console.log("[AMQ+] Chat message from self:", msg);
 
   // Check for 1v1 debug command
   if (msg.toLowerCase().trim() === "/1v1debug") {
     handle1v1DebugCommand();
+    return;
+  }
+
+  // Check for 1v1 results toggle command
+  if (msg.toLowerCase().trim() === "/1v1results") {
+    handle1v1ResultsCommand();
     return;
   }
 
@@ -6121,6 +6210,8 @@ function setupListeners() {
           sendSystemMessage("Other players show 'Pair X' badges for their matchups.");
           sendSystemMessage("Win the most rounds to be the champion!");
           sendSystemMessage("━━━━━━━━━━━━━━━━━━━━━━━━");
+          sendSystemMessage("Commands: /1v1results - Toggle result messages");
+          sendSystemMessage("━━━━━━━━━━━━━━━━━━━━━━━━");
         }, 500);
       }, 100);
     }
@@ -6226,6 +6317,11 @@ function setupListeners() {
       return;
     }
 
+    // Only host sends song source messages to global chat
+    if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
+      return;
+    }
+
     if (!songSourceMap || songSourceMap.size === 0) {
       return;
     }
@@ -6306,8 +6402,22 @@ function setupListeners() {
         continue; // Don't process as regular chat
       }
 
-      if (message.sender === selfName) {
-        handleChatCommand(message.message.toLowerCase());
+      // Check if message is a command
+      const msgLower = message.message.toLowerCase();
+      if (msgLower.startsWith('/amqplus') || msgLower === '/1v1debug' || msgLower === '/1v1results') {
+        // Only process AMQ+ commands if sender is host
+        if (typeof lobby !== 'undefined' && lobby.inLobby) {
+          // Get the sender's game player ID
+          const senderPlayer = Object.values(quiz?.players || {}).find(p => p._name === message.sender);
+          const isHost = senderPlayer?.host || message.sender === selfName && lobby.isHost;
+
+          if (isHost) {
+            handleChatCommand(msgLower);
+          } else if (message.sender === selfName) {
+            // If self but not host, show error
+            sendSystemMessage("⚠️ Only the room host can use AMQ+ commands.");
+          }
+        }
       } else {
         // Handle player list commands from other players (host only)
         handlePlayerListCommand(message.message, message.sender);
@@ -6323,8 +6433,22 @@ function setupListeners() {
       return; // Don't process as regular chat
     }
 
-    if (payload.sender === selfName) {
-      handleChatCommand(payload.message.toLowerCase());
+    // Check if message is a command
+    const msgLower = payload.message.toLowerCase();
+    if (msgLower.startsWith('/amqplus') || msgLower === '/1v1debug' || msgLower === '/1v1results') {
+      // Only process AMQ+ commands if sender is host
+      if (typeof lobby !== 'undefined' && lobby.inLobby) {
+        // Get the sender's game player ID
+        const senderPlayer = Object.values(quiz?.players || {}).find(p => p._name === payload.sender);
+        const isHost = senderPlayer?.host || payload.sender === selfName && lobby.isHost;
+
+        if (isHost) {
+          handleChatCommand(msgLower);
+        } else if (payload.sender === selfName) {
+          // If self but not host, show error
+          sendSystemMessage("⚠️ Only the room host can use AMQ+ commands.");
+        }
+      }
     } else {
       // Handle player list commands from other players (host only)
       handlePlayerListCommand(payload.message, payload.sender);
