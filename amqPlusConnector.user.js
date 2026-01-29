@@ -461,16 +461,13 @@ function setupRoomSettingsHijackOnLobbyEnter() {
     if (amqPlusEnabled) {
       hijackRoomSettings();
 
-      // Send /listhelp message to new player with @mention
+      // Send welcome message to new player with @mention
       setTimeout(() => {
         const playerName = data.name || data.username || (typeof data === 'string' ? data : null);
         if (playerName && typeof lobby !== 'undefined' && lobby.inLobby && lobby.isHost) {
           const isLiveNodeConfigured = cachedPlayerLists && cachedPlayerLists.length > 0;
           // Send a personalized message to the new player
-          sendGlobalChatMessage(`@${playerName}: Welcome! You can change what Anime is taken from your list using / listhelp for more info (no space).`);
-          setTimeout(() => {
-            handleListHelpCommand(playerName, isLiveNodeConfigured);
-          }, 500);
+          sendGlobalChatMessage(`@${playerName}: Welcome! You can change what Anime is taken from your list using the "listhelp" command for more info.`);
         }
       }, 1000);
     }
