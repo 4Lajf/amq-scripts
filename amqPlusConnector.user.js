@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.0.27
+// @version      1.1.0
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -31,7 +31,7 @@ const API_BASE_URL = "https://amqplus.moe";
 console.log("[AMQ+] Using API base URL:", API_BASE_URL);
 
 // Settings state
-let amqPlusEnabled = true;
+let amqPlusEnabled = false; // Always start disabled on page refresh
 let songSourceMessagesEnabled = true;
 let liveNodeSongSelectionMode = 'default';
 let amqPlusCreditsSent = false;
@@ -95,18 +95,57 @@ let trainingState = {
 
 let trainingSyncTimeout = null;
 const TRAINING_SYNC_DEBOUNCE = 500; // 500ms debounce for sync
-let trainingRatingLocked = false;
-let trainingRatingDelay = 500; // 500ms of delay before allowing a new submitrating call
+
+// ========================================
+// 1v1 Duel Mode State
+// ========================================
+let duelModeEnabled = false; // Flag to indicate duel mode is active
+let duelState = {
+  roster: [], // Frozen player roster at game start (player names)
+  rosterMap: {}, // Map of player name -> { username, platform, hasAnimeForSong: {} }
+  indexToName: {}, // Map of index -> player name (for compact messaging)
+  nameToIndex: {}, // Map of player name -> index (for compact messaging)
+  pendingMappingParts: {}, // For multi-part mapping assembly: { total: N, parts: { 1: "...", 2: "..." } }
+  roundRobinSchedule: [], // Pre-generated round-robin schedule: Array of rounds, each round is Array of pairs [playerA, playerB]
+  usedRounds: [], // Indices of rounds already used
+  currentRound: 0, // Current song/round number
+  currentPairings: {}, // Map of playerName -> opponentName for current song
+  myTarget: null, // Current player's opponent name
+  wins: {}, // Map of playerName -> win count
+  headToHead: {}, // Map of playerA -> { playerB -> wins }
+  songOverlapMap: null, // Per-song overlap data: Map of annSongId -> { hasAnimeUsernames: [] }
+  isHost: false, // Whether current player is the host
+  BYE: '__BYE__' // Sentinel value for bye rounds
+};
+
+// Debug toggle for duel mode messages
+let duelDebugEnabled = false;
+
+// Quick Sync / Basic Settings Mode state
+let basicSettingsMode = false; // Track if Quick Sync basic mode is active
+
+// Quiz re-roll prevention flag
+let quizFetchedBeforeGameStart = false; // Track if quiz was already fetched before game starts
+let roomSettingsQuizToken = null; // Store current temp quiz token
+let roomSettingsHijacked = false; // Track if Room Settings has been hijacked
+let isApplyingRoomSettingsQuiz = false; // Prevents infinite loop when applying quiz
+let amqPlusHostModalTab = 'settings'; // Track active tab in AMQ+ Advanced mode: 'settings' | 'loadQuiz'
+let isUpdatingAdvancedModeUI = false; // Prevents infinite loop in MutationObserver
+let advancedModeUIUpdateTimeout = null; // Debounce timer for observer updates
 
 function loadSettings() {
+  // Always start with AMQ+ disabled on page refresh (don't restore enabled state)
+  amqPlusEnabled = false;
+
   const saved = localStorage.getItem("amqPlusConnector");
   if (saved) {
     try {
       const data = JSON.parse(saved);
-      amqPlusEnabled = data.enabled ?? true;
+      // Don't load amqPlusEnabled - always start disabled
       songSourceMessagesEnabled = data.songSourceMessagesEnabled ?? true;
       liveNodeSongSelectionMode = data.liveNodeSongSelectionMode ?? 'default';
-      console.log("[AMQ+] Settings loaded from localStorage:", data);
+      basicSettingsMode = data.basicSettingsMode ?? false;
+      console.log("[AMQ+] Settings loaded from localStorage (AMQ+ always starts disabled):", data);
     } catch (e) {
       console.error("[AMQ+] Failed to load settings:", e);
     }
@@ -231,9 +270,10 @@ function saveTrainingSettings() {
 
 function saveSettings() {
   localStorage.setItem("amqPlusConnector", JSON.stringify({
-    enabled: amqPlusEnabled,
+    // Don't save enabled state - always starts disabled on page refresh
     songSourceMessagesEnabled: songSourceMessagesEnabled,
-    liveNodeSongSelectionMode: liveNodeSongSelectionMode
+    liveNodeSongSelectionMode: liveNodeSongSelectionMode,
+    basicSettingsMode: basicSettingsMode
   }));
 }
 
@@ -394,13 +434,475 @@ function setup() {
   setupQuizSavedModalObserver();
   setupQuizCreatorExportButton();
   setupSocketCommandInterceptor();
+
+  // Setup Room Settings hijacking when entering lobby
+  setupRoomSettingsHijackOnLobbyEnter();
+  setupBasicModeUIObserver();
+
   console.log("[AMQ+] Setup complete! Enabled:", amqPlusEnabled);
+}
+
+/**
+ * Setup listener to hijack Room Settings when entering lobby
+ */
+function setupRoomSettingsHijackOnLobbyEnter() {
+  // Hijack when joining lobby
+  new Listener("Join Game", (data) => {
+    console.log("[AMQ+] Joined lobby, setting up Room Settings hijacking...");
+    setTimeout(() => {
+      if (amqPlusEnabled) {
+        hijackRoomSettings();
+      }
+    }, 500);
+  }).bindListener();
+
+  // Also try to hijack when new player joins (ensures button exists)
+  new Listener("New Player", (data) => {
+    if (amqPlusEnabled) {
+      hijackRoomSettings();
+
+      // Send /listhelp message to new player with @mention
+      setTimeout(() => {
+        const playerName = data.name || data.username || (typeof data === 'string' ? data : null);
+        if (playerName && typeof lobby !== 'undefined' && lobby.inLobby && lobby.isHost) {
+          const isLiveNodeConfigured = cachedPlayerLists && cachedPlayerLists.length > 0;
+          // Send a personalized message to the new player
+          sendGlobalChatMessage(`@${playerName}: Welcome! You can change what Anime is taken from your list using / listhelp for more info (no space).`);
+          setTimeout(() => {
+            handleListHelpCommand(playerName, isLiveNodeConfigured);
+          }, 500);
+        }
+      }, 1000);
+    }
+  }).bindListener();
+}
+
+/**
+ * Update the AMQ Settings UI for Basic Mode
+ * Replaces "Empty" text in Genres and Tags with an informational message
+ */
+function updateBasicModeSettingsUI() {
+  const message = "This feature is not available in Basic Mode, switch to Advanced or turn AMQ+ off.";
+  const css = {
+    "opacity": "1",
+    "color": "white",
+    "font-size": "14px",
+    "text-align": "center",
+    "padding": "10px"
+  };
+
+  const updateElement = (selector) => {
+    const el = $(selector);
+    if (!el.length) return;
+
+    if (amqPlusEnabled && basicSettingsMode) {
+      // If not already modified or text is different
+      if (!el.data("amq-plus-modified") || el.text() !== message) {
+        if (!el.data("original-text")) {
+          el.data("original-text", el.text()); // Save original text
+        }
+        el.text(message);
+        el.css(css);
+        el.data("amq-plus-modified", true);
+      }
+    } else {
+      // Revert if modified
+      if (el.data("amq-plus-modified")) {
+        const originalText = el.data("original-text") || "Empty";
+        el.text(originalText);
+        el.css({
+          "opacity": "",
+          "color": "",
+          "font-size": "",
+          "text-align": "",
+          "padding": ""
+        });
+        el.removeData("amq-plus-modified");
+      }
+    }
+  };
+
+  updateElement("#mhGenreFilter .filterEmptyText");
+  updateElement("#mhTagFilter .filterEmptyText");
+}
+
+/**
+ * Render the AMQ+ host modal view based on the active tab
+ * Applies visibility rules for Settings vs Load Quiz tabs
+ */
+function renderAmqPlusHostModalView() {
+  const isAdvancedMode = amqPlusEnabled && !basicSettingsMode;
+  if (!isAdvancedMode) {
+    return;
+  }
+
+  // Prevent infinite loops
+  if (isUpdatingAdvancedModeUI) {
+    return;
+  }
+  isUpdatingAdvancedModeUI = true;
+
+  try {
+    if (amqPlusHostModalTab === 'settings') {
+      // === SETTINGS TAB: Apply trimmed view ===
+
+      // Hide entire Anime section (contains Genre, Tags, Vintage, etc.)
+      $("#mhAnimeSettings").hide();
+
+      // === MODIFY QUIZ SETTINGS ===
+      // Show Quiz section but hide most content, only keep Modifiers
+      $("#mhQuizSettings").show();
+      // Hide the category header
+      $("#mhQuizSettings .mhSettingCategoryContainer").hide();
+      // Hide Guess Time row
+      $("#mhQuizGuessTimeContainer").closest(".row").hide();
+      // Hide Sample Point and Playback Speed row
+      $("#mhSamplePointSpecificContainer").closest(".row").hide();
+      $("#mhSamplePointRangeContainer").closest(".row").hide();
+      // Hide Song Difficulty and Song Popularity row
+      $("#mhSongDiffContainer").closest(".row").hide();
+
+      // === MODIFY MODE SETTINGS ===
+      // Show Mode Settings but hide specific elements
+      $("#mhModeSettings").show();
+      // Hide the category header
+      $("#mhModeSettings .mhSettingCategoryContainer").hide();
+      // Hide Game Mode selector
+      $("#mhGameModeSelector").hide();
+      // Hide Community Score container (we'll show the regular Scoring instead)
+      $("#mhCommunityScoreContainer").hide();
+      // Hide Show Selection row
+      $(".row:has(#mhShowSelectionSlider)").hide();
+      // Hide Lives
+      $("#mhLifeContainer").hide();
+      // Hide Boss mode settings
+      $("#mhBossModeContainer").hide();
+      // Hide Battle Royale settings
+      $("#mhQuizBattleRoyaleSettingRow").hide();
+
+      // Show Scoring and Answering
+      $(".row:has(#mhScoringSlider)").show();
+      $(".row:has(#mhAnsweringSlider)").show();
+
+      // === MODIFY GENERAL SETTINGS ===
+      // Show only: Room Name, Private Room, Number of Players, Team Size
+      // Hide: Song Selection, Song Types, Watched/Unwatched sliders, Song Categories
+      $("#mhSongSelectionOuterContainer").hide();
+      $("#mnSongTypeStandardContainer").hide();
+      $("#mhSongSelectionCustomContainer").hide();
+      $("#mhSongTypeCustomContainer").hide();
+      $("#mhWatchedDisitributionContainer").hide();
+      // Hide Number of Songs (managed by AMQ+)
+      $("#mhNumberOfSongsContainer").hide();
+
+      // Hide Song Categories
+      $("label:contains('Song Categories')").closest(".row").hide();
+
+      // === MODIFY MODIFIERS ===
+      // Remove: Duplicate Shows, Dub Songs, Full Song Range completely
+      // Hide: Rebroadcast Songs
+      $("#mhDuplicateShows").closest("div").remove();
+      $("#mhRebroadcastSongs").closest("div.largeCheckbox").hide();
+      $("#mhDubSongs").closest("div").remove();
+      $("#mhFullSongRange").closest("div").remove();
+
+      // === SHOW INFO MESSAGE ===
+      if (!$("#amqPlusAdvancedModeInfo").length) {
+        const infoMessage = $(`
+        <div id="amqPlusAdvancedModeInfo" style="
+          background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.1) 100%);
+          border: 1px solid rgba(99, 102, 241, 0.5);
+          border-radius: 8px;
+          padding: 15px;
+          margin: 15px 0;
+          text-align: center;
+          color: white;
+        ">
+          <i class="fa fa-info-circle" style="font-size: 20px; margin-right: 8px; color: #6366f1;"></i>
+          <span style="font-size: 14px;">
+            Manage the rest of the settings in the <strong style="color: #6366f1;">AMQ+ App</strong>.
+          </span>
+        </div>
+      `);
+
+        // Insert after General Settings
+        $("#mhGeneralSettings").after(infoMessage);
+      } else {
+        // Update existing message text
+        $("#amqPlusAdvancedModeInfo span").html('Manage the rest of the settings in the <strong style="color: #6366f1;">AMQ+ App</strong>.');
+        $("#amqPlusAdvancedModeInfo").show();
+      }
+
+      // Hide the quick select container (Mode/General/Quiz/Anime buttons)
+      $("#mhQuickSelectContainer").hide();
+
+      // Hide the swap mode button
+      $("#mhSwapModeButtonContainer").hide();
+
+    }
+    // Note: Load Quiz tab opens the AMQ+ modal directly, no rendering needed here
+  } finally {
+    // Reset flag after update completes
+    setTimeout(() => {
+      isUpdatingAdvancedModeUI = false;
+    }, 100);
+  }
+}
+
+/**
+ * Update the AMQ Settings UI for Advanced Mode
+ * Handles tab injection and delegates rendering to renderAmqPlusHostModalView()
+ */
+function updateAdvancedModeSettingsUI() {
+  // Prevent infinite loops
+  if (isUpdatingAdvancedModeUI) {
+    return;
+  }
+
+  const isAdvancedMode = amqPlusEnabled && !basicSettingsMode;
+  const tabContainer = $(".tabContainer.quizBuilderHidden");
+  const quickTab = $("#mhQuickTab");
+  const advancedTab = $("#mhAdvancedTab");
+
+  if (!tabContainer.length) {
+    return;
+  }
+
+  // Set flag before proceeding
+  isUpdatingAdvancedModeUI = true;
+
+  try {
+    if (isAdvancedMode) {
+      // === TAB INJECTION + STATE MANAGEMENT ===
+      // Check if we've already modified the tabs
+      if (!$("#amqPlusSettingsTab").length) {
+        // Hide original tabs
+        quickTab.hide();
+        advancedTab.hide();
+
+        // Create new "Settings" tab
+        const settingsTab = $(`
+        <div id="amqPlusSettingsTab" class="tab clickAble selected">
+          <h5>Settings</h5>
+        </div>
+      `);
+
+        // Create new "Load Quiz" tab
+        const loadQuizTab = $(`
+        <div id="amqPlusLoadQuizTab" class="tab clickAble">
+          <h5>Load Quiz</h5>
+        </div>
+      `);
+
+        // Insert after advanced tab (before the .right container)
+        advancedTab.after(loadQuizTab);
+        advancedTab.after(settingsTab);
+
+        // Ensure modal is in advanced mode when tabs are created
+        // Use setTimeout to avoid triggering observer during DOM manipulation
+        setTimeout(() => {
+          if (typeof hostModal !== 'undefined' && hostModal.changeView) {
+            hostModal.changeView('advanced');
+          }
+        }, 100);
+
+        // Handle tab switching
+        settingsTab.off("click").on("click", function () {
+          if (isUpdatingAdvancedModeUI) return; // Prevent clicks during updates
+
+          $(this).addClass("selected");
+          $("#amqPlusLoadQuizTab").removeClass("selected");
+          amqPlusHostModalTab = 'settings';
+
+          // Ensure modal is in advanced mode and hide load container
+          if (typeof hostModal !== 'undefined') {
+            if (hostModal.changeView) {
+              hostModal.changeView('advanced');
+            }
+            if (hostModal.hideLoadContainer) {
+              hostModal.hideLoadContainer();
+            }
+          }
+
+          // Use setTimeout to allow DOM to settle before rendering
+          setTimeout(() => {
+            renderAmqPlusHostModalView();
+          }, 100);
+        });
+
+        loadQuizTab.off("click").on("click", function () {
+          if (isUpdatingAdvancedModeUI) return; // Prevent clicks during updates
+
+          // Close the Room Settings modal by clicking the Exit button
+          $('button[data-dismiss="modal"][data-i18n="game_settings.buttons.exit"]').click();
+
+          // Open the AMQ+ configuration modal after a short delay
+          setTimeout(() => {
+            // Remove any leftover modal backdrops and modal-open class
+            $(".modal-backdrop").remove();
+            $("body").removeClass("modal-open").css("padding-right", "");
+
+            // Show the AMQ+ modal
+            $("#amqPlusModal").modal("show");
+
+            // Ensure modal-open class is applied and scrolling works
+            setTimeout(() => {
+              $("body").addClass("modal-open");
+            }, 50);
+          }, 200);
+        });
+
+        // Initialize to Settings tab
+        amqPlusHostModalTab = 'settings';
+      } else {
+        // Sync tab state with actual selected tab
+        const settingsTabSelected = $("#amqPlusSettingsTab").hasClass("selected");
+        const loadQuizTabSelected = $("#amqPlusLoadQuizTab").hasClass("selected");
+
+        if (loadQuizTabSelected) {
+          amqPlusHostModalTab = 'loadQuiz';
+        } else {
+          amqPlusHostModalTab = 'settings';
+        }
+      }
+
+      // Render the view based on active tab
+      renderAmqPlusHostModalView();
+
+    } else {
+      // === REVERT ALL CHANGES ===
+      // Reset tab state
+      amqPlusHostModalTab = 'settings';
+
+      // Show original tabs
+      quickTab.show();
+      advancedTab.show();
+
+      // Remove custom tabs
+      $("#amqPlusSettingsTab").remove();
+      $("#amqPlusLoadQuizTab").remove();
+
+      // Show all hidden sections
+      $("#mhAnimeSettings").show();
+      $("#mhQuizSettings").show();
+      $("#mhModeSettings").show();
+
+      // Show Quiz Settings elements
+      $("#mhQuizSettings .mhSettingCategoryContainer").show();
+      $("#mhQuizGuessTimeContainer").closest(".row").show();
+      $("#mhSamplePointSpecificContainer").closest(".row").show();
+      $("#mhSamplePointRangeContainer").closest(".row").show();
+      $("#mhSongDiffContainer").closest(".row").show();
+
+      // Show Mode Settings elements
+      $("#mhModeSettings .mhSettingCategoryContainer").show();
+      $("#mhCommunityScoreContainer").show();
+
+      // Show hidden elements in General Settings
+      $("#mhSongSelectionOuterContainer").show();
+      $("#mnSongTypeStandardContainer").show();
+      $("#mhSongSelectionCustomContainer").show();
+      $("#mhSongTypeCustomContainer").show();
+      $("#mhWatchedDisitributionContainer").show();
+      $("#mhNumberOfSongsContainer").show();
+      $("label:contains('Song Categories')").closest(".row").show();
+
+      // Show hidden elements in Mode Settings
+      $("#mhGameModeSelector").show();
+      $(".row:has(#mhShowSelectionSlider)").show();
+      $(".row:has(#mhScoringSlider)").show();
+      $(".row:has(#mhAnsweringSlider)").show();
+      $("#mhLifeContainer").show();
+      $("#mhBossModeContainer").show();
+      $("#mhQuizBattleRoyaleSettingRow").show();
+
+      // Show hidden modifiers
+      $("#mhDuplicateShows").closest("div").show();
+      $("#mhRebroadcastSongs").closest("div.largeCheckbox").show();
+      $("#mhDubSongs").closest("div").show();
+      $("#mhFullSongRange").closest("div").show();
+
+      // Remove info message
+      $("#amqPlusAdvancedModeInfo").remove();
+
+      // Show quick select and swap mode
+      $("#mhQuickSelectContainer").show();
+      $("#mhSwapModeButtonContainer").show();
+    }
+  } finally {
+    // Reset flag after update completes
+    setTimeout(() => {
+      isUpdatingAdvancedModeUI = false;
+    }, 100);
+  }
+}
+
+/**
+ * Setup observer for AMQ Settings UI changes
+ */
+function setupBasicModeUIObserver() {
+  const observer = new MutationObserver((mutations) => {
+    // Skip if we're already updating to prevent infinite loops
+    if (isUpdatingAdvancedModeUI) return;
+
+    // Check if relevant elements exist in the mutations or in the DOM
+    const genreEmpty = document.querySelector("#mhGenreFilter .filterEmptyText");
+    const tagEmpty = document.querySelector("#mhTagFilter .filterEmptyText");
+    const tabContainer = document.querySelector(".tabContainer.quizBuilderHidden");
+
+    if (genreEmpty || tagEmpty) {
+      updateBasicModeSettingsUI();
+    }
+
+    // Debounce advanced mode UI updates to prevent excessive calls
+    if (tabContainer) {
+      // Clear existing timeout
+      if (advancedModeUIUpdateTimeout) {
+        clearTimeout(advancedModeUIUpdateTimeout);
+      }
+
+      // Set new timeout with debounce
+      advancedModeUIUpdateTimeout = setTimeout(() => {
+        if (!isUpdatingAdvancedModeUI) {
+          updateAdvancedModeSettingsUI();
+
+          // When modal opens in Advanced mode, ensure Settings tab is selected
+          const isAdvancedMode = amqPlusEnabled && !basicSettingsMode;
+          if (isAdvancedMode) {
+            const settingsTab = $("#amqPlusSettingsTab");
+            const loadQuizTab = $("#amqPlusLoadQuizTab");
+
+            if (settingsTab.length && loadQuizTab.length && !settingsTab.hasClass("selected")) {
+              amqPlusHostModalTab = 'settings';
+              settingsTab.addClass("selected");
+              loadQuizTab.removeClass("selected");
+
+              if (typeof hostModal !== 'undefined' && hostModal.hideLoadContainer) {
+                hostModal.hideLoadContainer();
+              }
+
+              renderAmqPlusHostModalView();
+            }
+          }
+        }
+        advancedModeUIUpdateTimeout = null;
+      }, 200);
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["style", "class", "hidden"]
+  });
 }
 
 function setupSocketCommandInterceptor() {
   if (!socket._amqPlusCommandHijacked) {
     const originalSendCommand = socket.sendCommand.bind(socket);
     socket.sendCommand = function (command) {
+      // Intercept like state command for AMQ+ quizzes
       if (command.command === "update custom quiz like state" && command.type === "quizCreator") {
         console.log("[AMQ+] Intercepted like state command:", command);
 
@@ -411,11 +913,275 @@ function setupSocketCommandInterceptor() {
           return;
         }
       }
+
+      // Intercept "change game settings" command when in basic settings mode
+      if (command.command === "change game settings" && command.type === "lobby" && basicSettingsMode) {
+        console.log("[AMQ+] Intercepted change game settings in basic mode:", command);
+
+        // Skip if this is just a community mode toggle (no actual settings changes)
+        // This prevents infinite loop when applying the quiz triggers another settings change
+        const isOnlyCommunityModeChange = command.data &&
+          command.data.communityMode !== undefined &&
+          (!command.data.settingChanges || Object.keys(command.data.settingChanges).length === 0);
+
+        if (isOnlyCommunityModeChange) {
+          console.log("[AMQ+] Skipping quiz creation - this is just a community mode toggle");
+          return originalSendCommand.call(this, command);
+        }
+
+        // Skip if we're currently applying a quiz (prevents infinite loop)
+        if (isApplyingRoomSettingsQuiz) {
+          console.log("[AMQ+] Skipping quiz creation - currently applying a quiz");
+          return originalSendCommand.call(this, command);
+        }
+
+        // Check if we have player lists configured
+        if (cachedPlayerLists && cachedPlayerLists.length > 0) {
+          // Reset quiz fetched flag when settings change - new settings require new quiz
+          quizFetchedBeforeGameStart = false;
+          console.log("[AMQ+] Settings changed, reset quiz fetched flag - will fetch new quiz");
+
+          // First, let the command go through to AMQ so lobby.settings gets updated
+          const result = originalSendCommand.call(this, command);
+
+          // After a short delay, read the updated lobby.settings and create the quiz
+          setTimeout(() => {
+            const updatedSettings = typeof lobby !== 'undefined' && lobby.settings ? lobby.settings : null;
+
+            if (!updatedSettings) {
+              console.log("[AMQ+] Could not read updated lobby.settings");
+              return;
+            }
+
+            console.log("[AMQ+] Read updated lobby.settings after change:", updatedSettings);
+
+            // Validate watchedDistribution (1=Random, 2=Weighted, 3=Equal)
+            if (updatedSettings.watchedDistribution === 2) {
+              sendSystemMessage("⚠️ Weighted Watched Distribution mode is not supported by AMQ+. Please use Random or Equal mode.");
+              return;
+            }
+
+            // Create room settings quiz via API using the updated settings
+            handleRoomSettingsQuizCreation(updatedSettings);
+          }, 100); // Small delay to let AMQ process the settings change
+
+          return result;
+        } else {
+          console.log("[AMQ+] No player lists available, proceeding with normal command");
+        }
+      }
+
       return originalSendCommand.call(this, command);
     };
     socket._amqPlusCommandHijacked = true;
     console.log("[AMQ+] Socket command interceptor set up for AMQ+ quizzes");
   }
+}
+
+/**
+ * Handle room settings quiz creation via AMQ+ API
+ * Note: The original "change game settings" command has already been sent to AMQ,
+ * so lobby.settings contains the updated values. This function creates an AMQ+ quiz
+ * from those settings.
+ * Settings changes should always trigger a new quiz fetch (re-roll prevention only applies when Start button is clicked)
+ */
+function handleRoomSettingsQuizCreation(roomSettings) {
+  console.log("[AMQ+] Creating room settings quiz from updated lobby.settings...");
+  console.log("[AMQ+] Room settings:", JSON.stringify(roomSettings, null, 2));
+  sendSystemMessage("Creating AMQ+ quiz from room settings...");
+
+  // Check watchedDistribution mode and apply appropriate preset
+  // watchedDistribution: 1=Random, 2=Weighted (not supported), 3=Equal
+  if (roomSettings.watchedDistribution !== undefined) {
+    const watchedDistribution = roomSettings.watchedDistribution;
+    console.log("[AMQ+] watchedDistribution:", watchedDistribution);
+
+    // Ensure cachedPlayerLists is populated before applying presets
+    if (!cachedPlayerLists || cachedPlayerLists.length === 0) {
+      console.warn("[AMQ+] No cached player lists available, cannot apply song selection preset");
+    } else {
+      if (watchedDistribution === 2) {
+        // Weighted/Mix mode - not supported
+        sendSystemMessage("⚠️ Weighted (Mix) song selection mode is not supported. Please use Random or Watched (Equal) mode.");
+        return;
+      } else if (watchedDistribution === 3) {
+        // Equal mode - apply equal preset
+        console.log("[AMQ+] Applying Equal preset for watchedDistribution=3 (Equal)");
+        applyEqualPreset();
+        sendSystemMessage("📊 Song Selection: Equal distribution across all player lists");
+      } else if (watchedDistribution === 1) {
+        // Random mode - apply random preset
+        console.log("[AMQ+] Applying Random preset for watchedDistribution=1 (Random)");
+        applyRandomPreset();
+        sendSystemMessage("🎲 Song Selection: Random from all player lists");
+      }
+    }
+  } else {
+    // No watchedDistribution in room settings - apply random as default
+    console.log("[AMQ+] No watchedDistribution found in room settings, applying Random preset as default");
+    if (cachedPlayerLists && cachedPlayerLists.length > 0) {
+      applyRandomPreset();
+    }
+  }
+
+  // Get configured player lists (after preset has been applied)
+  const configuredLists = getConfiguredPlayerLists();
+
+  // Filter out invalid entries
+  const validLists = configuredLists.filter(entry => {
+    const username = entry.username ? entry.username.trim() : '';
+    return username !== '' && username !== '-' && entry.platform !== 'kitsu';
+  });
+
+  if (validLists.length === 0) {
+    sendSystemMessage("⚠️ No valid player lists available. Please add players with linked anime lists.");
+    return;
+  }
+
+  // Prepare request body with the updated room settings
+  const requestBody = {
+    roomSettings: roomSettings,
+    playerLists: validLists
+  };
+
+  console.log("[AMQ+] Sending room settings to API:", requestBody);
+
+  GM_xmlhttpRequest({
+    method: "POST",
+    url: `${API_BASE_URL}/api/room-settings-quiz`,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    data: JSON.stringify(requestBody),
+    onload: function (response) {
+      console.log("[AMQ+] Room settings quiz API response:", response.status, response.responseText);
+
+      if (response.status === 200) {
+        try {
+          const data = JSON.parse(response.responseText);
+          if (data.success && data.playToken) {
+            console.log("[AMQ+] Room settings quiz created successfully:", data);
+            roomSettingsQuizToken = data.playToken;
+
+            // Now fetch the quiz using the play token
+            fetchAndApplyRoomSettingsQuiz(data.playToken);
+          } else {
+            console.error("[AMQ+] Room settings quiz creation failed:", data);
+            sendSystemMessage("⚠️ Failed to create quiz: " + (data.message || "Unknown error"));
+          }
+        } catch (e) {
+          console.error("[AMQ+] Failed to parse API response:", e);
+          sendSystemMessage("⚠️ Failed to create quiz: Parse error");
+        }
+      } else if (response.status === 400) {
+        try {
+          const errorData = JSON.parse(response.responseText);
+          sendSystemMessage("⚠️ " + (errorData.message || "Invalid settings"));
+        } catch (e) {
+          sendSystemMessage("⚠️ Invalid settings provided");
+        }
+      } else {
+        console.error("[AMQ+] Room settings quiz API error:", response.status, response.statusText);
+        sendSystemMessage("⚠️ Failed to create quiz: Server error");
+      }
+    },
+    onerror: function (error) {
+      console.error("[AMQ+] Room settings quiz API network error:", error);
+      sendSystemMessage("⚠️ Failed to create quiz: Network error");
+    }
+  });
+}
+
+/**
+ * Fetch and apply room settings quiz
+ * Note: Settings have already been applied to AMQ. This fetches the quiz songs
+ * and saves the quiz to the user's community quizzes.
+ */
+function fetchAndApplyRoomSettingsQuiz(playToken) {
+  console.log("[AMQ+] Fetching room settings quiz...");
+
+  // Get configured player lists for live node data
+  const configuredLists = getConfiguredPlayerLists();
+  const validLists = configuredLists.filter(entry => {
+    const username = entry.username ? entry.username.trim() : '';
+    return username !== '' && username !== '-' && entry.platform !== 'kitsu';
+  });
+
+  const liveNodeData = {
+    useEntirePool: false,
+    userEntries: validLists,
+    songSelectionMode: liveNodeSongSelectionMode
+  };
+
+  const requestBody = {
+    liveNodeData: liveNodeData,
+    roomId: lobby?.gameId ? String(lobby.gameId) : null
+  };
+
+  GM_xmlhttpRequest({
+    method: "POST",
+    url: `${API_BASE_URL}/play/${playToken}`,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    data: JSON.stringify(requestBody),
+    onload: function (response) {
+      console.log("[AMQ+] Fetch quiz response:", response.status);
+
+      if (response.status === 200) {
+        try {
+          const data = JSON.parse(response.responseText);
+
+          if (data.command) {
+            console.log("[AMQ+] Quiz command received, saving to AMQ...");
+            console.log("[AMQ+ DEBUG] Full API response keys:", Object.keys(data));
+            console.log("[AMQ+ DEBUG] songOverlapMap in response:", data.songOverlapMap ? `Array with ${data.songOverlapMap.length} entries` : 'NOT PRESENT');
+
+            // Check if any songs were generated
+            const songCount = data.command.data?.quizSave?.ruleBlocks?.[0]?.blocks?.length || 0;
+
+            if (songCount === 0) {
+              console.warn("[AMQ+] No songs generated for quiz!");
+              sendSystemMessage("⚠️ No songs were generated! Your filter settings may be too restrictive. Try adjusting the room settings.");
+              return;
+            }
+
+            console.log(`[AMQ+] Quiz has ${songCount} songs`);
+            currentQuizData = data;
+            currentQuizId = playToken;
+
+            // Build song source map
+            if (data.songSourceMap) {
+              buildSongSourceMap(data, data.command.data.quizSave);
+            }
+
+            // Build song overlap map for duel mode
+            console.log("[AMQ+ Duel DEBUG] fetchAndApplyRoomSettingsQuiz: duelModeEnabled =", duelModeEnabled, ", data.songOverlapMap =", data.songOverlapMap);
+            if (duelModeEnabled && data.songOverlapMap) {
+              console.log("[AMQ+ Duel] Building song overlap map from room settings quiz response");
+              buildSongOverlapMap(data.songOverlapMap, data.command.data.quizSave);
+            }
+
+            // Save the quiz to AMQ and then apply it
+            createOrUpdateQuiz(data);
+          } else {
+            console.error("[AMQ+] No command in response:", data);
+            sendSystemMessage("⚠️ Failed to generate quiz songs");
+          }
+        } catch (e) {
+          console.error("[AMQ+] Failed to parse quiz response:", e);
+          sendSystemMessage("⚠️ Failed to fetch quiz: Parse error");
+        }
+      } else {
+        console.error("[AMQ+] Failed to fetch quiz:", response.status);
+        sendSystemMessage("⚠️ Failed to fetch quiz from server");
+      }
+    },
+    onerror: function (error) {
+      console.error("[AMQ+] Fetch quiz network error:", error);
+      sendSystemMessage("⚠️ Failed to fetch quiz: Network error");
+    }
+  });
 }
 
 function setupQuizSavedModalObserver() {
@@ -805,15 +1571,18 @@ function createJsonImportInstructionsModalHTML() {
 function createModalHTML() {
   return `
         <div class="modal fade" id="amqPlusModal" tabindex="-1" role="dialog">
-            <div class="modal-dialog" role="document" style="width: 600px">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <div class="modal-dialog" role="document" style="width: 600px; max-width: 95%;">
+                <div class="modal-content" style="background-color: #1a1a2e; color: #e2e8f0; border: 1px solid #4a5568;">
+                    <div class="modal-header" style="border-bottom: 1px solid #2d3748; padding: 15px 20px;">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close" style="color: #fff; opacity: 0.8;">
                             <span aria-hidden="true">&times;</span>
                         </button>
-                        <h4 class="modal-title">AMQ+ Settings</h4>
+                        <h4 class="modal-title" style="font-weight: bold; color: #fff;">
+                            <i class="fa fa-cog" style="color: #6366f1; margin-right: 8px;"></i>
+                            AMQ+ Configuration
+                        </h4>
                     </div>
-                    <div class="modal-body">
+                    <div class="modal-body" style="padding: 20px; max-height: 60vh; overflow-y: auto;">
                         <div class="form-group" style="margin-bottom: 20px;">
                             <label style="display: flex; align-items: center; cursor: pointer;">
                                 <div class="customCheckbox" style="margin-right: 10px;">
@@ -822,19 +1591,19 @@ function createModalHTML() {
                                         <i class="fa fa-check" aria-hidden="true"></i>
                                     </label>
                                 </div>
-                                <span style="font-size: 16px; font-weight: bold;">Enable AMQ+ Mode</span>
+                                <span style="font-size: 16px; font-weight: bold; color: #fff;">Enable AMQ+ Mode</span>
                             </label>
-                            <small class="form-text text-muted">
+                            <small style="color: rgba(255,255,255,0.6); font-size: 12px;">
                                 When enabled, AMQ+ will automatically fetch and apply quizzes when starting a game
                             </small>
                         </div>
 
                         <div class="form-group">
-                            <label for="amqPlusUrlInput">Enter AMQ+ Play URL:</label>
+                            <label for="amqPlusUrlInput" style="color: #fff; font-weight: bold;">Enter AMQ+ Play URL:</label>
                             <input type="text" class="form-control" id="amqPlusUrlInput"
                                    placeholder="https://amqplus.com/play/quiz_id"
                                    style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 8px 12px;">
-                            <small class="form-text text-muted">
+                            <small style="color: rgba(255,255,255,0.6); font-size: 12px;">
                                 Paste the play link from AMQ+ website
                             </small>
                         </div>
@@ -889,8 +1658,8 @@ function createModalHTML() {
                             </div>
                         </div>
 
-                        <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #dee2e6;">
-                            <label style="font-weight: bold; margin-bottom: 10px; display: block;">Available Commands:</label>
+                        <div class="form-group" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <label style="font-weight: bold; margin-bottom: 10px; display: block; color: #fff;">Available Commands:</label>
                             <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 12px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); border: 1px solid #2d3748; font-size: 12px; font-family: monospace;">
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus toggle</strong> - Enable/disable AMQ+ mode</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus reload</strong> - Reload current quiz</div>
@@ -907,16 +1676,83 @@ function createModalHTML() {
                             </div>
                         </div>
 
-                        <div id="amqPlusLoadingSpinner" style="display: none; text-align: center;">
-                            <i class="fa fa-spinner fa-spin fa-3x"></i>
-                            <p id="amqPlusStatusMessage">Loading quiz from AMQ+...</p>
+                        <div id="amqPlusLoadingSpinner" style="display: none; text-align: center; padding: 30px; color: #e2e8f0;">
+                            <i class="fa fa-spinner fa-spin fa-3x" style="color: #6366f1;"></i>
+                            <p id="amqPlusStatusMessage" style="margin-top: 15px; color: #e2e8f0;">Loading quiz from AMQ+...</p>
                         </div>
-                        <div id="amqPlusError" class="alert alert-danger" style="display: none;"></div>
+                        <div id="amqPlusError" style="display: none; margin-top: 15px; padding: 12px; background-color: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 8px; color: #ef4444;"></div>
                     </div>
-                    <div class="modal-footer">
+                    <div class="modal-footer" style="border-top: 1px solid #2d3748; padding: 15px 20px;">
                         <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
                         <button type="button" class="btn btn-primary" id="amqPlusFetchBtn">Fetch Quiz</button>
                         <button type="button" class="btn btn-success" id="amqPlusChangeLinkBtn" style="display: none;">Change Link</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function createHubModalHTML() {
+  return `
+        <div class="modal fade" id="amqPlusHubModal" tabindex="-1" role="dialog">
+            <div class="modal-dialog" role="document" style="width: 800px;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                        <h2 class="modal-title">AMQ+ Hub</h2>
+                    </div>
+                    <div class="modal-body" style="display: flex; justify-content: space-around; gap: 20px; padding: 30px;">
+                        <!-- Standard Mode -->
+                        <div id="amqPlusHubStandard" class="gmsModeContainer clickAble" style="flex: 1; position: relative;">
+                             <img class="gmsModeImage" src="https://cdn.animemusicquiz.com/v1/ui/game-categories/250px/multiplayer.webp">
+                             <div class="gmsModeDescription">
+                                 Play with friends using AMQ+ features.
+                             </div>
+                             <div class="gmsModeName">
+                                 Standard
+                             </div>
+                             <div class="amqPlusHubOverlay" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); flex-direction: column; justify-content: center; align-items: center; gap: 10px; border-radius: 10px; z-index: 10;">
+                                 <button class="btn btn-primary amqPlusHubBasicBtn" style="width: 80%;">Basic</button>
+                                 <button class="btn btn-default amqPlusHubAdvancedBtn" style="width: 80%;">Custom Config</button>
+                                 <button class="btn btn-sm btn-danger amqPlusHubBackBtn" style="margin-top: 10px;">Back</button>
+                             </div>
+                        </div>
+
+                        <!-- 1v1 Duel Mode -->
+                        <div id="amqPlusHubDuel" class="gmsModeContainer clickAble" style="flex: 1; position: relative;">
+                             <img class="gmsModeImage" src="https://cdn.animemusicquiz.com/v1/ui/game-categories/250px/solo.webp">
+                             <div class="gmsModeDescription">
+                                 Round Robin head-to-head battles with everyone in the lobby.
+                             </div>
+                             <div class="gmsModeName">
+                                 1v1 Duel
+                             </div>
+                             <div class="amqPlusHubOverlay" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); flex-direction: column; justify-content: center; align-items: center; gap: 10px; border-radius: 10px; z-index: 10;">
+                                 <button class="btn btn-primary amqPlusHubBasicBtn" style="width: 80%;">Basic</button>
+                                 <button class="btn btn-default amqPlusHubAdvancedBtn" style="width: 80%;">Custom Config</button>
+                                 <button class="btn btn-sm btn-danger amqPlusHubBackBtn" style="margin-top: 10px;">Back</button>
+                             </div>
+                        </div>
+
+                        <!-- Training Mode -->
+                        <div id="amqPlusHubTraining" class="gmsModeContainer clickAble" style="flex: 1;" data-dismiss="modal">
+                             <img class="gmsModeImage" src="https://cdn.animemusicquiz.com/v1/ui/game-categories/250px/nexus.webp">
+                             <div class="gmsModeDescription">
+                                 Practice specific shows or lists with spaced repetition.
+                             </div>
+                             <div class="gmsModeName">
+                                 Training
+                             </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <div style="float: left;">
+                             <button type="button" class="btn btn-danger" id="amqPlusHubDisableBtn">Disable AMQ+</button>
+                        </div>
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
                     </div>
                 </div>
             </div>
@@ -932,93 +1768,2116 @@ function createUI() {
     return;
   }
 
-  // Add AMQ+ button
+  // Add AMQ+ button (Hub entry)
   $("#lobbyPage .topMenuBar").append(`<div id="amqPlusToggle" class="clickAble topMenuButton topMenuMediumButton"><h3>AMQ+</h3></div>`);
   $("#amqPlusToggle").click(() => {
-    console.log("[AMQ+] AMQ+ button clicked, opening modal");
-    $("#amqPlusModal").modal("show");
-  });
+    console.log("[AMQ+] AMQ+ button clicked");
 
-  // Add Training button
-  $("#lobbyPage .topMenuBar").append(`<div id="amqPlusTrainingToggle" class="clickAble topMenuButton topMenuMediumButton"><h3>Training</h3></div>`);
-  $("#amqPlusTrainingToggle").click(() => {
-    console.log("[AMQ+ Training] Training button clicked, opening modal");
-
-    // Reset training mode checkbox to unchecked when opening modal
-    $("#trainingModeToggle").prop("checked", false);
-    isTrainingMode = false;
-
-    $("#amqPlusTrainingModal").modal("show");
-
-    // Refresh stats for all quizzes when opening the modal
-    if (trainingState.isAuthenticated && trainingState.authToken) {
-      console.log("[AMQ+ Training] Refreshing stats for all quizzes...");
-      refreshAllQuizStats();
+    // Only allow host to open AMQ+ hub
+    if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
+      sendSystemMessage("⚠️ Only the room host can enable or configure AMQ+.");
+      return;
     }
 
-    // Show/hide logout button based on auth state
-    if (trainingState.isAuthenticated) {
-      $("#trainingLogoutBtn").show();
-      // Restore URL quiz display if saved
-      restoreUrlQuizDisplay();
-    } else {
-      $("#trainingLogoutBtn").hide();
-    }
-    if (trainingState.authToken && !trainingState.isAuthenticated) {
-      // Try to validate token on open
-      validateTrainingToken();
-    }
+    console.log("[AMQ+] Opening Hub (user is host or not in lobby)");
+    $("#amqPlusHubModal").modal("show");
   });
 
   updateToggleButton();
   applyStyles();
 
+  const hubModal = $(createHubModalHTML());
   const modal = $(createModalHTML());
   const trainingModal = $(createTrainingModalHTML());
   const instructionsModal = $(createJsonImportInstructionsModalHTML());
+
   const gameContainer = $("#gameContainer");
-  if (gameContainer.length > 0) {
-    if ($("#amqPlusModal").length === 0) {
-      gameContainer.append(modal);
-      console.log("[AMQ+] Modal appended to gameContainer");
-      attachModalHandlers();
-    } else {
-      console.log("[AMQ+] Modal already exists, skipping creation");
-      attachModalHandlers();
+  const targetContainer = gameContainer.length > 0 ? gameContainer : $("body");
+
+  // Append Hub Modal
+  if ($("#amqPlusHubModal").length === 0) {
+    targetContainer.append(hubModal);
+    console.log("[AMQ+] Hub modal appended");
+    attachHubHandlers();
+  }
+
+  if ($("#amqPlusModal").length === 0) {
+    targetContainer.append(modal);
+    console.log("[AMQ+] Settings modal appended");
+    attachModalHandlers();
+  }
+
+  if ($("#amqPlusTrainingModal").length === 0) {
+    targetContainer.append(trainingModal);
+    console.log("[AMQ+ Training] Training modal appended");
+    attachTrainingModalHandlers();
+  }
+
+  if ($("#amqPlusJsonImportInstructionsModal").length === 0) {
+    targetContainer.append(instructionsModal);
+  }
+}
+
+function attachHubHandlers() {
+  // Helper to safely switch modals while preserving scroll
+  function switchModal(fromSelector, toSelector) {
+    // Wait for hidden event to show next modal
+    $(fromSelector).one('hidden.bs.modal', function () {
+      $(toSelector).modal('show');
+      // Re-apply modal-open class to body after a short delay to ensure scrollbar works
+      // Bootstrap sometimes removes it when the first modal closes
+      setTimeout(() => {
+        if (!$('body').hasClass('modal-open')) {
+          $('body').addClass('modal-open');
+        }
+      }, 100);
+    }).modal('hide');
+  }
+
+  // Training Mode
+  $("#amqPlusHubTraining").click(() => {
+    console.log("[AMQ+ Hub] Training selected");
+
+    // Existing Training Logic
+    $("#trainingModeToggle").prop("checked", false);
+    isTrainingMode = false;
+
+    if (trainingState.isAuthenticated && trainingState.authToken) {
+      refreshAllQuizStats();
     }
 
-    if ($("#amqPlusTrainingModal").length === 0) {
-      gameContainer.append(trainingModal);
-      console.log("[AMQ+ Training] Training modal appended to gameContainer");
-      attachTrainingModalHandlers();
+    if (trainingState.isAuthenticated) {
+      $("#trainingLogoutBtn").show();
+      restoreUrlQuizDisplay();
     } else {
-      console.log("[AMQ+ Training] Training modal already exists");
-      attachTrainingModalHandlers();
+      $("#trainingLogoutBtn").hide();
+    }
+    if (trainingState.authToken && !trainingState.isAuthenticated) {
+      validateTrainingToken();
     }
 
-    if ($("#amqPlusJsonImportInstructionsModal").length === 0) {
-      gameContainer.append(instructionsModal);
-    }
-  } else {
-    console.warn("[AMQ+] GameContainer not found, appending to body as fallback");
-    if ($("#amqPlusModal").length === 0) {
-      $("body").append(modal);
-      attachModalHandlers();
-    } else {
-      attachModalHandlers();
+    switchModal("#amqPlusHubModal", "#amqPlusTrainingModal");
+  });
+
+  // Standard Mode - Show Overlay
+  $("#amqPlusHubStandard").click(function (e) {
+    if ($(e.target).closest('.amqPlusHubOverlay').length) return; // Ignore clicks inside overlay
+    $(".amqPlusHubOverlay").hide(); // Hide others
+    $(this).find(".amqPlusHubOverlay").css("display", "flex");
+  });
+
+  // 1v1 Duel Mode - Show Overlay
+  $("#amqPlusHubDuel").click(function (e) {
+    if ($(e.target).closest('.amqPlusHubOverlay').length) return; // Ignore clicks inside overlay
+    $(".amqPlusHubOverlay").hide(); // Hide others
+    $(this).find(".amqPlusHubOverlay").css("display", "flex");
+  });
+
+  // Back Buttons in Overlay
+  $(document).on('click', '.amqPlusHubBackBtn', function (e) {
+    e.stopPropagation();
+    $(".amqPlusHubOverlay").hide();
+  });
+
+  // Use event delegation for overlay buttons to ensure they work correctly
+  // Check which parent container (Standard or Duel) the button is in
+  $(document).on('click', '.amqPlusHubBasicBtn', function (e) {
+    e.stopPropagation();
+
+    // Only host can enable AMQ+
+    if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
+      sendSystemMessage("⚠️ Only the room host can enable or configure AMQ+.");
+      $("#amqPlusHubModal").modal("hide");
+      return;
     }
 
-    if ($("#amqPlusTrainingModal").length === 0) {
-      $("body").append(trainingModal);
-      attachTrainingModalHandlers();
+    const $parent = $(this).closest('.gmsModeContainer');
+    const isDuelMode = $parent.attr('id') === 'amqPlusHubDuel';
+
+    $("#amqPlusHubModal").modal("hide");
+
+    if (isDuelMode) {
+      console.log("[AMQ+ Hub] 1v1 Duel Quick Sync selected");
+
+      // Enable duel mode
+      duelModeEnabled = true;
+      resetDuelState();
+
+      // Logic for Basic Mode with Duel
+      amqPlusEnabled = true;
+      basicSettingsMode = true;
+      saveSettings();
+      updateToggleButton();
+      updateBasicModeSettingsUI();
+      updateAdvancedModeSettingsUI();
+      updateUsersListsButtonVisibility();
+
+      // Hijack Room Settings if not already done
+      if (!roomSettingsHijacked) {
+        hijackRoomSettings();
+      }
+
+      // Trigger Sync to gather player lists
+      gatherPlayerLists().then(userEntries => {
+        if (userEntries.length === 0) {
+          sendSystemMessage("⚠️ No player lists found in lobby.");
+          return;
+        }
+        cachedPlayerLists = userEntries;
+        updatePlayerListsConfigUI();
+        checkAndWarnUserLists();
+
+        // Format player names for display
+        const playerNames = userEntries.map(entry => {
+          // Prefer AMQ username if available, otherwise use anime list username
+          return entry.amqUsername || entry.username || 'Unknown';
+        }).join(', ');
+
+        sendSystemMessage(`🎯 1v1 Duel Mode enabled: ${userEntries.length} player(s) synced (${playerNames}). Round Robin pairings will be assigned each song.`);
+
+        // Generate quiz from current room settings
+        setTimeout(() => {
+          if (typeof lobby !== "undefined" && lobby.settings) {
+            console.log("[AMQ+ Hub] Generating quiz from current room settings after Duel Quick Sync...");
+            handleRoomSettingsQuizCreation(lobby.settings);
+          } else {
+            console.warn("[AMQ+ Hub] lobby.settings not available, quiz generation skipped");
+          }
+        }, 500);
+      }).catch(error => {
+        console.error("[AMQ+] Error gathering player lists:", error);
+        sendSystemMessage("⚠️ Failed to gather player lists: " + error.message);
+      });
     } else {
-      attachTrainingModalHandlers();
+      console.log("[AMQ+ Hub] Standard Quick Sync selected");
+
+      // Disable duel mode if it was enabled
+      duelModeEnabled = false;
+      resetDuelState();
+
+      // Logic for Basic Mode
+      amqPlusEnabled = true;
+      basicSettingsMode = true;
+      saveSettings();
+      updateToggleButton();
+      updateBasicModeSettingsUI();
+      updateAdvancedModeSettingsUI();
+      updateUsersListsButtonVisibility();
+
+      // Hijack Room Settings if not already done
+      if (!roomSettingsHijacked) {
+        hijackRoomSettings();
+      }
+
+      // Trigger Sync to gather player lists
+      gatherPlayerLists().then(userEntries => {
+        if (userEntries.length === 0) {
+          sendSystemMessage("⚠️ No player lists found in lobby.");
+          return;
+        }
+        cachedPlayerLists = userEntries;
+        updatePlayerListsConfigUI();
+        checkAndWarnUserLists();
+
+        // Format player names for display
+        const playerNames = userEntries.map(entry => {
+          // Prefer AMQ username if available, otherwise use anime list username
+          return entry.amqUsername || entry.username || 'Unknown';
+        }).join(', ');
+
+        sendSystemMessage(`AMQ+ Quick Sync enabled: ${userEntries.length} player(s) synced (${playerNames}). Configure settings via Room Settings. Manage user's lists in the Users' Lists button nearby.`);
+
+        setTimeout(() => {
+          if (typeof lobby !== "undefined" && lobby.settings) {
+            console.log("[AMQ+ Hub] Generating quiz from current room settings after Quick Sync...");
+            handleRoomSettingsQuizCreation(lobby.settings);
+          } else {
+            console.warn("[AMQ+ Hub] lobby.settings not available, quiz generation skipped");
+          }
+        }, 500);
+      }).catch(error => {
+        console.error("[AMQ+] Error gathering player lists:", error);
+        sendSystemMessage("⚠️ Failed to gather player lists: " + error.message);
+      });
+    }
+  });
+
+  // Advanced (Custom Config) Handler - use event delegation
+  $(document).on('click', '.amqPlusHubAdvancedBtn', function (e) {
+    e.stopPropagation();
+
+    // Only host can enable AMQ+
+    if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
+      sendSystemMessage("⚠️ Only the room host can enable or configure AMQ+.");
+      $("#amqPlusHubModal").modal("hide");
+      return;
     }
 
-    if ($("#amqPlusJsonImportInstructionsModal").length === 0) {
-      $("body").append(instructionsModal);
+    const $parent = $(this).closest('.gmsModeContainer');
+    const isDuelMode = $parent.attr('id') === 'amqPlusHubDuel';
+
+    if (isDuelMode) {
+      console.log("[AMQ+ Hub] 1v1 Duel Advanced selected");
+
+      // Enable duel mode
+      duelModeEnabled = true;
+      resetDuelState();
+
+      // Enable AMQ+ in Advanced mode with Duel
+      amqPlusEnabled = true;
+      basicSettingsMode = false;
+      saveSettings();
+      updateToggleButton();
+      updateAdvancedModeSettingsUI();
+      updateUsersListsButtonVisibility();
+
+      sendSystemMessage("🎯 1v1 Duel Mode enabled with Advanced config. Round Robin pairings will be assigned each song.");
+
+      switchModal("#amqPlusHubModal", "#amqPlusModal");
+    } else {
+      console.log("[AMQ+ Hub] Standard Advanced selected");
+
+      // Disable duel mode if it was enabled
+      duelModeEnabled = false;
+      resetDuelState();
+
+      // Enable AMQ+ in Advanced mode (not basic mode)
+      amqPlusEnabled = true;
+      basicSettingsMode = false;
+      saveSettings();
+      updateToggleButton();
+      updateAdvancedModeSettingsUI();
+      updateUsersListsButtonVisibility();
+
+      switchModal("#amqPlusHubModal", "#amqPlusModal");
+    }
+  });
+
+  // Disable AMQ+ Button Handler
+  $("#amqPlusHubDisableBtn").click(function () {
+    console.log("[AMQ+ Hub] Disable AMQ+ clicked");
+
+    // Only host can disable AMQ+
+    if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
+      sendSystemMessage("⚠️ Only the room host can enable or configure AMQ+.");
+      $("#amqPlusHubModal").modal("hide");
+      return;
+    }
+
+    amqPlusEnabled = false;
+    basicSettingsMode = false; // Also disable basic settings mode
+    duelModeEnabled = false; // Disable duel mode
+    resetDuelState();
+    saveSettings();
+    updateToggleButton();
+    updateBasicModeSettingsUI();
+    updateAdvancedModeSettingsUI();
+    updateUsersListsButtonVisibility(); // Update button text
+    sendSystemMessage("AMQ+ mode disabled");
+    $("#amqPlusHubModal").modal("hide");
+  });
+}
+
+/**
+ * Reset duel state to initial values
+ */
+function resetDuelState() {
+  duelState = {
+    roster: [],
+    rosterMap: {},
+    indexToName: {},
+    nameToIndex: {},
+    pendingMappingParts: {},
+    roundRobinSchedule: [],
+    usedRounds: [],
+    currentRound: 0,
+    currentPairings: {},
+    myTarget: null,
+    wins: {},
+    headToHead: {},
+    songOverlapMap: null,
+    isHost: false,
+    BYE: '__BYE__'
+  };
+
+  console.log("[AMQ+ Duel] State reset");
+}
+
+// Scoreboard updates are now handled at predictable game events instead of MutationObserver
+
+/**
+ * Initialize duel roster from quiz players at game start
+ * Locks the roster and generates the round-robin schedule
+ */
+function initializeDuelRoster() {
+  if (!duelModeEnabled) return;
+
+  // Get players from quiz.players (available at game start)
+  const players = Object.values(quiz.players || {});
+  if (players.length < 2) {
+    console.warn("[AMQ+ Duel] Not enough players for duel mode");
+    return;
+  }
+
+  // Build roster from player names
+  duelState.roster = players.map(p => p._name);
+  duelState.isHost = lobby?.isHost || false;
+
+  // Build index mappings for compact messaging
+  duelState.indexToName = {};
+  duelState.nameToIndex = {};
+  duelState.roster.forEach((name, idx) => {
+    duelState.indexToName[idx] = name;
+    duelState.nameToIndex[name] = idx;
+  });
+  console.log("[AMQ+ Duel] Index mappings built:", duelState.nameToIndex);
+
+  // Update scoreboard after roster initialization
+  setTimeout(() => {
+    updateDuelScoreboard();
+  }, 200);
+
+  // Build roster map with cached list info
+  duelState.rosterMap = {};
+  duelState.roster.forEach(playerName => {
+    // Try to find player's list info from cachedPlayerLists
+    // Match by amqUsername (AMQ username) since playerName is the AMQ username
+    const listEntry = cachedPlayerLists?.find(e =>
+      e.amqUsername === playerName || e.username === playerName
+    );
+
+    // Store the anime list username (for overlap matching) - this is what appears in songOverlapMap
+    const animeListUsername = listEntry?.username || playerName;
+    const hasProperMapping = listEntry && listEntry.amqUsername && listEntry.username !== listEntry.amqUsername;
+
+    duelState.rosterMap[playerName] = {
+      username: animeListUsername, // Anime list username for overlap check
+      amqUsername: playerName, // AMQ username for display
+      platform: listEntry?.platform || null,
+      hasAnimeForSong: {} // Will be populated per-song
+    };
+
+    if (!listEntry) {
+      console.warn(`[AMQ+ Duel] No cached player list entry found for "${playerName}" - song overlap matching may not work correctly`);
+    } else if (!listEntry.amqUsername) {
+      console.warn(`[AMQ+ Duel] Entry for "${playerName}" missing amqUsername - please refresh page and re-sync player lists`);
+    }
+
+    console.log(`[AMQ+ Duel DEBUG] rosterMap entry for "${playerName}": animeListUsername="${animeListUsername}", hasProperMapping=${hasProperMapping}`);
+  });
+
+  // Initialize wins and head-to-head trackers
+  duelState.wins = {};
+  duelState.headToHead = {};
+  duelState.roster.forEach(player => {
+    duelState.wins[player] = 0;
+    duelState.headToHead[player] = {};
+    duelState.roster.forEach(opponent => {
+      if (player !== opponent) {
+        duelState.headToHead[player][opponent] = 0;
+      }
+    });
+  });
+
+  // Get number of songs from game settings
+  const numberOfSongs = (typeof lobby !== 'undefined' && lobby.settings && lobby.settings.numberOfSongs)
+    ? lobby.settings.numberOfSongs
+    : null;
+
+  // Generate round-robin schedule with target number of rounds matching game song count
+  duelState.roundRobinSchedule = generateRoundRobinSchedule(duelState.roster, numberOfSongs);
+  duelState.usedRounds = [];
+  duelState.currentRound = 0;
+
+  console.log("[AMQ+ Duel] Roster initialized:", duelState.roster);
+  console.log("[AMQ+ Duel] Round-robin schedule generated:", duelState.roundRobinSchedule.length, "rounds",
+    numberOfSongs ? `(target: ${numberOfSongs} songs)` : "(using default round-robin)");
+
+  // Log pairing summary
+  logRoundRobinPairingSummary();
+
+  if (duelState.isHost) {
+    sendSystemMessage(`🎯 Duel Mode: ${duelState.roster.length} players, ${duelState.roundRobinSchedule.length} rounds scheduled`);
+  }
+}
+
+/**
+ * Generate round-robin schedule using the circle method
+ * For n players, generates n-1 rounds (or n rounds if odd, with BYE)
+ * If targetRounds is specified, generates that many rounds by cycling through the base schedule
+ * @param {Array<string>} players - Array of player names
+ * @param {number|null} targetRounds - Target number of rounds (e.g., number of songs in game). If null, uses default round-robin.
+ * @returns {Array<Array<Array<string>>>} Array of rounds, each round is array of pairs [playerA, playerB]
+ */
+function generateRoundRobinSchedule(players, targetRounds = null) {
+  const roster = [...players];
+  const BYE = duelState.BYE;
+
+  // If odd number of players, add BYE
+  if (roster.length % 2 !== 0) {
+    roster.push(BYE);
+  }
+
+  const n = roster.length;
+  const baseRounds = [];
+  const numBaseRounds = n - 1;
+
+  // Generate base round-robin schedule using circle method
+  for (let round = 0; round < numBaseRounds; round++) {
+    const pairs = [];
+
+    for (let i = 0; i < n / 2; i++) {
+      const home = i === 0 ? roster[0] : roster[i];
+      const away = roster[n - 1 - i];
+
+      // Skip if pairing with BYE results in a bye round
+      if (home !== BYE && away !== BYE) {
+        pairs.push([home, away]);
+      } else if (home === BYE) {
+        // away gets a BYE
+        pairs.push([away, BYE]);
+      } else {
+        // home gets a BYE
+        pairs.push([home, BYE]);
+      }
+    }
+
+    baseRounds.push(pairs);
+
+    // Rotate: move last element to position 1, shift others right
+    const last = roster.pop();
+    roster.splice(1, 0, last);
+  }
+
+  // If targetRounds is specified and greater than base rounds, cycle through to generate more
+  if (targetRounds !== null && targetRounds > numBaseRounds) {
+    const rounds = [];
+    for (let i = 0; i < targetRounds; i++) {
+      rounds.push(baseRounds[i % numBaseRounds]);
+    }
+    return rounds;
+  }
+
+  // Otherwise return base schedule
+  return baseRounds;
+}
+
+/**
+ * Log summary of how many times each player will be paired with each other player
+ */
+function logRoundRobinPairingSummary() {
+  if (!duelState.roundRobinSchedule || duelState.roundRobinSchedule.length === 0) {
+    return;
+  }
+
+  // Count pairings: player -> { opponent: count }
+  const pairingCounts = {};
+
+  // Initialize counts for all players
+  duelState.roster.forEach(player => {
+    pairingCounts[player] = {};
+    duelState.roster.forEach(opponent => {
+      if (player !== opponent) {
+        pairingCounts[player][opponent] = 0;
+      }
+    });
+  });
+
+  // Count pairings across all rounds
+  duelState.roundRobinSchedule.forEach((round, roundIdx) => {
+    round.forEach(([playerA, playerB]) => {
+      // Skip BYE pairs
+      if (playerA !== duelState.BYE && playerB !== duelState.BYE) {
+        if (pairingCounts[playerA] && pairingCounts[playerA][playerB] !== undefined) {
+          pairingCounts[playerA][playerB]++;
+        }
+        if (pairingCounts[playerB] && pairingCounts[playerB][playerA] !== undefined) {
+          pairingCounts[playerB][playerA]++;
+        }
+      }
+    });
+  });
+
+  // Log summary in requested format
+  console.log("[AMQ+ Duel DEBUG] Round-robin pairing summary:");
+  duelState.roster.forEach(player => {
+    console.log(`  username: ${player}`);
+    console.log(`  Targets:`);
+    Object.entries(pairingCounts[player] || {})
+      .sort(([a], [b]) => a.localeCompare(b))
+      .forEach(([opponent, count]) => {
+        console.log(`    ${opponent}: ${count}`);
+      });
+  });
+}
+
+/**
+ * Check if a player has the anime for a given song on their list
+ * @param {string} playerName - Player name
+ * @param {number} annSongId - Song ID
+ * @returns {boolean} True if player has the anime on their list
+ */
+function playerHasAnimeForSong(playerName, annSongId) {
+  if (!duelState.songOverlapMap || !annSongId) {
+    console.log(`[AMQ+ Duel DEBUG] playerHasAnimeForSong: No map or songId. playerName=${playerName}, annSongId=${annSongId}, hasMap=${!!duelState.songOverlapMap}`);
+    return false;
+  }
+
+  const usersWithSong = duelState.songOverlapMap.get(annSongId) || [];
+  const playerInfo = duelState.rosterMap[playerName];
+
+  if (!playerInfo) {
+    console.log(`[AMQ+ Duel DEBUG] playerHasAnimeForSong: No playerInfo. playerName=${playerName}, annSongId=${annSongId}`);
+    return false;
+  }
+
+  // Check if player's username is in the list of users who have this song
+  const hasAnime = usersWithSong.some(username =>
+    username === playerInfo.username ||
+    username === playerName ||
+    username?.toLowerCase() === playerInfo.username?.toLowerCase()
+  );
+
+  console.log(`[AMQ+ Duel DEBUG] playerHasAnimeForSong: playerName=${playerName}, annSongId=${annSongId}, playerInfo.username=${playerInfo.username}, usersWithSong=[${usersWithSong.join(', ')}], hasAnime=${hasAnime}`);
+
+  return hasAnime;
+}
+
+/**
+ * Score a pair for a given song based on familiarity fairness
+ * @param {Array<string>} pair - [playerA, playerB]
+ * @param {number} annSongId - Song ID
+ * @returns {number} Score: +1 for fair (both know or both don't), -1 for unfair
+ */
+function scorePairForSong(pair, annSongId) {
+  const [playerA, playerB] = pair;
+
+  // BYE pairs are neutral
+  if (playerA === duelState.BYE || playerB === duelState.BYE) {
+    console.log(`[AMQ+ Duel DEBUG] scorePairForSong: BYE pair, annSongId=${annSongId}, pair=[${playerA}, ${playerB}]`);
+    return 0;
+  }
+
+  const aKnows = playerHasAnimeForSong(playerA, annSongId);
+  const bKnows = playerHasAnimeForSong(playerB, annSongId);
+
+  const score = (aKnows === bKnows) ? 1 : -1;
+  const fairness = (aKnows === bKnows) ? 'FAIR' : 'UNFAIR';
+  const status = `(${playerA}: ${aKnows ? 'watched' : 'not watched'}, ${playerB}: ${bKnows ? 'watched' : 'not watched'})`;
+
+  console.log(`[AMQ+ Duel DEBUG] scorePairForSong: ${fairness} ${status}, annSongId=${annSongId}, score=${score}`);
+
+  // Fair if both know or both don't know
+  if (aKnows === bKnows) {
+    return 1;
+  }
+
+  // Unfair if only one knows
+  return -1;
+}
+
+/**
+ * Select the best round for a given song based on familiarity scoring
+ * @param {number} annSongId - Song ID for the current song
+ * @returns {number} Index of the best round to use
+ */
+function selectBestRoundForSong(annSongId) {
+  console.log(`[AMQ+ Duel DEBUG] selectBestRoundForSong: Starting selection for annSongId=${annSongId}`);
+  console.log(`[AMQ+ Duel DEBUG] songOverlapMap for this song:`, duelState.songOverlapMap?.get(annSongId) || 'NOT FOUND');
+
+  const availableRounds = [];
+
+  // Find all rounds that haven't been used yet
+  for (let i = 0; i < duelState.roundRobinSchedule.length; i++) {
+    if (!duelState.usedRounds.includes(i)) {
+      availableRounds.push(i);
     }
   }
+
+  // If no available rounds, cycle back (more songs than rounds)
+  if (availableRounds.length === 0) {
+    duelState.usedRounds = [];
+    for (let i = 0; i < duelState.roundRobinSchedule.length; i++) {
+      availableRounds.push(i);
+    }
+    console.log("[AMQ+ Duel] All rounds used, cycling back");
+  }
+
+  console.log(`[AMQ+ Duel DEBUG] Available rounds: [${availableRounds.join(', ')}]`);
+
+  // Score each available round
+  let bestRoundIdx = availableRounds[0];
+  let bestScore = -Infinity;
+  const roundScores = [];
+
+  for (const roundIdx of availableRounds) {
+    const round = duelState.roundRobinSchedule[roundIdx];
+    let totalScore = 0;
+    const pairScores = [];
+
+    for (const pair of round) {
+      const pairScore = scorePairForSong(pair, annSongId);
+      totalScore += pairScore;
+      pairScores.push({ pair, score: pairScore });
+    }
+
+    // Tiebreaker: prefer rounds that haven't been used recently
+    // Add small bonus for earlier unused rounds
+    const recencyBonus = (availableRounds.length - availableRounds.indexOf(roundIdx)) * 0.01;
+    totalScore += recencyBonus;
+
+    roundScores.push({ roundIdx, totalScore, recencyBonus, pairScores });
+
+    if (totalScore > bestScore) {
+      bestScore = totalScore;
+      bestRoundIdx = roundIdx;
+    }
+  }
+
+  console.log(`[AMQ+ Duel DEBUG] Round scores for annSongId=${annSongId}:`, roundScores);
+  console.log(`[AMQ+ Duel DEBUG] Selected round ${bestRoundIdx} with score ${bestScore}`);
+
+  return bestRoundIdx;
+}
+
+/**
+ * Compute pairings for the current song (host only)
+ * @param {number} songNumber - Current song number (1-indexed)
+ * @param {number} annSongId - Song ID for the current song
+ * @returns {Object} Pairings map: playerName -> opponentName
+ */
+function computePairingsForSong(songNumber, annSongId) {
+  console.log(`[AMQ+ Duel DEBUG] computePairingsForSong: songNumber=${songNumber}, annSongId=${annSongId}`);
+  console.log(`[AMQ+ Duel DEBUG] Full songOverlapMap:`, duelState.songOverlapMap);
+  console.log(`[AMQ+ Duel DEBUG] rosterMap:`, duelState.rosterMap);
+
+  const pairings = {};
+
+  // Select the best round for this song
+  const roundIdx = selectBestRoundForSong(annSongId);
+  const round = duelState.roundRobinSchedule[roundIdx];
+
+  // Mark round as used
+  duelState.usedRounds.push(roundIdx);
+
+  // Build pairings map and verify fairness
+  const pairingDetails = [];
+  for (const [playerA, playerB] of round) {
+    if (playerA !== duelState.BYE && playerB !== duelState.BYE) {
+      pairings[playerA] = playerB;
+      pairings[playerB] = playerA;
+
+      // Verify fairness for final pairings
+      const aKnows = playerHasAnimeForSong(playerA, annSongId);
+      const bKnows = playerHasAnimeForSong(playerB, annSongId);
+      const isFair = (aKnows === bKnows);
+      pairingDetails.push({
+        pair: [playerA, playerB],
+        aKnows,
+        bKnows,
+        isFair,
+        status: isFair ? 'FAIR' : 'UNFAIR'
+      });
+    } else if (playerA === duelState.BYE) {
+      pairings[playerB] = duelState.BYE;
+      pairingDetails.push({ pair: [playerA, playerB], status: 'BYE' });
+    } else {
+      pairings[playerA] = duelState.BYE;
+      pairingDetails.push({ pair: [playerA, playerB], status: 'BYE' });
+    }
+  }
+
+  console.log(`[AMQ+ Duel] Song ${songNumber}: Using round ${roundIdx + 1}, pairings:`, pairings);
+  console.log(`[AMQ+ Duel DEBUG] Final pairing fairness check:`, pairingDetails);
+
+  return pairings;
+}
+
+/**
+ * Apply pairings received from host (all clients)
+ * @param {Object} pairings - Pairings map: playerName -> opponentName
+ */
+function applyPairings(pairings) {
+  // Ensure duel mode is enabled (should be enabled by enable command, but check just in case)
+  if (!duelModeEnabled) {
+    console.warn("[AMQ+ Duel] Received pairings but duel mode not enabled, enabling now...");
+    duelModeEnabled = true;
+  }
+
+  duelState.currentPairings = pairings;
+
+  // Find my target
+  const myName = selfName;
+  duelState.myTarget = pairings[myName] || null;
+
+  console.log(`[AMQ+ Duel] Applied pairings. My target: ${duelState.myTarget}`);
+
+  // Update UI to show only self and target
+  updateDuelAvatarVisibility();
+
+  // Update scoreboard to prevent AMQ from overwriting it
+  updateDuelScoreboard();
+}
+
+/**
+ * Get the annSongId for the current song
+ * @param {number} songNumber - Current song number (1-indexed)
+ * @returns {number|null} The annSongId or null if not found
+ */
+function getAnnSongIdForSong(songNumber) {
+  let annSongId = null;
+
+  // Try to get from quizSave blocks
+  if (currentQuizData && currentQuizData.command && currentQuizData.command.data) {
+    try {
+      const quizSave = currentQuizData.command.data.quizSave;
+      if (quizSave && quizSave.ruleBlocks && quizSave.ruleBlocks[0]) {
+        const ruleBlock = quizSave.ruleBlocks[0];
+        if (ruleBlock.blocks && Array.isArray(ruleBlock.blocks) && songNumber > 0) {
+          const blockIndex = songNumber - 1; // blocks are 0-indexed
+          if (blockIndex >= 0 && blockIndex < ruleBlock.blocks.length) {
+            const block = ruleBlock.blocks[blockIndex];
+            annSongId = block.annSongId || null;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[AMQ+ Duel] Error getting annSongId from quizSave:", e);
+    }
+  }
+
+  return annSongId;
+}
+
+/**
+ * Handle song start in duel mode - host computes and broadcasts pairings
+ * @param {number} songNumber - Current song number
+ */
+function handleDuelSongStart(songNumber) {
+  if (!duelModeEnabled || duelState.roster.length < 2) return;
+
+  duelState.currentRound = songNumber;
+
+  // Only host computes and broadcasts pairings
+  if (duelState.isHost) {
+    const annSongId = getAnnSongIdForSong(songNumber);
+    const pairings = computePairingsForSong(songNumber, annSongId);
+
+    // Broadcast pairings to all players
+    broadcastDuelPairings(songNumber, pairings);
+
+    // Apply pairings locally
+    applyPairings(pairings);
+  }
+}
+
+/**
+ * Broadcast duel mode enable command to all players at game start
+ * Uses compact format: ❦M[part]/[total]:[idx=name,idx=name,...]
+ * Splits into multiple messages if needed (150 char limit)
+ * Only host should call this
+ * @param {Array<string>} roster - Array of player names
+ */
+function broadcastDuelModeEnable(roster) {
+  const MAX_MSG_LENGTH = 150;
+  const PREFIX_OVERHEAD = 10; // "❦M99/99:" = max 9 chars + safety
+  const MAX_CONTENT_LENGTH = MAX_MSG_LENGTH - PREFIX_OVERHEAD;
+
+  // Build mapping entries: "0=name,1=name,..."
+  const entries = roster.map((name, idx) => `${idx}=${name}`);
+
+  // Split into parts if needed
+  const parts = [];
+  let currentPart = [];
+  let currentLength = 0;
+
+  for (const entry of entries) {
+    const entryLength = entry.length + (currentPart.length > 0 ? 1 : 0); // +1 for comma
+
+    if (currentLength + entryLength > MAX_CONTENT_LENGTH && currentPart.length > 0) {
+      // Start new part
+      parts.push(currentPart.join(','));
+      currentPart = [entry];
+      currentLength = entry.length;
+    } else {
+      currentPart.push(entry);
+      currentLength += entryLength;
+    }
+  }
+
+  // Add last part
+  if (currentPart.length > 0) {
+    parts.push(currentPart.join(','));
+  }
+
+  const totalParts = parts.length;
+
+  // Build index mappings for debug
+  const indexToName = {};
+  const nameToIndex = {};
+  roster.forEach((name, idx) => {
+    indexToName[idx] = name;
+    nameToIndex[name] = idx;
+  });
+
+  // Send each part with delay between them
+  parts.forEach((partContent, idx) => {
+    const partNum = idx + 1;
+    const message = `❦M${partNum}/${totalParts}:${partContent}`;
+
+    // Output debug info if enabled
+    if (duelDebugEnabled) {
+      const entries = partContent.split(',');
+      sendSystemMessage(`━━━━━━━━━━━━━━━━━━━━━━━━`);
+      sendSystemMessage(`[1v1 Debug] MAPPING MESSAGE SENT - Part ${partNum}/${totalParts}`);
+      sendSystemMessage(`Raw: ${message}`);
+      sendSystemMessage(`Part Data: ${partContent}`);
+      sendSystemMessage(`Entries in this part:`);
+      entries.forEach(entryStr => {
+        const [idxStr, name] = entryStr.split('=');
+        sendSystemMessage(`  Index ${idxStr} = ${name}`);
+      });
+      if (partNum === totalParts) {
+        sendSystemMessage(`Full Roster (${roster.length} players):`);
+        roster.forEach((name, idx) => {
+          sendSystemMessage(`  Index ${idx}: ${name}`);
+        });
+      }
+      sendSystemMessage(`━━━━━━━━━━━━━━━━━━━━━━━━`);
+    }
+
+    setTimeout(() => {
+      socket.sendCommand({
+        type: "lobby",
+        command: "game chat message",
+        data: { msg: message, teamMessage: false }
+      });
+      console.log(`[AMQ+ Duel] Broadcast mapping part ${partNum}/${totalParts}: ${message.length} chars`);
+    }, idx * 100); // 100ms delay between parts
+  });
+
+  console.log(`[AMQ+ Duel] Broadcast duel mode enable for ${roster.length} players in ${totalParts} part(s)`);
+}
+
+/**
+ * Broadcast duel pairings to all players via chat
+ * Uses compact format: ❦P[song]:[idx-idx,idx-idx,...]
+ * B = BYE
+ * @param {number} songNumber - Current song number
+ * @param {Object} pairings - Pairings map: playerName -> opponentName
+ */
+function broadcastDuelPairings(songNumber, pairings) {
+  // Convert name-based pairings to index-based
+  const indexPairs = [];
+  const processed = new Set();
+
+  for (const [playerName, opponentName] of Object.entries(pairings)) {
+    if (processed.has(playerName)) continue;
+
+    const playerIdx = duelState.nameToIndex[playerName];
+    let opponentIdx;
+
+    if (opponentName === duelState.BYE) {
+      opponentIdx = 'B'; // B for BYE
+    } else {
+      opponentIdx = duelState.nameToIndex[opponentName];
+      processed.add(opponentName); // Mark opponent as processed
+    }
+
+    if (playerIdx !== undefined) {
+      indexPairs.push(`${playerIdx}-${opponentIdx}`);
+      processed.add(playerName);
+    }
+  }
+
+  // Format: ❦P[song]:[pairs]
+  const message = `❦P${songNumber}:${indexPairs.join(',')}`;
+
+  // Output debug info if enabled
+  if (duelDebugEnabled) {
+    const namePairs = Object.entries(pairings).map(([player, opponent]) => ({
+      player: player,
+      opponent: opponent === duelState.BYE ? 'BYE' : opponent,
+      playerIdx: duelState.nameToIndex[player],
+      opponentIdx: opponent === duelState.BYE ? 'B' : duelState.nameToIndex[opponent]
+    }));
+
+    sendSystemMessage(`━━━━━━━━━━━━━━━━━━━━━━━━`);
+    sendSystemMessage(`[1v1 Debug] PAIRINGS MESSAGE SENT - Song ${songNumber}`);
+    sendSystemMessage(`Raw: ${message}`);
+    sendSystemMessage(`Index Pairs: ${indexPairs.join(', ')}`);
+    sendSystemMessage(`Pairings (${namePairs.length} pairs):`);
+    namePairs.forEach(pair => {
+      const opponentDisplay = pair.opponent === 'BYE' ? 'BYE' : pair.opponent;
+      sendSystemMessage(`  ${pair.player} vs ${opponentDisplay} (Indices: ${pair.playerIdx}-${pair.opponentIdx})`);
+    });
+    sendSystemMessage(`━━━━━━━━━━━━━━━━━━━━━━━━`);
+  }
+
+  // Send via chat (will be parsed by all clients)
+  socket.sendCommand({
+    type: "lobby",
+    command: "game chat message",
+    data: { msg: message, teamMessage: false }
+  });
+
+  console.log(`[AMQ+ Duel] Broadcast pairings for song ${songNumber}: ${message} (${message.length} chars)`);
+}
+
+/**
+ * Handle duel mode messages received via chat
+ * Compact formats:
+ *   Mapping: ❦M[part]/[total]:[idx=name,idx=name,...]
+ *   Pairings: ❦P[song]:[idx-idx,idx-idx,...] (B for BYE)
+ * Only the host should send duel messages. Non-hosts accept and apply commands from the host.
+ * @param {string} message - Full message starting with ❦
+ * @param {string} sender - Message sender
+ */
+function handleDuelMessage(message, sender) {
+  try {
+    const content = message.substring(1); // Remove ❦ prefix
+
+    // Determine message type by first character
+    const msgType = content.charAt(0);
+
+    // Handle Mapping command (M)
+    if (msgType === 'M') {
+      handleDuelMappingMessage(content, sender);
+    }
+    // Handle Pairings command (P)
+    else if (msgType === 'P') {
+      handleDuelPairingsMessage(content, sender);
+    }
+
+    // Remove message from chat history after processing
+    setTimeout(() => {
+      const $messages = $("#gcMessageContainer li");
+      $messages.each(function () {
+        const $msg = $(this);
+        const msgText = $msg.text();
+        if (msgText.includes('❦')) {
+          $msg.remove();
+        }
+      });
+    }, 1);
+  } catch (e) {
+    console.error("[AMQ+ Duel] Failed to parse duel message:", e);
+  }
+}
+
+/**
+ * Handle mapping message: ❦M[part]/[total]:[idx=name,idx=name,...]
+ */
+function handleDuelMappingMessage(content, sender) {
+  // Parse: M[part]/[total]:[data]
+  const match = content.match(/^M(\d+)\/(\d+):(.+)$/);
+  if (!match) {
+    console.error("[AMQ+ Duel] Invalid mapping format:", content);
+    return;
+  }
+
+  const partNum = parseInt(match[1]);
+  const totalParts = parseInt(match[2]);
+  const partData = match[3];
+
+  console.log(`[AMQ+ Duel] Received mapping part ${partNum}/${totalParts} from ${sender}`);
+
+  // Output debug info if enabled
+  if (duelDebugEnabled) {
+    const entries = partData.split(',');
+    sendSystemMessage(`━━━━━━━━━━━━━━━━━━━━━━━━`);
+    sendSystemMessage(`[1v1 Debug] MAPPING MESSAGE RECEIVED - Part ${partNum}/${totalParts} from ${sender}`);
+    sendSystemMessage(`Raw: ❦M${partNum}/${totalParts}:${partData}`);
+    sendSystemMessage(`Part Data: ${partData}`);
+    sendSystemMessage(`Entries in this part:`);
+    entries.forEach(entryStr => {
+      const [idxStr, name] = entryStr.split('=');
+      sendSystemMessage(`  Index ${idxStr} = ${name}`);
+    });
+    sendSystemMessage(`━━━━━━━━━━━━━━━━━━━━━━━━`);
+  }
+
+  // If we're the host, ignore (we already have the mapping)
+  if (duelState.isHost) {
+    console.log(`[AMQ+ Duel] Host received own mapping broadcast, ignoring`);
+    return;
+  }
+
+  // Initialize pending parts if needed
+  if (!duelState.pendingMappingParts.total || duelState.pendingMappingParts.total !== totalParts) {
+    duelState.pendingMappingParts = { total: totalParts, parts: {} };
+  }
+
+  // Store this part
+  duelState.pendingMappingParts.parts[partNum] = partData;
+
+  // Check if we have all parts
+  const receivedParts = Object.keys(duelState.pendingMappingParts.parts).length;
+  if (receivedParts === totalParts) {
+    // Combine all parts in order
+    let fullMapping = '';
+    for (let i = 1; i <= totalParts; i++) {
+      if (fullMapping.length > 0) fullMapping += ',';
+      fullMapping += duelState.pendingMappingParts.parts[i];
+    }
+
+    // Parse the full mapping: "0=name,1=name,..."
+    const entries = fullMapping.split(',');
+    const roster = [];
+    duelState.indexToName = {};
+    duelState.nameToIndex = {};
+
+    for (const entry of entries) {
+      const [idxStr, name] = entry.split('=');
+      if (idxStr !== undefined && name !== undefined) {
+        const idx = parseInt(idxStr);
+        duelState.indexToName[idx] = name;
+        duelState.nameToIndex[name] = idx;
+        roster[idx] = name; // Maintain order by index
+      }
+    }
+
+    // Filter out any undefined entries (shouldn't happen but safety)
+    duelState.roster = roster.filter(n => n !== undefined);
+
+    console.log("[AMQ+ Duel] Full mapping received:", duelState.nameToIndex);
+
+    // Enable duel mode and initialize state
+    duelModeEnabled = true;
+    duelState.isHost = false;
+
+    // Initialize wins and head-to-head trackers
+    duelState.wins = {};
+    duelState.headToHead = {};
+    duelState.roster.forEach(player => {
+      duelState.wins[player] = 0;
+      duelState.headToHead[player] = {};
+      duelState.roster.forEach(opponent => {
+        if (player !== opponent) {
+          duelState.headToHead[player][opponent] = 0;
+        }
+      });
+    });
+
+    // Build roster map
+    duelState.rosterMap = {};
+    duelState.roster.forEach(playerName => {
+      duelState.rosterMap[playerName] = {
+        username: playerName,
+        platform: null,
+        hasAnimeForSong: {}
+      };
+    });
+
+    // Get number of songs from game settings (clients should have access to lobby.settings)
+    const numberOfSongs = (typeof lobby !== 'undefined' && lobby.settings && lobby.settings.numberOfSongs)
+      ? lobby.settings.numberOfSongs
+      : null;
+
+    // Generate round-robin schedule (for reference)
+    duelState.roundRobinSchedule = generateRoundRobinSchedule(duelState.roster, numberOfSongs);
+    duelState.usedRounds = [];
+    duelState.currentRound = 0;
+
+    // Log pairing summary
+    logRoundRobinPairingSummary();
+
+    // Clear pending
+    duelState.pendingMappingParts = {};
+
+    // Output full roster debug info if enabled
+    if (duelDebugEnabled) {
+      sendSystemMessage(`[1v1 Debug] Full mapping assembled - Roster (${duelState.roster.length} players):`);
+      duelState.roster.forEach((name, idx) => {
+        sendSystemMessage(`  Index ${idx}: ${name}`);
+      });
+    }
+
+    console.log("[AMQ+ Duel] Duel mode enabled via mapping. Roster:", duelState.roster);
+
+    // Update scoreboard
+    setTimeout(() => {
+      updateDuelScoreboard();
+    }, 200);
+  } else {
+    console.log(`[AMQ+ Duel] Waiting for more parts... (${receivedParts}/${totalParts})`);
+  }
+}
+
+/**
+ * Handle pairings message: ❦P[song]:[idx-idx,idx-idx,...] (B for BYE)
+ */
+function handleDuelPairingsMessage(content, sender) {
+  // Parse: P[song]:[pairs]
+  const colonIdx = content.indexOf(':');
+  if (colonIdx === -1) {
+    console.error("[AMQ+ Duel] Invalid pairings format:", content);
+    return;
+  }
+
+  const songNumber = parseInt(content.substring(1, colonIdx));
+  const pairsStr = content.substring(colonIdx + 1);
+
+  console.log(`[AMQ+ Duel] Received pairings from ${sender} for song ${songNumber}: ${pairsStr}`);
+
+  // Output debug info if enabled
+  if (duelDebugEnabled) {
+    const pairs = pairsStr.split(',');
+    const parsedPairs = pairs.map(pair => {
+      const [idx1Str, idx2Str] = pair.split('-');
+      const idx1 = parseInt(idx1Str);
+      const name1 = duelState.indexToName[idx1];
+      let name2;
+      if (idx2Str === 'B') {
+        name2 = duelState.BYE;
+      } else {
+        const idx2 = parseInt(idx2Str);
+        name2 = duelState.indexToName[idx2];
+      }
+      return {
+        indexPair: pair,
+        playerIdx: idx1,
+        opponentIdx: idx2Str === 'B' ? 'B' : parseInt(idx2Str),
+        playerName: name1,
+        opponentName: name2 === duelState.BYE ? 'BYE' : name2
+      };
+    });
+
+    sendSystemMessage(`━━━━━━━━━━━━━━━━━━━━━━━━`);
+    sendSystemMessage(`[1v1 Debug] PAIRINGS MESSAGE RECEIVED - Song ${songNumber} from ${sender}`);
+    sendSystemMessage(`Raw: ❦P${songNumber}:${pairsStr}`);
+    sendSystemMessage(`Index Pairs: ${pairs.join(', ')}`);
+    sendSystemMessage(`Pairings (${parsedPairs.length} pairs):`);
+    parsedPairs.forEach(pair => {
+      const opponentDisplay = pair.opponentName === 'BYE' ? 'BYE' : pair.opponentName;
+      sendSystemMessage(`  ${pair.playerName} vs ${opponentDisplay} (Indices: ${pair.playerIdx}-${pair.opponentIdx})`);
+    });
+    sendSystemMessage(`━━━━━━━━━━━━━━━━━━━━━━━━`);
+  }
+
+  // If we're the host, ignore (we already applied pairings locally)
+  if (duelState.isHost) {
+    console.log(`[AMQ+ Duel] Host received own pairings broadcast, ignoring`);
+    return;
+  }
+
+  // Parse index pairs and convert to name-based pairings
+  const pairings = {};
+  const pairs = pairsStr.split(',');
+
+  for (const pair of pairs) {
+    const [idx1Str, idx2Str] = pair.split('-');
+    const idx1 = parseInt(idx1Str);
+    const name1 = duelState.indexToName[idx1];
+
+    let name2;
+    if (idx2Str === 'B') {
+      name2 = duelState.BYE;
+    } else {
+      const idx2 = parseInt(idx2Str);
+      name2 = duelState.indexToName[idx2];
+    }
+
+    if (name1) {
+      pairings[name1] = name2;
+      if (name2 && name2 !== duelState.BYE) {
+        pairings[name2] = name1;
+      }
+    }
+  }
+
+  console.log("[AMQ+ Duel] Parsed pairings:", pairings);
+
+  // Apply pairings
+  applyPairings(pairings);
+}
+
+
+/**
+ * Update avatar badges for duel mode
+ * Adds "Target" badge to opponent and "Pair X" badges to other pairings
+ */
+function updateDuelAvatarVisibility() {
+  if (!duelModeEnabled || typeof quiz === 'undefined' || !quiz.players) {
+    return;
+  }
+
+  const targetName = duelState.myTarget;
+  const isBye = targetName === duelState.BYE;
+
+  const players = Object.values(quiz.players);
+
+  // Find self player name
+  const selfPlayer = players.find(p => p.isSelf);
+  const selfPlayerName = selfPlayer?._name || quiz.ownGamePlayerId;
+
+  console.log(`[AMQ+ Duel] Updating avatars. Target: ${targetName}, isBye: ${isBye}`);
+
+  // Build pair numbers for all players
+  const pairNumbers = new Map(); // playerName -> pairNumber
+  const processedPlayers = new Set();
+  let pairCounter = 1;
+
+  // Current player's pairing is always "Pair 1"
+  if (!isBye) {
+    pairNumbers.set(selfPlayerName, 1);
+    pairNumbers.set(targetName, 1);
+    processedPlayers.add(selfPlayerName);
+    processedPlayers.add(targetName);
+    pairCounter = 2;
+  }
+
+  // Assign pair numbers to other pairings
+  if (duelState.currentPairings) {
+    for (const [playerA, playerB] of Object.entries(duelState.currentPairings)) {
+      if (processedPlayers.has(playerA) || playerB === duelState.BYE) {
+        continue;
+      }
+
+      // Assign this pairing a number
+      pairNumbers.set(playerA, pairCounter);
+      pairNumbers.set(playerB, pairCounter);
+      processedPlayers.add(playerA);
+      processedPlayers.add(playerB);
+      pairCounter++;
+    }
+  }
+
+  // Update badges for all players
+  for (const player of players) {
+    const isTarget = player._name === targetName;
+    const isSelf = player.isSelf;
+    const pairNumber = pairNumbers.get(player._name);
+
+    // Ensure player is visible (in case it was hidden)
+    showDuelPlayer(player);
+
+    if (isSelf) {
+      // Self: no badge
+      removeDuelTargetBadge(player);
+      removePairBadge(player);
+    } else if (isTarget && !isBye) {
+      // Target: red "Target" badge
+      addDuelTargetBadge(player);
+      removePairBadge(player);
+    } else if (pairNumber) {
+      // Others: purple "Pair X" badge
+      removeDuelTargetBadge(player);
+      addPairBadge(player, pairNumber);
+    } else {
+      // No pairing (BYE or error)
+      removeDuelTargetBadge(player);
+      removePairBadge(player);
+    }
+  }
+
+  // If BYE round, show a message
+  if (isBye) {
+    sendSystemMessage("🎯 This round: You have a BYE (no opponent)");
+  }
+}
+
+/**
+ * Hide a player's avatar in duel mode
+ * @param {Object} player - Quiz player object
+ */
+function hideDuelPlayer(player) {
+  if (!player || !player.avatarSlot) return;
+
+  // Store original values if not already stored
+  if (!player._duelHidden) {
+    player._duelOriginalTextColor = player.avatarSlot.$nameContainer.css("color");
+    player._duelOriginalName = player._name;
+    player._duelHidden = true;
+  }
+
+  // Hide avatar elements
+  player.avatarSlot.$avatarImageContainer.addClass("hide");
+  player.avatarSlot.$backgroundContainer.addClass("hide");
+  player.avatarSlot.$nameContainer.addClass("hide");
+  player.avatarSlot.$pointContainer.addClass("hide");
+
+  // Hide the entire outer container
+  const $outer = player.avatarSlot.$innerContainer?.closest('.qpAvatarContainerOuter');
+  if ($outer && $outer.length) {
+    $outer.addClass("hide");
+  }
+}
+
+/**
+ * Show a player's avatar in duel mode
+ * @param {Object} player - Quiz player object
+ */
+function showDuelPlayer(player) {
+  if (!player || !player.avatarSlot) return;
+
+  // Restore visibility
+  player.avatarSlot.$avatarImageContainer.removeClass("hide");
+  player.avatarSlot.$backgroundContainer.removeClass("hide");
+  player.avatarSlot.$nameContainer.removeClass("hide");
+  player.avatarSlot.$pointContainer.removeClass("hide");
+
+  // Restore original values if they were stored
+  if (player._duelHidden) {
+    if (player._duelOriginalTextColor) {
+      player.avatarSlot.$nameContainer.css("color", player._duelOriginalTextColor);
+    }
+    if (player._duelOriginalName) {
+      player.avatarSlot.$nameContainer.text(player._duelOriginalName);
+    }
+    player._duelHidden = false;
+  }
+
+  // Show the entire outer container
+  const $outer = player.avatarSlot.$innerContainer?.closest('.qpAvatarContainerOuter');
+  if ($outer && $outer.length) {
+    $outer.removeClass("hide");
+  }
+}
+
+/**
+ * Add Target badge to opponent player
+ * @param {Object} player - Quiz player object
+ */
+function addDuelTargetBadge(player) {
+  if (!player || !player.avatarSlot) return;
+
+  // Find the level bar area where host badge is shown
+  const $levelBar = player.avatarSlot.$bottomContainer?.find('.qpAvatarLevelBar');
+  if (!$levelBar || !$levelBar.length) return;
+
+  // Check if badge already exists
+  if ($levelBar.find('.qpAvatarDuelTargetIcon').length > 0) return;
+
+  // Create target badge similar to host badge but with light red background
+  const $targetBadge = $(`
+    <div class="qpAvatarDuelTargetIcon text-center" style="
+      background-color: rgba(239, 68, 68, 0.8);
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: bold;
+      margin-left: 5px;
+      display: inline-block;
+    ">
+      <div>Target</div>
+    </div>
+  `);
+
+  // Insert after level container
+  const $levelOuter = $levelBar.find('.qpAvatarLevelOuter');
+  if ($levelOuter.length) {
+    $levelOuter.after($targetBadge);
+  } else {
+    $levelBar.append($targetBadge);
+  }
+
+  console.log(`[AMQ+ Duel] Added Target badge to ${player._name}`);
+}
+
+/**
+ * Remove Target badge from player
+ * @param {Object} player - Quiz player object
+ */
+function removeDuelTargetBadge(player) {
+  if (!player || !player.avatarSlot) return;
+
+  const $levelBar = player.avatarSlot.$bottomContainer?.find('.qpAvatarLevelBar');
+  if (!$levelBar || !$levelBar.length) return;
+
+  $levelBar.find('.qpAvatarDuelTargetIcon').remove();
+}
+
+/**
+ * Add Pair badge to player (purple with pair number)
+ * @param {Object} player - Quiz player object
+ * @param {number} pairNumber - The pair number (e.g., 1, 2, 3)
+ */
+function addPairBadge(player, pairNumber) {
+  if (!player || !player.avatarSlot) return;
+
+  // Find the level bar area where badges are shown
+  const $levelBar = player.avatarSlot.$bottomContainer?.find('.qpAvatarLevelBar');
+  if (!$levelBar || !$levelBar.length) return;
+
+  // Remove existing badge first
+  $levelBar.find('.qpAvatarDuelPairIcon').remove();
+
+  // Create pair badge with purple background
+  const $pairBadge = $(`
+    <div class="qpAvatarDuelPairIcon text-center" style="
+      background-color: rgba(147, 51, 234, 0.8);
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: bold;
+      margin-left: 5px;
+      display: inline-block;
+    ">
+      <div>Pair ${pairNumber}</div>
+    </div>
+  `);
+
+  // Insert after level container
+  const $levelOuter = $levelBar.find('.qpAvatarLevelOuter');
+  if ($levelOuter.length) {
+    $levelOuter.after($pairBadge);
+  } else {
+    $levelBar.append($pairBadge);
+  }
+
+  console.log(`[AMQ+ Duel] Added Pair ${pairNumber} badge to ${player._name}`);
+}
+
+/**
+ * Remove Pair badge from player
+ * @param {Object} player - Quiz player object
+ */
+function removePairBadge(player) {
+  if (!player || !player.avatarSlot) return;
+
+  const $levelBar = player.avatarSlot.$bottomContainer?.find('.qpAvatarLevelBar');
+  if (!$levelBar || !$levelBar.length) return;
+
+  $levelBar.find('.qpAvatarDuelPairIcon').remove();
+}
+
+/**
+ * Reset all duel UI changes (called when quiz ends or duel mode disabled)
+ */
+function resetDuelUI() {
+  if (typeof quiz === 'undefined' || !quiz.players) return;
+
+  for (const player of Object.values(quiz.players)) {
+    showDuelPlayer(player);
+    removeDuelTargetBadge(player);
+    removePairBadge(player);
+  }
+
+  console.log("[AMQ+ Duel] UI reset");
+}
+
+/**
+ * Process answer results for duel mode - determine winners for each pairing
+ * @param {Object} data - Answer results data from AMQ
+ */
+function processDuelAnswerResults(data) {
+  if (!duelModeEnabled || !duelState.currentPairings || Object.keys(duelState.currentPairings).length === 0) {
+    return;
+  }
+
+  // Build a map of player name to their result
+  const playerResults = {};
+  if (data.players && Array.isArray(data.players)) {
+    data.players.forEach(result => {
+      // Find player name from gamePlayerId
+      const player = quiz?.players?.[result.gamePlayerId];
+      if (player) {
+        playerResults[player._name] = {
+          correct: result.correct,
+          score: result.score || 0,
+          answer: result.answer || ''
+        };
+      }
+    });
+  }
+
+  // Process each pairing to determine winner
+  const processedPairs = new Set(); // Track processed pairs to avoid double counting
+  const roundResults = [];
+
+  for (const [playerA, playerB] of Object.entries(duelState.currentPairings)) {
+    // Skip if we've already processed this pair (since pairings are bidirectional)
+    const pairKey = [playerA, playerB].sort().join('|');
+    if (processedPairs.has(pairKey)) continue;
+    processedPairs.add(pairKey);
+
+    // Skip BYE pairings
+    if (playerB === duelState.BYE) {
+      roundResults.push({ playerA, playerB: 'BYE', result: 'bye' });
+      continue;
+    }
+
+    const resultA = playerResults[playerA];
+    const resultB = playerResults[playerB];
+
+    if (!resultA || !resultB) {
+      console.warn(`[AMQ+ Duel] Missing result for ${playerA} or ${playerB}`);
+      continue;
+    }
+
+    let winner = null;
+    let result = 'tie';
+
+    if (resultA.correct && !resultB.correct) {
+      // Player A wins
+      winner = playerA;
+      result = 'win';
+      duelState.wins[playerA] = (duelState.wins[playerA] || 0) + 1;
+      duelState.headToHead[playerA][playerB] = (duelState.headToHead[playerA]?.[playerB] || 0) + 1;
+    } else if (!resultA.correct && resultB.correct) {
+      // Player B wins
+      winner = playerB;
+      result = 'win';
+      duelState.wins[playerB] = (duelState.wins[playerB] || 0) + 1;
+      duelState.headToHead[playerB][playerA] = (duelState.headToHead[playerB]?.[playerA] || 0) + 1;
+    } else {
+      // Tie (both correct or both wrong)
+      result = 'tie';
+    }
+
+    roundResults.push({ playerA, playerB, winner, result, resultA, resultB });
+  }
+
+  // Log round results
+  console.log(`[AMQ+ Duel] Song ${duelState.currentRound} results:`, roundResults);
+
+  // Display my duel result
+  const myResult = roundResults.find(r =>
+    r.playerA === selfName || r.playerB === selfName
+  );
+
+  if (myResult) {
+    if (myResult.result === 'bye') {
+      // BYE message already sent in updateDuelAvatarVisibility
+    } else if (myResult.winner === selfName) {
+      sendSystemMessage(`🎯 You won this round vs ${duelState.myTarget}! (Wins: ${duelState.wins[selfName] || 0})`);
+    } else if (myResult.winner) {
+      sendSystemMessage(`🎯 ${duelState.myTarget} won this round. (Your wins: ${duelState.wins[selfName] || 0})`);
+    } else {
+      sendSystemMessage(`🎯 Tie with ${duelState.myTarget}. (Your wins: ${duelState.wins[selfName] || 0})`);
+    }
+  }
+
+  // Update the scoreboard to show duel wins
+  updateDuelScoreboard();
+}
+
+/**
+ * Update the scoreboard to show duel wins
+ * Called at predictable game events: Game Starting, play next song, answer results
+ */
+function updateDuelScoreboard() {
+  if (!duelModeEnabled || typeof quiz === 'undefined') return;
+
+  // Update the score display to show duel wins
+  // The scoreboard shows .qpsPlayerScore which normally shows total points
+  // We'll update it to show duel wins instead
+
+  try {
+    const entries = quiz.scoreboard?.playerEntries;
+    if (!entries) return;
+
+    for (const [playerId, entry] of Object.entries(entries)) {
+      const playerName = entry.name || entry.$scoreBoardEntryTextContainer?.find('.qpsPlayerName').text();
+      const duelWins = duelState.wins[playerName] || 0;
+
+      // Update the score display
+      const $scoreElement = entry.$scoreBoardEntryTextContainer?.find('.qpsPlayerScore');
+      if ($scoreElement && $scoreElement.length) {
+        // Only update if value changed to minimize DOM mutations
+        const currentText = $scoreElement.text();
+        const newText = `${duelWins}W`;
+        if (currentText !== newText) {
+          // Store original score if not stored
+          if (entry._duelOriginalScore === undefined) {
+            entry._duelOriginalScore = currentText;
+          }
+          // Show duel wins with indicator
+          $scoreElement.text(newText);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[AMQ+ Duel] Error updating scoreboard:", e);
+  }
+}
+
+/**
+ * Display final duel standings at quiz end
+ */
+function displayDuelFinalStandings() {
+  if (!duelModeEnabled || Object.keys(duelState.wins).length === 0) return;
+
+  // Sort players by wins (descending)
+  const standings = Object.entries(duelState.wins)
+    .sort((a, b) => {
+      // First by wins
+      if (b[1] !== a[1]) return b[1] - a[1];
+      // Then by head-to-head if tied
+      const h2hA = duelState.headToHead[a[0]]?.[b[0]] || 0;
+      const h2hB = duelState.headToHead[b[0]]?.[a[0]] || 0;
+      return h2hB - h2hA;
+    });
+
+  console.log("[AMQ+ Duel] Final standings:", standings);
+
+  // Display standings in chat
+  sendSystemMessage("━━━━━━━━━━━━━━━━━━━━");
+  sendSystemMessage("🏆 DUEL MODE FINAL STANDINGS 🏆");
+
+  standings.forEach(([player, wins], index) => {
+    const rank = index + 1;
+    let medal = '';
+    if (rank === 1) medal = '🥇';
+    else if (rank === 2) medal = '🥈';
+    else if (rank === 3) medal = '🥉';
+
+    sendSystemMessage(`${medal} ${rank}. ${player}: ${wins} win${wins !== 1 ? 's' : ''}`);
+  });
+
+  sendSystemMessage("━━━━━━━━━━━━━━━━━━━━");
+
+  // Update the final scoreboard display
+  updateFinalDuelScoreboard(standings);
+}
+
+/**
+ * Update the final scoreboard to show duel rankings
+ * Called when quiz ends
+ * @param {Array} standings - Sorted array of [playerName, wins]
+ */
+function updateFinalDuelScoreboard(standings) {
+  if (typeof quiz === 'undefined' || !quiz.scoreboard) return;
+
+  try {
+    // The standing items container shows the final rankings
+    const $container = $('#qpStandingItemContainer');
+    if (!$container.length) return;
+
+    // Update each standing item based on duel wins
+    const $items = $container.find('.qpStandingItem');
+
+    standings.forEach(([playerName, wins], index) => {
+      // Find the item for this player
+      $items.each(function () {
+        const $item = $(this);
+        const $playerName = $item.find('.qpsPlayerName');
+        const itemPlayerName = $playerName.text().trim();
+
+        if (itemPlayerName === playerName) {
+          // Update the rank number
+          const $rankNum = $item.find('.qpScoreBoardNumber');
+          if ($rankNum.length) {
+            $rankNum.text(index + 1);
+          }
+
+          // Update the score to show wins
+          const $score = $item.find('.qpsPlayerScore');
+          if ($score.length) {
+            $score.text(`${wins}W`);
+          }
+
+          // Update position based on new rank
+          $item.css('transform', `translateY(${index * 30}px)`);
+        }
+      });
+    });
+
+    console.log("[AMQ+ Duel] Final scoreboard updated");
+  } catch (e) {
+    console.error("[AMQ+ Duel] Error updating final scoreboard:", e);
+  }
+}
+
+/**
+ * Check player lists and warn about missing/invalid lists
+ */
+function checkAndWarnUserLists() {
+  if (!cachedPlayerLists || cachedPlayerLists.length === 0) return;
+
+  cachedPlayerLists.forEach(entry => {
+    const username = entry.username ? entry.username.trim() : '';
+    if (!username || username === '-') {
+      const playerName = entry.originalName || entry.id || 'A player';
+      sendSystemMessage(`⚠️ ${playerName} has no linked anime list - their songs won't be included`);
+    } else if (entry.platform === 'kitsu') {
+      sendSystemMessage(`⚠️ ${entry.username} uses Kitsu which is not supported - their songs won't be included`);
+    }
+  });
+}
+
+/**
+ * Hijack Room Settings button to show Users' Lists/Load Quiz button and force Standard Quiz view
+ * Button text changes based on mode: "Load Quiz" in Advanced mode, "Users' Lists" in Basic mode
+ */
+function hijackRoomSettings() {
+  console.log("[AMQ+] Setting up Room Settings and Users' Lists/Load Quiz buttons...");
+
+  // Move Room Settings button to the far right
+  const settingsContainer = $("#lnSettingsButtonContainer");
+  if (settingsContainer.length === 0) {
+    console.warn("[AMQ+] Room Settings container not found, will retry...");
+    setTimeout(hijackRoomSettings, 1000);
+    return;
+  }
+
+  // AMQ's top menu layout:
+  // [Leave] [Room Info] ... [Start] ... [Settings] [Team Setup] [AMQ+]
+  // We want: [Start] ... [Users' Lists/Load Quiz] [Room Settings] [AMQ+]
+  // Room Settings should be rightmost, Users' Lists/Load Quiz should be to its left
+
+  // Remove existing Users' Lists/Load Quiz button if it exists (to reposition it)
+  $("#amqPlusUsersListsBtn").remove();
+
+  // Get the menu bar and ensure it has position relative for absolute positioning
+  const menuBar = $("#lobbyPage .topMenuBar");
+  if (menuBar.css("position") === "static" || !menuBar.css("position")) {
+    menuBar.css("position", "relative");
+  }
+
+  // Create Users' Lists button with absolute positioning and centered text
+  // Position it at the far right (rightmost)
+  // Button text changes based on mode: "Load Quiz" in Advanced mode, "Users' Lists" in Basic mode
+  const isAdvancedMode = amqPlusEnabled && !basicSettingsMode;
+  const initialButtonText = isAdvancedMode ? "Load Quiz" : "Users' Lists";
+  const usersListsBtn = $(`
+    <div id="amqPlusUsersListsBtn" class="clickAble topMenuButton topMenuMediumButton" style="position: absolute; top: 0; text-align: center; z-index: 10;">
+      <h3 style="text-align: center; margin: 0;">${initialButtonText}</h3>
+    </div>
+  `);
+
+  // Append Users' Lists/Load Quiz button to menu bar
+  menuBar.append(usersListsBtn);
+
+  // Update positions after elements are rendered to get accurate widths
+  // Users' Lists/Load Quiz stays at right: 0 (rightmost), Room Settings goes to its left
+  const updatePositions = () => {
+    // Ensure Users' Lists/Load Quiz is at the far right
+    const actualUsersListsWidth = usersListsBtn.outerWidth(true) || 120;
+    usersListsBtn.css({
+      "position": "absolute",
+      "right": "0",
+      "top": "0",
+      "z-index": "10"
+    });
+
+    // Position Room Settings to the left of Users' Lists/Load Quiz
+    const margin = 5; // spacing between buttons
+    const settingsRight = actualUsersListsWidth + margin;
+
+    settingsContainer.css({
+      "position": "absolute",
+      "right": `${settingsRight}px`,
+      "top": "0",
+      "z-index": "5"
+    });
+
+    const actualSettingsWidth = settingsContainer.outerWidth(true) || 150;
+
+    console.log("[AMQ+] Users' Lists/Load Quiz at right: 0px (width:", actualUsersListsWidth, "px), Room Settings at right:", settingsRight, "px (width:", actualSettingsWidth, "px)");
+  };
+
+  // Update positions multiple times to ensure accuracy
+  setTimeout(updatePositions, 50);
+  setTimeout(updatePositions, 150);
+  setTimeout(updatePositions, 300);
+
+  // Verify the DOM structure and force reflow
+  setTimeout(() => {
+    const insertedBtn = $("#amqPlusUsersListsBtn");
+    const nextSibling = insertedBtn.next();
+    if (nextSibling.length > 0 && nextSibling.attr("id") === "lnSettingsButtonContainer") {
+      console.log("[AMQ+] ✓ Users' Lists/Load Quiz button correctly positioned before Settings container");
+      console.log("[AMQ+] DOM order: Users' Lists/Load Quiz -> Room Settings");
+      console.log("[AMQ+] Expected visual order (with float:right): Room Settings (rightmost) -> Users' Lists/Load Quiz");
+
+      // Force a reflow to ensure styles are applied
+      insertedBtn[0].offsetHeight;
+      nextSibling[0].offsetHeight;
+    } else {
+      console.warn("[AMQ+] ⚠ Users' Lists/Load Quiz button positioning may be incorrect. Next sibling:", nextSibling.attr("id") || "none");
+    }
+  }, 100);
+
+  // Handler for Users' Lists button
+  usersListsBtn.off("click").on("click", () => {
+    const isAdvancedMode = amqPlusEnabled && !basicSettingsMode;
+
+    if (isAdvancedMode) {
+      console.log("[AMQ+] Load Quiz button clicked, opening AMQ+ advanced modal");
+      // Remove any leftover modal backdrops and modal-open class
+      $(".modal-backdrop").remove();
+      $("body").removeClass("modal-open").css("padding-right", "");
+
+      // Show the AMQ+ modal
+      $("#amqPlusModal").modal("show");
+
+      // Ensure modal-open class is applied and scrolling works
+      setTimeout(() => {
+        $("body").addClass("modal-open");
+      }, 50);
+    } else {
+      console.log("[AMQ+] Users' Lists button clicked");
+      showUsersListsModal();
+    }
+  });
+
+  console.log("[AMQ+] Users' Lists/Load Quiz button inserted before Settings container");
+
+  // Update button visibility and text based on AMQ+ enabled state
+  updateUsersListsButtonVisibility();
+
+  // Intercept Room Settings button click to ensure it opens on Settings tab in Advanced mode
+  const settingsButton = settingsContainer.find(".clickAble");
+  if (settingsButton.length > 0) {
+    settingsButton.off("click.amqPlus").on("click.amqPlus", function (e) {
+      const isAdvancedMode = amqPlusEnabled && !basicSettingsMode;
+      if (isAdvancedMode) {
+        // Set tab to Settings before opening modal
+        amqPlusHostModalTab = 'settings';
+
+        // Wait for modal to open, then ensure Settings tab is selected
+        setTimeout(() => {
+          const settingsTab = $("#amqPlusSettingsTab");
+          const loadQuizTab = $("#amqPlusLoadQuizTab");
+
+          if (settingsTab.length && loadQuizTab.length) {
+            // Ensure Settings tab is selected
+            settingsTab.addClass("selected");
+            loadQuizTab.removeClass("selected");
+
+            // Ensure modal is in advanced mode and hide load container
+            if (typeof hostModal !== 'undefined') {
+              if (hostModal.changeView) {
+                hostModal.changeView('advanced');
+              }
+              if (hostModal.hideLoadContainer) {
+                hostModal.hideLoadContainer();
+              }
+            }
+
+            // Render the Settings view
+            renderAmqPlusHostModalView();
+          }
+        }, 100);
+      }
+    });
+  }
+
+  // Mark as hijacked (but allow repositioning on subsequent calls)
+  if (!roomSettingsHijacked) {
+    roomSettingsHijacked = true;
+    console.log("[AMQ+] Room Settings setup complete");
+  }
+}
+
+/**
+ * Show Users' Lists configuration modal
+ */
+function showUsersListsModal() {
+  // Check if modal already exists
+  let modal = $("#amqPlusUsersListsModal");
+  if (modal.length === 0) {
+    // Create the modal
+    const modalHtml = createUsersListsModalHTML();
+    $("body").append(modalHtml);
+    modal = $("#amqPlusUsersListsModal");
+    attachUsersListsModalHandlers();
+  }
+
+  // Update content
+  updateUsersListsModalContent();
+
+  // Show modal
+  modal.modal("show");
+}
+
+/**
+ * Create Users' Lists modal HTML
+ */
+function createUsersListsModalHTML() {
+  return `
+    <div class="modal fade" id="amqPlusUsersListsModal" tabindex="-1" role="dialog">
+      <div class="modal-dialog" role="document" style="width: 600px; max-width: 95%;">
+        <div class="modal-content" style="background-color: #1a1a2e; color: #e2e8f0; border: 1px solid #4a5568;">
+          <div class="modal-header" style="border-bottom: 1px solid #2d3748; padding: 15px 20px;">
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close" style="color: #fff; opacity: 0.8;">
+              <span aria-hidden="true">&times;</span>
+            </button>
+            <h4 class="modal-title" style="font-weight: bold; color: #fff;">
+              <i class="fa fa-users" style="color: #6366f1; margin-right: 8px;"></i>
+              Users' Lists Configuration
+            </h4>
+          </div>
+          <div class="modal-body" style="padding: 20px; max-height: 60vh; overflow-y: auto;">
+            <div id="amqPlusUsersListsContent">
+              <!-- Content will be populated dynamically -->
+            </div>
+          </div>
+          <div class="modal-footer" style="border-top: 1px solid #2d3748; padding: 15px 20px;">
+            <button type="button" class="btn btn-default" id="amqPlusUsersListsSyncBtn">
+              <i class="fa fa-refresh"></i> Sync from Lobby
+            </button>
+            <button type="button" class="btn btn-success" id="amqPlusUsersListsAddBtn">
+              <i class="fa fa-plus"></i> Add Player
+            </button>
+            <button type="button" class="btn btn-primary" data-dismiss="modal">
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Attach handlers for Users' Lists modal
+ */
+function attachUsersListsModalHandlers() {
+  // Sync from Lobby button
+  $("#amqPlusUsersListsSyncBtn").off("click").on("click", function () {
+    const btn = $(this);
+    btn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Syncing...');
+
+    gatherPlayerLists().then(userEntries => {
+      cachedPlayerLists = userEntries;
+      applyRandomPreset();
+      updateUsersListsModalContent();
+      checkAndWarnUserLists();
+      btn.prop("disabled", false).html('<i class="fa fa-refresh"></i> Sync from Lobby');
+    }).catch(error => {
+      console.error("[AMQ+] Error syncing:", error);
+      sendSystemMessage("⚠️ Failed to sync: " + error.message);
+      btn.prop("disabled", false).html('<i class="fa fa-refresh"></i> Sync from Lobby');
+    });
+  });
+
+  // Add Player button
+  $("#amqPlusUsersListsAddBtn").off("click").on("click", function () {
+    handleManualAdd();
+    updateUsersListsModalContent();
+  });
+}
+
+/**
+ * Update Users' Lists modal content
+ */
+function updateUsersListsModalContent() {
+  const container = $("#amqPlusUsersListsContent");
+
+  if (!cachedPlayerLists || cachedPlayerLists.length === 0) {
+    container.html(`
+      <div style="text-align: center; padding: 30px; color: rgba(255,255,255,0.6);">
+        <i class="fa fa-users" style="font-size: 48px; margin-bottom: 15px; opacity: 0.5; display: block;"></i>
+        <p>No player lists synced yet.</p>
+        <p>Click "Sync from Lobby" to gather player lists.</p>
+      </div>
+    `);
+    return;
+  }
+
+  const entriesHtml = cachedPlayerLists.map((entry, idx) => createUsersListsEntryHTML(entry, idx)).join('');
+
+  container.html(`
+    ${entriesHtml}
+  `);
+
+  // Attach handlers for dynamic elements
+  attachUsersListsEntryHandlers();
+}
+
+/**
+ * Create HTML for a single user entry in Users' Lists modal
+ */
+function createUsersListsEntryHTML(entry, idx) {
+  const username = entry.username || '-';
+  const platform = entry.platform || 'unknown';
+  const isInvalid = !username || username === '-' || platform === 'kitsu';
+
+  const selectedLists = entry.selectedLists || {
+    completed: true,
+    watching: true,
+    planning: false,
+    on_hold: false,
+    dropped: false
+  };
+
+  return `
+    <div class="amqPlusUsersListsEntry" data-idx="${idx}" style="
+      padding: 12px;
+      margin-bottom: 10px;
+      background: ${isInvalid ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255,255,255,0.05)'};
+      border: 1px solid ${isInvalid ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255,255,255,0.1)'};
+      border-radius: 8px;
+    ">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div>
+          <strong style="color: ${isInvalid ? '#ef4444' : '#fff'};">
+            ${isInvalid ? '⚠️ ' : ''}${username}
+          </strong>
+          <span style="color: rgba(255,255,255,0.6); font-size: 11px; margin-left: 8px;">
+            (${platform})
+          </span>
+          ${isInvalid ? '<span style="color: #ef4444; font-size: 11px; margin-left: 8px;">- No valid list</span>' : ''}
+        </div>
+        <button class="btn btn-xs btn-danger amqPlusUsersListsRemoveBtn" data-idx="${idx}" style="padding: 2px 8px;">
+          <i class="fa fa-times"></i>
+        </button>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+        <label style="display: flex; align-items: center; cursor: pointer; font-size: 12px;">
+          <input type="checkbox" class="amqPlusUsersListsStatus" data-idx="${idx}" data-status="completed" ${selectedLists.completed ? 'checked' : ''} style="margin-right: 4px;">
+          Completed
+        </label>
+        <label style="display: flex; align-items: center; cursor: pointer; font-size: 12px;">
+          <input type="checkbox" class="amqPlusUsersListsStatus" data-idx="${idx}" data-status="watching" ${selectedLists.watching ? 'checked' : ''} style="margin-right: 4px;">
+          Watching
+        </label>
+        <label style="display: flex; align-items: center; cursor: pointer; font-size: 12px;">
+          <input type="checkbox" class="amqPlusUsersListsStatus" data-idx="${idx}" data-status="planning" ${selectedLists.planning ? 'checked' : ''} style="margin-right: 4px;">
+          Planning
+        </label>
+        <label style="display: flex; align-items: center; cursor: pointer; font-size: 12px;">
+          <input type="checkbox" class="amqPlusUsersListsStatus" data-idx="${idx}" data-status="on_hold" ${selectedLists.on_hold ? 'checked' : ''} style="margin-right: 4px;">
+          On Hold
+        </label>
+        <label style="display: flex; align-items: center; cursor: pointer; font-size: 12px;">
+          <input type="checkbox" class="amqPlusUsersListsStatus" data-idx="${idx}" data-status="dropped" ${selectedLists.dropped ? 'checked' : ''} style="margin-right: 4px;">
+          Dropped
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Attach handlers for Users' Lists entries
+ */
+function attachUsersListsEntryHandlers() {
+  // Remove button handler
+  $(".amqPlusUsersListsRemoveBtn").off("click").on("click", function () {
+    const idx = $(this).data("idx");
+    if (cachedPlayerLists && cachedPlayerLists[idx]) {
+      const removed = cachedPlayerLists.splice(idx, 1)[0];
+      sendSystemMessage(`Removed ${removed.username || 'player'} from list`);
+      updateUsersListsModalContent();
+    }
+  });
+
+  // Status checkbox handler
+  $(".amqPlusUsersListsStatus").off("change").on("change", function () {
+    const idx = $(this).data("idx");
+    const status = $(this).data("status");
+    const checked = $(this).is(":checked");
+
+    if (cachedPlayerLists && cachedPlayerLists[idx]) {
+      if (!cachedPlayerLists[idx].selectedLists) {
+        cachedPlayerLists[idx].selectedLists = {
+          completed: true,
+          watching: true,
+          planning: false,
+          on_hold: false,
+          dropped: false
+        };
+      }
+      cachedPlayerLists[idx].selectedLists[status] = checked;
+      savePlayerSettingsForEntry(cachedPlayerLists[idx]);
+    }
+  });
 }
 
 function attachModalHandlers() {
@@ -1040,11 +3899,29 @@ function attachModalHandlers() {
 
 
   $("#amqPlusEnableToggle").off("change").change(function () {
+    // Only host can toggle AMQ+
+    if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
+      sendSystemMessage("⚠️ Only the room host can enable or configure AMQ+.");
+      $(this).prop("checked", amqPlusEnabled); // Revert the toggle
+      return;
+    }
+
     amqPlusEnabled = $(this).is(":checked");
+    if (!amqPlusEnabled) {
+      basicSettingsMode = false; // Disable basic mode when AMQ+ is disabled
+    }
     saveSettings();
     updateToggleButton();
+    updateBasicModeSettingsUI();
+    updateAdvancedModeSettingsUI();
+    updateUsersListsButtonVisibility(); // Update button text
     if (amqPlusEnabled) {
       sendSystemMessage("AMQ+ mode enabled");
+      // Send /listhelp message to inform users about list commands
+      setTimeout(() => {
+        const isLiveNodeConfigured = cachedPlayerLists && cachedPlayerLists.length > 0;
+        handleListHelpCommand("System", isLiveNodeConfigured);
+      }, 500);
     } else {
       sendSystemMessage("AMQ+ mode disabled");
     }
@@ -1116,6 +3993,39 @@ function updateToggleButton() {
   if ($("#amqPlusEnableToggle").length > 0) {
     $("#amqPlusEnableToggle").prop("checked", amqPlusEnabled);
   }
+
+  // Update Users' Lists button visibility
+  updateUsersListsButtonVisibility();
+}
+
+/**
+ * Update Users' Lists button visibility and text based on AMQ+ enabled state and mode
+ */
+function updateUsersListsButtonVisibility() {
+  const usersListsBtn = $("#amqPlusUsersListsBtn");
+  if (usersListsBtn.length > 0) {
+    if (amqPlusEnabled && !isTrainingMode) {
+      usersListsBtn.show();
+
+      // Update button text based on mode
+      const isAdvancedMode = !basicSettingsMode;
+      const buttonText = isAdvancedMode ? "Load Quiz" : "Users' Lists";
+      usersListsBtn.find("h3").text(buttonText);
+
+      console.log("[AMQ+] Users' Lists/Load Quiz button shown as:", buttonText);
+    } else {
+      usersListsBtn.hide();
+      if (isTrainingMode) {
+        console.log("[AMQ+] Users' Lists/Load Quiz button hidden (training mode)");
+      } else {
+        console.log("[AMQ+] Users' Lists/Load Quiz button hidden");
+      }
+    }
+  } else if (amqPlusEnabled && !isTrainingMode) {
+    // Button doesn't exist but AMQ+ is enabled - create it
+    console.log("[AMQ+] Users' Lists/Load Quiz button doesn't exist, creating it...");
+    hijackRoomSettings();
+  }
 }
 
 function applyStyles() {
@@ -1128,6 +4038,29 @@ function applyStyles() {
             position: absolute;
             right: calc(50% + 120px);
             width: 80px;
+        }
+        #amqPlusUsersListsBtn {
+            position: absolute !important;
+            right: 0 !important;
+            top: 0 !important;
+            text-align: center !important;
+            z-index: 10 !important;
+            width: auto !important;
+            min-width: 110px !important;
+            max-width: 120px !important;
+            padding-left: 8px !important;
+            padding-right: 8px !important;
+        }
+        #lnSettingsButtonContainer {
+            position: absolute !important;
+            top: 0 !important;
+            z-index: 5 !important;
+        }
+        #amqPlusUsersListsBtn h3 {
+            text-align: center !important;
+            margin: 0 !important;
+            width: 100% !important;
+            white-space: nowrap !important;
         }
         #amqPlusTrainingToggle {
             position: absolute;
@@ -2128,6 +5061,19 @@ function handleQuizData(data, quizId) {
   // Build song source map from quiz data if source metadata is available
   buildSongSourceMap(data, quizSave);
 
+  // Build song overlap map for duel mode if available
+  console.log("[AMQ+ Duel DEBUG] saveQuiz: Checking if should build songOverlapMap...");
+  console.log("[AMQ+ Duel DEBUG] saveQuiz: duelModeEnabled =", duelModeEnabled);
+  console.log("[AMQ+ Duel DEBUG] saveQuiz: data.songOverlapMap exists =", !!data.songOverlapMap);
+  console.log("[AMQ+ Duel DEBUG] saveQuiz: data.songOverlapMap =", data.songOverlapMap);
+
+  if (duelModeEnabled && data.songOverlapMap) {
+    buildSongOverlapMap(data.songOverlapMap, quizSave);
+  } else {
+    console.warn("[AMQ+ Duel DEBUG] saveQuiz: NOT building songOverlapMap! Reason:",
+      !duelModeEnabled ? "duelModeEnabled is false" : "data.songOverlapMap is missing from API response");
+  }
+
   if (songCount === 0) {
     console.error("[AMQ+] Quiz has 0 songs, cannot save");
     updateModalStatus(null);
@@ -2224,6 +5170,51 @@ function buildSongSourceMap(data, quizSave) {
   }
 
   console.log("[AMQ+] Built song source map with", songSourceMap.size, "entries");
+}
+
+/**
+ * Build song overlap map for duel mode - maps annSongId to list of usernames who know the song
+ * @param {Array} overlapMapData - Array of {annSongId, hasAnimeUsernames} from API
+ * @param {Object} quizSave - Quiz save object to filter to only quiz songs
+ */
+function buildSongOverlapMap(overlapMapData, quizSave) {
+  console.log("[AMQ+ Duel DEBUG] buildSongOverlapMap: Starting build");
+  console.log("[AMQ+ Duel DEBUG] overlapMapData:", overlapMapData);
+
+  duelState.songOverlapMap = new Map();
+
+  // Extract annSongIds from quizSave blocks to filter
+  const quizAnnSongIds = new Set();
+  if (quizSave && quizSave.ruleBlocks && Array.isArray(quizSave.ruleBlocks)) {
+    quizSave.ruleBlocks.forEach(ruleBlock => {
+      if (ruleBlock.blocks && Array.isArray(ruleBlock.blocks)) {
+        ruleBlock.blocks.forEach(block => {
+          if (block.annSongId) {
+            quizAnnSongIds.add(block.annSongId);
+          }
+        });
+      }
+    });
+  }
+
+  console.log("[AMQ+ Duel DEBUG] Quiz annSongIds:", Array.from(quizAnnSongIds));
+
+  if (overlapMapData && Array.isArray(overlapMapData)) {
+    overlapMapData.forEach(entry => {
+      if (entry.annSongId) {
+        // Only add if song is in the quiz
+        if (quizAnnSongIds.size === 0 || quizAnnSongIds.has(entry.annSongId)) {
+          duelState.songOverlapMap.set(entry.annSongId, entry.hasAnimeUsernames || []);
+          console.log(`[AMQ+ Duel DEBUG] Added to map: annSongId=${entry.annSongId}, hasAnimeUsernames=[${(entry.hasAnimeUsernames || []).join(', ')}]`);
+        } else {
+          console.log(`[AMQ+ Duel DEBUG] Skipped (not in quiz): annSongId=${entry.annSongId}`);
+        }
+      }
+    });
+  }
+
+  console.log("[AMQ+ Duel] Built song overlap map with", duelState.songOverlapMap.size, "entries");
+  console.log("[AMQ+ Duel DEBUG] Full songOverlapMap:", Array.from(duelState.songOverlapMap.entries()).map(([id, users]) => ({ annSongId: id, users })));
 }
 
 function extractUsernameFromSourceInfo(sourceInfo) {
@@ -2482,6 +5473,9 @@ function saveQuiz(data, quizId) {
 function applyQuizToLobby(quizId, quizName) {
   console.log("[AMQ+] Applying quiz to lobby, quiz ID:", quizId, "quiz name:", quizName);
 
+  // Set flag to prevent infinite loop when applying quiz triggers settings change
+  isApplyingRoomSettingsQuiz = true;
+
   console.log("[AMQ+] Sending community mode command...");
   const communityModeCommand = {
     type: "lobby",
@@ -2508,7 +5502,10 @@ function applyQuizToLobby(quizId, quizName) {
 
     updateModalStatus("Quiz applied - Click 'Start' button to begin");
     console.log("[AMQ+] Quiz applied");
+
+    // Clear the flag after quiz is applied
     setTimeout(() => {
+      isApplyingRoomSettingsQuiz = false;
       $("#amqPlusModal").modal("hide");
     }, 100);
   }, 500);
@@ -2588,8 +5585,9 @@ let distributionOutputEnabled = false;
  * Handle listhelp command
  */
 function handleListHelpCommand(sender, isLiveNodeConfigured) {
+  const isSystemMessage = sender === "System";
   const helpMessages = [
-    `@${sender}: Player List Commands Help`,
+    isSystemMessage ? "Player List Commands Help" : `@${sender}: Player List Commands Help`,
     "━━━━━━━━━━━━━━━━━━━━━━━━",
     "/ add [status...] - Add list statuses",
     "/ remove [status...] - Remove list statuses",
@@ -2598,7 +5596,8 @@ function handleListHelpCommand(sender, isLiveNodeConfigured) {
     "━━━━━━━━━━━━━━━━━━━━━━━━",
     "Valid statuses: completed, watching, planning, on-hold, dropped",
     "Example: / add completed watching",
-    "Example: / remove dropped"
+    "Example: / remove dropped",
+    "━━━━━━━━━━━━━━━━━━━━━━━━"
   ];
 
   if (!isLiveNodeConfigured) {
@@ -2806,8 +5805,25 @@ function capitalizeFirst(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+/**
+ * Handle /1v1debug command - toggle real-time debug output for duel mode messages
+ */
+function handle1v1DebugCommand() {
+  duelDebugEnabled = !duelDebugEnabled;
+  sendSystemMessage(`1v1 Debug Mode ${duelDebugEnabled ? 'ENABLED' : 'DISABLED'}`);
+  if (duelDebugEnabled) {
+    sendSystemMessage("All duel mode commands will now be displayed as human-readable messages in system chat.");
+  }
+}
+
 function handleChatCommand(msg) {
   console.log("[AMQ+] Chat message from self:", msg);
+
+  // Check for 1v1 debug command
+  if (msg.toLowerCase().trim() === "/1v1debug") {
+    handle1v1DebugCommand();
+    return;
+  }
 
   if (!msg.startsWith("/amqplus")) {
     // Also check for player list commands from self
@@ -2820,6 +5836,11 @@ function handleChatCommand(msg) {
 
   if (parts[1] === "toggle") {
     console.log("[AMQ+] Toggle command received");
+    // Only host can toggle AMQ+ via command
+    if (typeof lobby !== 'undefined' && lobby.inLobby && !lobby.isHost) {
+      sendSystemMessage("⚠️ Only the room host can enable or configure AMQ+.");
+      return;
+    }
     amqPlusEnabled = !amqPlusEnabled;
     saveSettings();
     updateToggleButton();
@@ -2917,6 +5938,12 @@ function setupListeners() {
     console.log("[AMQ+] Current quiz info:", currentQuizInfo);
     console.log("[AMQ+] Selected custom quiz name:", selectedCustomQuizName);
 
+    // Reset duel UI when quiz ends
+    if (duelModeEnabled) {
+      resetDuelUI();
+      displayDuelFinalStandings();
+    }
+
     let quizInfoToUse = currentQuizInfo;
 
     if (!quizInfoToUse && selectedCustomQuizName && selectedCustomQuizName.startsWith("AMQ+")) {
@@ -2943,6 +5970,27 @@ function setupListeners() {
     } else {
       console.log("[AMQ+] Quiz info not available, skipping play tracking");
     }
+
+    // Remind users to sync players list if AMQ+ is enabled
+    if (amqPlusEnabled && cachedPlayerLists && cachedPlayerLists.length > 0) {
+      setTimeout(() => {
+        sendSystemMessage("Remember to sync players list through Users' List tab if anyone joins or leaves the lobby!");
+      }, 1000);
+    }
+  }).bindListener();
+
+  new Listener("quiz over", (payload) => {
+    // Reset quiz fetched flag when quiz ends (allows re-roll for next game)
+    quizFetchedBeforeGameStart = false;
+    console.log("[AMQ+] Quiz over, reset quiz fetched flag");
+
+    // Reset duel UI when returning to lobby
+    if (duelModeEnabled) {
+      console.log("[AMQ+ Duel] Quiz over, resetting UI");
+      resetDuelUI();
+      // Display final standings before resetting
+      displayDuelFinalStandings();
+    }
   }).bindListener();
 
   new Listener("custom quiz selected", (payload) => {
@@ -2962,6 +6010,9 @@ function setupListeners() {
           creatorUsername: quizDesc.creatorName || null
         };
         console.log("[AMQ+] Stored quiz info from 'custom quiz selected' event:", currentQuizInfo);
+        // Mark that quiz was fetched before game start
+        quizFetchedBeforeGameStart = true;
+        console.log("[AMQ+] Quiz fetched before game start, flag set");
       } else {
         currentQuizInfo = null;
       }
@@ -2988,6 +6039,10 @@ function setupListeners() {
       const quizName = payload.quizSave?.name || currentQuizData?.command?.data?.quizSave?.name || "Unknown Quiz";
       console.log("[AMQ+] Quiz saved successfully with ID:", newQuizId);
 
+      // Mark that quiz was fetched/saved before game start to prevent re-roll on Start
+      quizFetchedBeforeGameStart = true;
+      console.log("[AMQ+] Quiz saved before game start, flag set to prevent re-roll");
+
       // Rebuild songSourceMap from the actual saved quiz to ensure it matches what AMQ saved
       if (payload.quizSave && currentQuizData && currentQuizData.songSourceMap) {
         console.log("[AMQ+] Rebuilding songSourceMap from saved quiz");
@@ -2998,6 +6053,16 @@ function setupListeners() {
       }
 
       updateModalStatus("Quiz saved successfully - Applying to lobby...");
+
+      // Get song count for the message
+      const songCount = payload.quizSave?.ruleBlocks?.[0]?.blocks?.length || 0;
+
+      // Send message to chat that quiz is ready
+      if (songCount > 0) {
+        sendSystemMessage(`✅ Quiz ready! ${songCount} song${songCount !== 1 ? 's' : ''} loaded. Press Start to begin.`);
+      } else {
+        sendSystemMessage("✅ Quiz ready! Press Start to begin.");
+      }
 
       setTimeout(() => {
         const savedModal = document.querySelector(".swal2-popup.swal2-show");
@@ -3014,19 +6079,55 @@ function setupListeners() {
 
       amqPlusCreditsSent = false;
 
-      // Only auto-apply quiz to lobby if not in training mode
-      // Training mode sessions handle quiz application themselves
+      // Apply quiz to lobby (settings were already applied in basic settings mode)
       if (!isTrainingMode) {
+        // Only auto-apply quiz to lobby if not in training mode
+        // Training mode sessions handle quiz application themselves
         applyQuizToLobby(newQuizId, quizName);
       }
     } else {
       console.error("[AMQ+] Save quiz command failed:", payload);
       updateModalStatus(null);
+
       messageDisplayer.displayMessage("Quiz Save Failed", "The quiz failed to save. This is likely due to insufficient community quiz slots (need at least 1). Please delete an old quiz and try again.");
     }
   }).bindListener();
 
   new Listener("Game Starting", (payload) => {
+    // Reset quiz fetched flag when game starts (allows re-roll for next game)
+    quizFetchedBeforeGameStart = false;
+    console.log("[AMQ+] Game starting, reset quiz fetched flag");
+
+    // Initialize duel mode if enabled
+    if (duelModeEnabled) {
+      console.log("[AMQ+ Duel] Game starting, initializing duel roster...");
+      setTimeout(() => {
+        initializeDuelRoster();
+
+        // Host broadcasts enable command to all clients
+        if (duelState.isHost && duelState.roster.length >= 2) {
+          console.log("[AMQ+ Duel] Host broadcasting duel mode enable command...");
+          broadcastDuelModeEnable(duelState.roster);
+        }
+
+        // Update scoreboard after roster initialization
+        updateDuelScoreboard();
+
+        // Send 1v1 mode instructions
+        setTimeout(() => {
+          sendSystemMessage("━━━━━━━━━━━━━━━━━━━━━━━━");
+          sendSystemMessage("🎯 1v1 Duel Mode - How to Play:");
+          sendSystemMessage("Each song, you'll be paired with an opponent.");
+          sendSystemMessage("The player who answers correctly wins the round.");
+          sendSystemMessage("If both answer correctly or both wrong, it's a tie.");
+          sendSystemMessage("Your target opponent is marked with a red 'Target' badge.");
+          sendSystemMessage("Other players show 'Pair X' badges for their matchups.");
+          sendSystemMessage("Win the most rounds to be the champion!");
+          sendSystemMessage("━━━━━━━━━━━━━━━━━━━━━━━━");
+        }, 500);
+      }, 100);
+    }
+
     if (amqPlusEnabled && selectedCustomQuizName && selectedCustomQuizName.startsWith("AMQ+") && !amqPlusCreditsSent) {
       console.log("[AMQ+] Game starting, sending AMQ+ credits message");
       setTimeout(() => {
@@ -3102,10 +6203,24 @@ function setupListeners() {
     if (payload && payload.songNumber) {
       currentSongNumber = payload.songNumber;
       console.log("[AMQ+] Current song number:", currentSongNumber);
+
+      // Duel mode: host broadcasts pairings for this song
+      if (duelModeEnabled && duelState.roster.length >= 2) {
+        handleDuelSongStart(currentSongNumber);
+        // Update scoreboard after a delay to ensure it's updated after AMQ renders it
+        setTimeout(() => {
+          updateDuelScoreboard();
+        }, 500);
+      }
     }
   }).bindListener();
 
   new Listener("answer results", (data) => {
+    // Process duel mode scoring if enabled
+    if (duelModeEnabled && duelState.roster.length >= 2) {
+      processDuelAnswerResults(data);
+    }
+
     if (!amqPlusEnabled || !selectedCustomQuizName || !selectedCustomQuizName.startsWith("AMQ+")) {
       return;
     }
@@ -3187,6 +6302,13 @@ function setupListeners() {
 
   new Listener("game chat update", (payload) => {
     for (let message of payload.messages) {
+      // Check for duel mode messages first (hidden from players)
+      // Process even if duelModeEnabled is false to receive enable commands
+      if (message.message.startsWith('❦')) {
+        handleDuelMessage(message.message, message.sender);
+        continue; // Don't process as regular chat
+      }
+
       if (message.sender === selfName) {
         handleChatCommand(message.message.toLowerCase());
       } else {
@@ -3197,6 +6319,13 @@ function setupListeners() {
   }).bindListener();
 
   new Listener("Game Chat Message", (payload) => {
+    // Check for duel mode messages first (hidden from players)
+    // Process even if duelModeEnabled is false to receive enable commands
+    if (payload.message.startsWith('❦')) {
+      handleDuelMessage(payload.message, payload.sender);
+      return; // Don't process as regular chat
+    }
+
     if (payload.sender === selfName) {
       handleChatCommand(payload.message.toLowerCase());
     } else {
@@ -3233,6 +6362,14 @@ function fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMai
           // Update currentQuizData with the re-roll response data
           currentQuizData = data;
           buildSongSourceMap(data, data.command.data.quizSave);
+
+          // Build song overlap map for duel mode
+          console.log("[AMQ+ Duel DEBUG] fetchQuizForReRoll: duelModeEnabled =", duelModeEnabled, ", data.songOverlapMap =", data.songOverlapMap);
+          if (duelModeEnabled && data.songOverlapMap) {
+            console.log("[AMQ+ Duel] Building song overlap map from re-roll response");
+            buildSongOverlapMap(data.songOverlapMap, data.command.data.quizSave);
+          }
+
           saveQuiz(data, selectedCustomQuizId);
 
           setTimeout(() => {
@@ -3289,63 +6426,113 @@ function fetchQuizForReRoll(quizId, liveNodeData, skipAutoReady, originalFireMai
 }
 
 function hijackStartButton() {
-  console.log("[AMQ+] Hijacking start button...");
-  const originalFireMainButtonEvent = lobby.fireMainButtonEvent.bind(lobby);
+  console.log("[AMQ+] Setting up start button click prevention...");
 
-  lobby.fireMainButtonEvent = function (skipAutoReady) {
-    console.log("[AMQ+] fireMainButtonEvent called, AMQ+ enabled:", amqPlusEnabled, "skipAutoReady:", skipAutoReady, "isTrainingMode:", isTrainingMode);
-
+  // Use MutationObserver to watch for start button appearance/changes
+  const startButtonObserver = new MutationObserver(() => {
     const startButton = $("#lbStartButton");
-    const buttonText = startButton.find("h1").text().trim();
+    if (startButton.length === 0) return;
 
-    if (buttonText !== "Start") {
-      console.log("[AMQ+] Button text is not 'Start' (is '" + buttonText + "'), proceeding normally");
-      originalFireMainButtonEvent(skipAutoReady);
-      return;
-    }
+    // Remove any existing handlers to avoid duplicates
+    startButton.off("click.amqplus");
 
-    // Don't hijack if in training mode - let it start normally
-    if (isTrainingMode) {
-      console.log("[AMQ+] Training mode active, proceeding with normal start");
-      originalFireMainButtonEvent(skipAutoReady);
-      return;
-    }
+    // Attach click handler
+    startButton.on("click.amqplus", function (e) {
+      const buttonText = startButton.find("h1").text().trim();
 
-    if (amqPlusEnabled) {
-      console.log("[AMQ+] AMQ+ mode is enabled, checking selected quiz...");
-      if (selectedCustomQuizName && selectedCustomQuizName.startsWith("AMQ+")) {
-        console.log("[AMQ+] AMQ+ quiz selected:", selectedCustomQuizName);
-        if (currentQuizId) {
-          console.log("[AMQ+] Current quiz ID available, starting re-roll...");
-          sendSystemMessage("Re-rolling quiz...");
-
-          if (cachedPlayerLists && cachedPlayerLists.length > 0) {
-            console.log("[AMQ+] Using cached player lists for re-roll");
-            const configuredEntries = getConfiguredPlayerLists();
-            const liveNodeData = {
-              useEntirePool: false,
-              userEntries: configuredEntries,
-              songSelectionMode: liveNodeSongSelectionMode
-            };
-            fetchQuizForReRoll(currentQuizId, liveNodeData, skipAutoReady, originalFireMainButtonEvent);
-          } else {
-            checkQuizForLiveNodeForReRoll(currentQuizId, skipAutoReady, originalFireMainButtonEvent);
-          }
-        } else {
-          console.log("[AMQ+] No quiz ID stored, proceeding to start");
-          originalFireMainButtonEvent(skipAutoReady);
-        }
-      } else {
-        console.log("[AMQ+] No AMQ+ quiz selected, showing modal");
-        $("#amqPlusModal").modal("show");
+      // Only check for "Start" button, not "Ready" or other states
+      if (buttonText !== "Start") {
+        return; // Let normal behavior proceed
       }
-    } else {
-      console.log("[AMQ+] AMQ+ mode not enabled, calling original function");
-      originalFireMainButtonEvent(skipAutoReady);
-    }
-  };
 
-  console.log("[AMQ+] Start button hijack complete");
+      // Don't prevent if in training mode
+      if (isTrainingMode) {
+        return; // Let normal behavior proceed
+      }
+
+      // Check if AMQ+ is enabled and quiz needs to be fetched
+      if (amqPlusEnabled) {
+        console.log("[AMQ+] Start button clicked, AMQ+ enabled, checking quiz status...");
+
+        if (selectedCustomQuizName && selectedCustomQuizName.startsWith("AMQ+")) {
+          // Check if quiz has been fetched and saved
+          // Quiz is ready if: currentQuizId exists AND quizFetchedBeforeGameStart is true
+          const isQuizReady = currentQuizId && quizFetchedBeforeGameStart;
+
+          if (!isQuizReady) {
+            console.log("[AMQ+] Quiz not fetched yet, preventing start. currentQuizId:", currentQuizId, "quizFetchedBeforeGameStart:", quizFetchedBeforeGameStart);
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+            messageDisplayer.displayMessage(
+              "Quiz Not Ready",
+              "Please configure a quiz before starting the game. In basic mode the quiz should be configured automatically whenever you change room settings on STANDARD (not community) tab. For advanced mode supply the link to the quiz on AMQ+ site by clicking the the Load Quiz button. "
+            );
+            return false;
+          } else {
+            console.log("[AMQ+] Quiz already fetched and ready, allowing start");
+            // Quiz is ready, allow normal start
+          }
+        }
+        // If no AMQ+ quiz selected, allow normal start
+      }
+      // If AMQ+ not enabled, allow normal start
+    });
+  });
+
+  // Observe the lobby page for start button
+  const lobbyContainer = $("#lobbyPage");
+  if (lobbyContainer.length > 0) {
+    startButtonObserver.observe(lobbyContainer[0], {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  // Also check immediately in case button already exists
+  setTimeout(() => {
+    const startButton = $("#lbStartButton");
+    if (startButton.length > 0) {
+      startButton.off("click.amqplus");
+      startButton.on("click.amqplus", function (e) {
+        const buttonText = startButton.find("h1").text().trim();
+
+        if (buttonText !== "Start") {
+          return;
+        }
+
+        if (isTrainingMode) {
+          return;
+        }
+
+        if (amqPlusEnabled) {
+          console.log("[AMQ+] Start button clicked, AMQ+ enabled, checking quiz status...");
+
+          if (selectedCustomQuizName && selectedCustomQuizName.startsWith("AMQ+")) {
+            const isQuizReady = currentQuizId && quizFetchedBeforeGameStart;
+
+            if (!isQuizReady) {
+              console.log("[AMQ+] Quiz not fetched yet, preventing start. currentQuizId:", currentQuizId, "quizFetchedBeforeGameStart:", quizFetchedBeforeGameStart);
+              e.preventDefault();
+              e.stopPropagation();
+              e.stopImmediatePropagation();
+
+              messageDisplayer.displayMessage(
+                "Quiz Not Ready",
+                "Please wait for the AMQ+ quiz to be fetched before starting the game. The quiz will be automatically loaded when ready."
+              );
+              return false;
+            } else {
+              console.log("[AMQ+] Quiz already fetched and ready, allowing start");
+            }
+          }
+        }
+      });
+    }
+  }, 500);
+
+  console.log("[AMQ+] Start button click prevention setup complete");
 }
 
 function setupQuizCreatorExportButton() {
@@ -3558,6 +6745,26 @@ function extractUsernameFromProfileStats(statsRow) {
   return null;
 }
 
+function extractPlayerNameFromProfile() {
+  const profileContainer = $('.playerProfileContainer.floatingContainer:visible');
+  if (profileContainer.length === 0) {
+    return null;
+  }
+
+  // Try to find player name in common profile title locations
+  const titleElement = profileContainer.find('.ppPlayerName, .playerName, h1, h2, .title').first();
+  if (titleElement.length > 0) {
+    const name = titleElement.text().trim();
+    if (name) return name;
+  }
+
+  // Fallback: try to get from data attributes or other common patterns
+  const dataName = profileContainer.attr('data-player-name') || profileContainer.attr('data-name');
+  if (dataName) return dataName;
+
+  return null;
+}
+
 function getPlatformFromStatsName(statsName) {
   const nameLower = statsName.toLowerCase();
   if (nameLower.includes('anilist')) {
@@ -3619,32 +6826,48 @@ async function gatherPlayerLists() {
   };
 
   const ownListInfo = getOwnListInfo();
+  // Get own AMQ username for duel mode matching
+  const ownAmqUsername = typeof selfName !== 'undefined' ? selfName : null;
+
   if (ownListInfo && ownListInfo.username && ownListInfo.username.trim() !== '-' && ownListInfo.username.trim() !== '') {
     let entry = {
       id: `user-self-${Date.now()}`,
       platform: ownListInfo.platform,
       username: ownListInfo.username,
+      amqUsername: ownAmqUsername, // Store AMQ username for duel mode matching
       selectedLists: { ...defaultStatuses },
       songPercentage: null
     };
     // Apply saved settings if they exist
     entry = applyPlayerSettingsToEntry(entry);
     userEntries.push(entry);
-    console.log("[AMQ+] Added own list:", ownListInfo);
+    console.log("[AMQ+] Added own list:", ownListInfo, `AMQ username: ${ownAmqUsername}`);
   } else if (ownListInfo && ownListInfo.username === '-') {
     console.log("[AMQ+] Skipped own list - username is '-' (no list provided)");
+    sendSystemMessage(`⚠️ You have no linked anime list - your songs won't be included`);
+  } else if (ownListInfo && (!ownListInfo.username || ownListInfo.username.trim() === '')) {
+    console.log("[AMQ+] Skipped own list - username is empty or falsy");
+    sendSystemMessage(`⚠️ You have no linked anime list - your songs won't be included`);
   }
 
   const lobbyAvatarRows = $('#lobbyAvatarContainer .lobbyAvatarRow');
   console.log("[AMQ+] Found lobby avatar rows:", lobbyAvatarRows.length);
 
   const profileIcons = [];
+  const playerNames = [];
   lobbyAvatarRows.each(function () {
     const avatars = $(this).find('.lobbyAvatar:not(.isSelf)');
     avatars.each(function () {
-      const profileIcon = $(this).find('.playerCommandProfileIcon');
+      const avatar = $(this);
+      const profileIcon = avatar.find('.playerCommandProfileIcon');
       if (profileIcon.length > 0) {
+        // Try to extract player name from avatar element
+        let playerName = avatar.attr('data-player-name') ||
+          avatar.find('.playerName, .lobbyPlayerName').text().trim() ||
+          avatar.attr('title') ||
+          null;
         profileIcons.push(profileIcon[0]);
+        playerNames.push(playerName);
       }
     });
   });
@@ -3653,6 +6876,7 @@ async function gatherPlayerLists() {
 
   for (let i = 0; i < profileIcons.length; i++) {
     const icon = profileIcons[i];
+    const storedPlayerName = playerNames[i];
 
     try {
       // Close any existing profile popup first
@@ -3672,23 +6896,28 @@ async function gatherPlayerLists() {
       await new Promise(resolve => setTimeout(resolve, 600));
 
       const listInfo = readPlayerListFromProfile();
+      const playerName = storedPlayerName || extractPlayerNameFromProfile() || `Player ${i + 1}`;
+
       if (listInfo && listInfo.username && listInfo.username.trim() !== '-' && listInfo.username.trim() !== '') {
         let entry = {
           id: `user-${i}-${Date.now()}`,
           platform: listInfo.platform,
           username: listInfo.username,
+          amqUsername: playerName, // Store AMQ username for duel mode matching
           selectedLists: { ...defaultStatuses },
           songPercentage: null
         };
         // Apply saved settings if they exist
         entry = applyPlayerSettingsToEntry(entry);
         userEntries.push(entry);
-        console.log(`[AMQ+] Added player ${i + 1} list:`, listInfo);
+        console.log(`[AMQ+] Added player ${i + 1} list:`, listInfo, `AMQ username: ${playerName}`);
       } else {
         if (listInfo && listInfo.username === '-') {
           console.log(`[AMQ+] Skipped player ${i + 1} - username is "-" (no list provided)`);
-        } else {
+          sendSystemMessage(`⚠️ ${playerName} has no linked anime list - their songs won't be included`);
+        } else if (!listInfo || !listInfo.username || listInfo.username.trim() === '') {
           console.log(`[AMQ+] No list info found for player ${i + 1}`);
+          sendSystemMessage(`⚠️ ${playerName} has no linked anime list - their songs won't be included`);
         }
       }
 
@@ -4305,6 +7534,8 @@ function attachTrainingModalHandlers() {
   $("#trainingModeToggle").off("change").on("change", function () {
     isTrainingMode = $(this).is(":checked");
     console.log("[AMQ+ Training] Training mode", isTrainingMode ? "enabled" : "disabled");
+    // Update button visibility when training mode changes
+    updateUsersListsButtonVisibility();
   });
 
   // Initialize checkbox state (unchecked by default)
@@ -4405,12 +7636,12 @@ function attachTrainingModalHandlers() {
 
     // Read basic settings
     const sessionLength = parseInt($("#trainingSessionLength").val()) || 20;
-    
+
     // Read percentages (both modes)
     const newSongPercentage = parseInt($("#trainingNewPercentage").val());
     const dueSongPercentage = parseInt($("#trainingDuePercentage").val());
     const revisionSongPercentage = parseInt($("#trainingRevisionPercentage").val());
-    
+
     // Save percentages to state
     if (!isNaN(newSongPercentage)) trainingState.newSongPercentage = Math.max(0, Math.min(100, newSongPercentage));
     if (!isNaN(dueSongPercentage)) trainingState.dueSongPercentage = Math.max(0, Math.min(100, dueSongPercentage));
@@ -5125,6 +8356,13 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
               quizSavedListener.unbindListener();
 
               const newQuizId = payload.quizId;
+              const songCount = payload.quizSave?.ruleBlocks?.[0]?.blocks?.length || 0;
+
+              // Send message to chat that training quiz is ready
+              if (songCount > 0) {
+                sendSystemMessage(`✅ Training quiz ready! ${songCount} song${songCount !== 1 ? 's' : ''} loaded. Starting automatically...`);
+              }
+
               applyQuizToLobby(newQuizId, quizName);
 
               // Set up listener for quiz selection to auto-start
@@ -5545,20 +8783,6 @@ function skipTrainingRating() {
   }
 }
 
-function withTrainingLock(fn) {
-  return function () {
-    if (trainingRatingLocked) return;
-
-    trainingRatingLocked = true;
-    fn.apply(this, arguments);
-
-    // Unlock after short delay
-    setTimeout(() => {
-      trainingRatingLocked = false;
-    }, trainingRatingDelay);
-  };
-}
-
 // Setup player answer listener to capture text
 let trainingPlayerAnswerListener = new Listener("player answers", (payload) => {
   if (!isTrainingMode) return;
@@ -5682,24 +8906,24 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     // Check if double-click mode is enabled
     if (trainingState.requireDoubleClick) {
       // Use double-click for all buttons (rating and skip)
-      $(".trainingRatingBtn").off("click dblclick").on("dblclick", withTrainingLock(function () {
+      $(".trainingRatingBtn").off("click dblclick").on("dblclick", function () {
         const rating = parseInt($(this).data("rating"));
         submitTrainingRating(rating);
-      }));
+      });
 
       $(".trainingSkipBtn").off("click dblclick").on("dblclick", function () {
         skipTrainingRating();
       });
     } else {
       // Use single-click for rating buttons, double-click for skip button
-      $(".trainingRatingBtn").off("click dblclick").on("click", withTrainingLock(function () {
+      $(".trainingRatingBtn").off("click dblclick").on("click", function () {
         const rating = parseInt($(this).data("rating"));
         submitTrainingRating(rating);
-      }));
+      });
 
-      $(".trainingSkipBtn").off("click dblclick").on("dblclick", withTrainingLock(function () {
+      $(".trainingSkipBtn").off("click dblclick").on("dblclick", function () {
         skipTrainingRating();
-      }));
+      });
     }
 
     // Add hover effects
@@ -6120,5 +9344,4 @@ function importOldTrainingData() {
 }
 
 console.log("[AMQ+ Training] Training mode initialized");
-
 
