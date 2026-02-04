@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.1.1
+// @version      1.2.0
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -32,7 +32,7 @@ console.log("[AMQ+] Using API base URL:", API_BASE_URL);
 
 /**
  * Check if script should be disabled based on game mode
- * Disables script in Jam, Ranked, or Themed modes
+ * Disables script in Jam, Ranked, or Themed mode
  */
 function shouldDisableScript() {
   // Check if we're in a restricted game mode
@@ -4069,6 +4069,7 @@ function attachModalHandlers() {
     amqPlusEnabled = $(this).is(":checked");
     if (!amqPlusEnabled) {
       basicSettingsMode = false; // Disable basic mode when AMQ+ is disabled
+      autoDisableTraining("AMQ+ disabled");
     }
     saveSettings();
     updateToggleButton();
@@ -6149,6 +6150,10 @@ function setupListeners() {
     console.log("[AMQ+] Current quiz info:", currentQuizInfo);
     console.log("[AMQ+] Selected custom quiz name:", selectedCustomQuizName);
 
+    // Reset quiz fetched flag when quiz ends (allows loading new quiz for next game)
+    quizFetchedBeforeGameStart = false;
+    console.log("[AMQ+] Quiz end result, reset quiz fetched flag");
+
     // Reset duel UI when quiz ends
     if (duelModeEnabled) {
       resetDuelUI();
@@ -6194,6 +6199,9 @@ function setupListeners() {
     // Reset quiz fetched flag when quiz ends (allows re-roll for next game)
     quizFetchedBeforeGameStart = false;
     console.log("[AMQ+] Quiz over, reset quiz fetched flag");
+
+    // Defensive cleanup for training overlay
+    hideTrainingRatingUI(false);
 
     // Reset duel UI when returning to lobby
     if (duelModeEnabled) {
@@ -6310,10 +6318,6 @@ function setupListeners() {
       console.log("[AMQ+] Script disabled: Jam, Ranked, or Themed mode detected");
       return;
     }
-
-    // Reset quiz fetched flag when game starts (allows re-roll for next game)
-    quizFetchedBeforeGameStart = false;
-    console.log("[AMQ+] Game starting, reset quiz fetched flag");
 
     // Initialize duel mode if enabled
     if (duelModeEnabled) {
@@ -6536,11 +6540,25 @@ function setupListeners() {
       // Check if message is a command
       const msgLower = message.message.toLowerCase();
       if (msgLower.startsWith('/amqplus') || msgLower === '/1v1debug' || msgLower === '/1v1results') {
-        // Only process AMQ+ commands if sender is host
+        // Commands that work locally for everyone (info, sources, dist)
+        const localCommands = ['info', 'metadata', 'sources', 'distribution', 'dist'];
+        const commandParts = msgLower.split(' ');
+        const commandName = commandParts[1];
+        const isLocalCommand = localCommands.includes(commandName);
+
+        // Local commands work for everyone, even when not in lobby
+        // Always allow local commands from self, regardless of lobby state
+        if (isLocalCommand && message.sender === selfName) {
+          handleChatCommand(msgLower);
+          continue;
+        }
+
+        // Other commands require lobby and host status
         if (typeof lobby !== 'undefined' && lobby.inLobby) {
           // Get the sender's game player ID
           const senderPlayer = Object.values(quiz?.players || {}).find(p => p._name === message.sender);
-          const isHost = senderPlayer?.host || message.sender === selfName && lobby.isHost;
+          // Check if sender is host: either player object has host flag, or sender is self and lobby says we're host
+          const isHost = senderPlayer?.host === true || (message.sender === selfName && lobby.isHost === true);
 
           if (isHost) {
             handleChatCommand(msgLower);
@@ -6548,6 +6566,10 @@ function setupListeners() {
             // If self but not host, show error
             sendSystemMessage("⚠️ Only the room host can use AMQ+ commands.");
           }
+        } else if (message.sender === selfName) {
+          // If not in lobby but command is from self, try to handle it anyway
+          // This handles edge cases where lobby state might not be properly initialized
+          handleChatCommand(msgLower);
         }
       } else {
         // Handle player list commands from other players (host only)
@@ -6567,11 +6589,25 @@ function setupListeners() {
     // Check if message is a command
     const msgLower = payload.message.toLowerCase();
     if (msgLower.startsWith('/amqplus') || msgLower === '/1v1debug' || msgLower === '/1v1results') {
-      // Only process AMQ+ commands if sender is host
+      // Commands that work locally for everyone (info, sources, dist)
+      const localCommands = ['info', 'metadata', 'sources', 'distribution', 'dist'];
+      const commandParts = msgLower.split(' ');
+      const commandName = commandParts[1];
+      const isLocalCommand = localCommands.includes(commandName);
+
+      // Local commands work for everyone, even when not in lobby
+      // Always allow local commands from self, regardless of lobby state
+      if (isLocalCommand && payload.sender === selfName) {
+        handleChatCommand(msgLower);
+        return;
+      }
+
+      // Other commands require lobby and host status
       if (typeof lobby !== 'undefined' && lobby.inLobby) {
         // Get the sender's game player ID
         const senderPlayer = Object.values(quiz?.players || {}).find(p => p._name === payload.sender);
-        const isHost = senderPlayer?.host || payload.sender === selfName && lobby.isHost;
+        // Check if sender is host: either player object has host flag, or sender is self and lobby says we're host
+        const isHost = senderPlayer?.host === true || (payload.sender === selfName && lobby.isHost === true);
 
         if (isHost) {
           handleChatCommand(msgLower);
@@ -6579,6 +6615,10 @@ function setupListeners() {
           // If self but not host, show error
           sendSystemMessage("⚠️ Only the room host can use AMQ+ commands.");
         }
+      } else if (payload.sender === selfName) {
+        // If not in lobby but command is from self, try to handle it anyway
+        // This handles edge cases where lobby state might not be properly initialized
+        handleChatCommand(msgLower);
       }
     } else {
       // Handle player list commands from other players (host only)
@@ -6758,6 +6798,12 @@ function hijackStartButton() {
 
         if (buttonText !== "Start") {
           return;
+        }
+
+        // Disable script in restricted modes (Jam, Ranked, Themed)
+        if (shouldDisableScript()) {
+          console.log("[AMQ+] Script disabled: Jam, Ranked, or Themed mode detected");
+          return; // Let normal behavior proceed
         }
 
         if (isTrainingMode) {
@@ -7787,6 +7833,60 @@ function sendQuizMetadataAsMessages(quiz) {
 // Note: Pause/unpause system messages are now filtered at the source via setupGameChatFilter()
 // which overrides gameChat.systemMessage() to block these messages during training mode
 
+let lastTrainingAutoDisableAt = 0;
+let lastTrainingAutoDisableReason = null;
+
+function hideTrainingRatingUI(removeContainer = false) {
+  $("#trainingRatingSection").stop(true, true).fadeOut(100);
+  $("#trainingRatingContainer").stop(true, true).fadeOut(100, function () {
+    if (removeContainer) {
+      $(this).remove();
+    }
+  });
+}
+
+function getAnswerResultAnnSongId(result) {
+  if (!result) return null;
+  if (result.songInfo) {
+    return result.songInfo.annSongId ?? result.songInfo.annId ?? result.songInfo.songId ?? null;
+  }
+  return result.annSongId ?? result.annId ?? null;
+}
+
+function isLikelyTrainingQuiz() {
+  const description = currentQuizInfo?.description;
+  const hasTrainingDescription = typeof description === "string" && description.toLowerCase().includes("training session with");
+  const nameMatch = typeof selectedCustomQuizName === "string" &&
+    typeof trainingState.currentSession?.quizName === "string" &&
+    selectedCustomQuizName === `AMQ+ ${trainingState.currentSession.quizName}`;
+  return hasTrainingDescription || nameMatch;
+}
+
+function autoDisableTraining(reason) {
+  const hadTrainingMode = isTrainingMode;
+  const hadSession = Boolean(trainingState.currentSession?.sessionId);
+
+  isTrainingMode = false;
+  if ($("#trainingModeToggle").length > 0) {
+    $("#trainingModeToggle").prop("checked", false);
+  }
+
+  trainingState.pendingAnswer = null;
+  trainingState.lastAnswerDetails = null;
+  hideTrainingRatingUI(true);
+  updateUsersListsButtonVisibility();
+
+  const now = Date.now();
+  if ((hadTrainingMode || hadSession) && reason) {
+    const shouldNotify = lastTrainingAutoDisableReason !== reason || (now - lastTrainingAutoDisableAt) > 5000;
+    if (shouldNotify) {
+      sendSystemMessage(`⚠️ Training mode auto-disabled (${reason}).`);
+      lastTrainingAutoDisableReason = reason;
+      lastTrainingAutoDisableAt = now;
+    }
+  }
+}
+
 function attachTrainingModalHandlers() {
   // Training mode toggle checkbox handler
   $("#trainingModeToggle").off("change").on("change", function () {
@@ -8692,10 +8792,7 @@ function endTrainingSession() {
   }
 
   // Hide and remove rating UI if it exists
-  $("#trainingRatingContainer").fadeOut(300, function () {
-    $(this).remove();
-  });
-  $("#trainingRatingSection").fadeOut(300);
+  hideTrainingRatingUI(true);
 
   GM_xmlhttpRequest({
     method: "POST",
@@ -8927,29 +9024,74 @@ function updateTrainingAccuracy() {
   $("#trainingSessionProgress").text(accuracyText);
 }
 
+function getCurrentTrainingAnnSongId() {
+  if (typeof quiz === 'undefined' || !quiz.songList || !quiz.songOrder) {
+    return null;
+  }
+
+  if (!currentSongNumber || currentSongNumber <= 0) {
+    return null;
+  }
+
+  try {
+    const songIndex = quiz.songOrder[currentSongNumber];
+    if (songIndex === undefined || !quiz.songList[songIndex]) {
+      return null;
+    }
+
+    const song = quiz.songList[songIndex];
+    return song.annSongId || song.annId || null;
+  } catch (e) {
+    console.warn("[AMQ+ Training] Error resolving current annSongId:", e);
+    return null;
+  }
+}
+
+function findTrainingPlaylistIndexByAnnSongId(annSongId) {
+  if (!annSongId || !trainingState.currentSession || !trainingState.currentSession.playlist) {
+    return -1;
+  }
+
+  return trainingState.currentSession.playlist.findIndex(
+    (song) => String(song.annSongId) === String(annSongId)
+  );
+}
+
 function submitTrainingRating(rating) {
   if (!trainingState.currentSession.sessionId) return;
 
-  const currentSong = trainingState.currentSession.playlist[trainingState.currentSession.currentIndex];
-  if (!currentSong) {
-    console.warn("[AMQ+ Training] No current song found");
-    return;
+  const playlistIndex = trainingState.currentSession.currentIndex;
+  const playlistSong = trainingState.currentSession.playlist[playlistIndex];
+  const actualAnnSongId = getCurrentTrainingAnnSongId();
+  const resolvedIndex = actualAnnSongId
+    ? findTrainingPlaylistIndexByAnnSongId(actualAnnSongId)
+    : playlistIndex;
+
+  const resolvedSong = resolvedIndex >= 0
+    ? trainingState.currentSession.playlist[resolvedIndex]
+    : null;
+
+  const annSongId = actualAnnSongId || (resolvedSong ? resolvedSong.annSongId : null);
+  if (!annSongId) {
+    console.warn("[AMQ+ Training] No annSongId resolved for rating; skipping progress update");
   }
-
-  const annSongId = currentSong.annSongId; // AMQ song ID - primary identifier
-  const success = rating >= 2; // Hard, Good or Easy counts as success
-
-  console.log("[AMQ+ Training] Submitting rating:", {
-    rating: rating,
-    annSongId: annSongId,
-    success: success
-  });
 
   // Get extra answer details if available
   const answerDetails = trainingState.lastAnswerDetails || {};
   console.log("[AMQ+ Training] Answer details:", answerDetails);
   // Clear them after use so they don't leak to next song
   trainingState.lastAnswerDetails = null;
+
+  const success = answerDetails.success === true;
+  console.log("[AMQ+ Training] Answer correctness:", {
+    success: success
+  });
+
+  console.log("[AMQ+ Training] Submitting rating:", {
+    rating: rating,
+    annSongId: annSongId,
+    success: success
+  });
 
   // Update counters
   trainingState.currentSession.totalRated++; // Increment total rated count
@@ -8960,14 +9102,26 @@ function submitTrainingRating(rating) {
   }
 
   // Report to server immediately
-  reportSongProgress(annSongId, rating, success, answerDetails);
+  if (annSongId && resolvedIndex >= 0) {
+    reportSongProgress(annSongId, rating, success, answerDetails);
+  } else if (actualAnnSongId && resolvedIndex < 0) {
+    console.warn("[AMQ+ Training] Rated song not found in session playlist:", actualAnnSongId);
+  }
 
   // Update UI
   $("#trainingSessionCorrect").text(trainingState.currentSession.correctCount);
   $("#trainingSessionIncorrect").text(trainingState.currentSession.incorrectCount);
 
-  // Move to next song
-  trainingState.currentSession.currentIndex++;
+  // Move to next song based on resolved index (avoid index drift)
+  if (resolvedIndex >= 0) {
+    trainingState.currentSession.currentIndex = resolvedIndex + 1;
+  } else {
+    trainingState.currentSession.currentIndex = Math.min(
+      trainingState.currentSession.currentIndex + 1,
+      trainingState.currentSession.playlist.length
+    );
+  }
+  saveTrainingSettings();
 
   // Update accuracy display
   updateTrainingAccuracy();
@@ -8995,8 +9149,11 @@ function submitTrainingRating(rating) {
 function skipTrainingRating() {
   if (!trainingState.currentSession.sessionId) return;
 
-  const currentSong = trainingState.currentSession.playlist[trainingState.currentSession.currentIndex];
-  const songKey = currentSong.songKey;
+  const playlistIndex = trainingState.currentSession.currentIndex;
+  const currentSong = trainingState.currentSession.playlist[playlistIndex];
+  const songKey = currentSong ? currentSong.songKey : null;
+  const actualAnnSongId = getCurrentTrainingAnnSongId();
+  let removedIndex = -1;
 
   // Try to get song name from AMQ quiz data if available by matching annSongId
   let songName = "Unknown";
@@ -9014,9 +9171,28 @@ function skipTrainingRating() {
   console.log("[AMQ+ Training] Skipping rating for song:", songName || "unknown");
   console.log("[AMQ+ Training] No progress will be sent to server for this song");
 
+  // Remove skipped song from the session playlist so it can't be reported later
+  if (actualAnnSongId) {
+    removedIndex = findTrainingPlaylistIndexByAnnSongId(actualAnnSongId);
+  }
+  if (removedIndex < 0 && playlistIndex >= 0 && playlistIndex < trainingState.currentSession.playlist.length) {
+    removedIndex = playlistIndex;
+  }
+  if (removedIndex >= 0) {
+    trainingState.currentSession.playlist.splice(removedIndex, 1);
+  }
+
   // Move to next song without reporting
   // Note: totalRated is NOT incremented for skipped songs
-  trainingState.currentSession.currentIndex++;
+  if (removedIndex >= 0 && removedIndex <= trainingState.currentSession.currentIndex) {
+    trainingState.currentSession.currentIndex = Math.max(0, removedIndex);
+  } else {
+    trainingState.currentSession.currentIndex = Math.min(
+      trainingState.currentSession.currentIndex + 1,
+      trainingState.currentSession.playlist.length
+    );
+  }
+  saveTrainingSettings();
 
   // Update accuracy display (skipped songs don't affect accuracy)
   updateTrainingAccuracy();
@@ -9046,7 +9222,11 @@ let trainingPlayerAnswerListener = new Listener("player answers", (payload) => {
   if (!isTrainingMode) return;
 
   try {
-    const myPlayerId = typeof quiz !== 'undefined' ? quiz.myPlayerId : null;
+    // Find self player
+    const players = typeof quiz !== 'undefined' && quiz.players ? Object.values(quiz.players) : [];
+    const selfPlayer = players.find(p => p.isSelf);
+    const myPlayerId = selfPlayer ? selfPlayer.gamePlayerId : null;
+
     console.log("[AMQ+ Training] Player answers received, myPlayerId:", myPlayerId);
     if (myPlayerId !== null && payload.answers) {
       const myAnswer = payload.answers.find(a => a.gamePlayerId === myPlayerId);
@@ -9079,13 +9259,29 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     return;
   }
 
+  const expectedSong = trainingState.currentSession.playlist?.[trainingState.currentSession.currentIndex];
+  const expectedAnnSongId = expectedSong?.annSongId;
+  const resultAnnSongId = getAnswerResultAnnSongId(result);
+  const isTrainingContext = isLikelyTrainingQuiz() ||
+    (expectedAnnSongId && resultAnnSongId && String(expectedAnnSongId) === String(resultAnnSongId));
+
+  if (!isTrainingContext) {
+    console.log("[AMQ+ Training] Non-training quiz detected, auto-disabling training mode");
+    autoDisableTraining("non-training quiz");
+    return;
+  }
+
   console.log("[AMQ+ Training] Answer results received, showing rating UI");
 
   // Merge previously captured answer from "player answers" with result data
   try {
-    const myPlayerId = typeof quiz !== 'undefined' ? quiz.myPlayerId : null;
+    // Find self player
+    const players = typeof quiz !== 'undefined' && quiz.players ? Object.values(quiz.players) : [];
+    const selfPlayer = players.find(p => p.isSelf);
+    const myPlayerId = selfPlayer ? selfPlayer.gamePlayerId : null;
+
     let userAnswer = null;
-    let wasCorrect = false;
+    let success = false;
     let correctAnswer = null;
 
     // 1. Get user answer text (captured from "player answers" listener)
@@ -9099,7 +9295,7 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     if (myPlayerId !== null && result.players) {
       const myPlayerResult = result.players.find(p => p.gamePlayerId === myPlayerId);
       if (myPlayerResult) {
-        wasCorrect = myPlayerResult.correct;
+        success = myPlayerResult.correct === true;
       }
     }
 
@@ -9108,10 +9304,12 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
       correctAnswer = result.songInfo.animeNames ? (result.songInfo.animeNames.english || result.songInfo.animeNames.romaji) : null;
     }
 
+    console.log("[AMQ+ Training] Extracted answer details - myPlayerId:", myPlayerId, "success:", success);
+
     trainingState.lastAnswerDetails = {
       userAnswer,
       correctAnswer,
-      wasCorrect
+      success
     };
     console.log("[AMQ+ Training] Captured answer details:", trainingState.lastAnswerDetails);
 
@@ -9588,10 +9786,41 @@ function importOldTrainingData() {
         }
       }
     },
-    onerror: function () {
+    onerror: function (error) {
       if (window._importCountdownTimer) clearInterval(window._importCountdownTimer);
       $("#trainingImportBtn").prop("disabled", false).html('<i class="fa fa-upload"></i> Import');
-      showImportStatus("Connection error. Please try again.", "error");
+
+      // Log full error details to console for debugging
+      console.error("[AMQ+ Training] Import error:", error);
+
+      // Build detailed error message
+      let errorMessage = "Connection error occurred. ";
+      if (error) {
+        const errorDetails = [];
+        if (error.status) errorDetails.push(`Status: ${error.status}`);
+        if (error.statusText) errorDetails.push(`Status Text: ${error.statusText}`);
+        if (error.error) errorDetails.push(`Error: ${error.error}`);
+        if (error.responseText) {
+          try {
+            const errorData = JSON.parse(error.responseText);
+            if (errorData.error) errorDetails.push(`Server Error: ${errorData.error}`);
+          } catch (e) {
+            errorDetails.push(`Response: ${error.responseText.substring(0, 200)}`);
+          }
+        }
+
+        if (errorDetails.length > 0) {
+          errorMessage += "Details: " + errorDetails.join(" | ");
+        } else {
+          errorMessage += "Please check the browser console for more details.";
+        }
+      } else {
+        errorMessage += "Please check the browser console for more details.";
+      }
+
+      errorMessage += "\nConnection to the server was lost but your import is probably still going on the server side. Please check the training page after your ETA has passed.";
+
+      showImportStatus(errorMessage, "error");
     },
     ontimeout: function () {
       if (window._importCountdownTimer) clearInterval(window._importCountdownTimer);
