@@ -549,14 +549,14 @@ function displayRoundLeaderboard(result, correctIds, incorrectIds) {
   const finalOrder = [...correctPlayers, ...incorrectPlayers, ...noBuzzPlayers];
 
   const emojiNumbers = ["1⃣", "2⃣", "3⃣", "4⃣", "5⃣", "6⃣", "7⃣", "8⃣", "9⃣", "🔟"];
-  
+
   setTimeout(() => {
     sendLobbyMessage(`===== ROUND ${currentSongNumber} =====`);
-    
+
     finalOrder.forEach((p, i) => {
       const place = i < emojiNumbers.length ? emojiNumbers[i] : `${i + 1}.`;
       let status;
-      
+
       if (p.time === -1) {
         status = "-";
       } else if (p.incorrect) {
@@ -566,7 +566,7 @@ function displayRoundLeaderboard(result, correctIds, incorrectIds) {
       } else {
         status = "-";
       }
-      
+
       const msg = `${place} ${p.name}: ${status}`;
       setTimeout(() => sendLobbyMessage(msg), (i + 1) * 150);
     });
@@ -590,7 +590,7 @@ function quizEndBuzzerResult() {
   if (players.length === 0) return;
 
   if (typeof lobby !== "undefined" && lobby?.isHost) {
-    sendLobbyMessage("===== BUZZER MODE RESULTS =====");
+    sendLobbyMessage("=========== RESULTS ===========");
     const placeNumbers = ["🥇", "🥈", "🥉", "4.", "5.", "6.", "7.", "8.", "9.", "10."];
     for (let i = 0; i < Math.min(players.length, 10); i++) {
       sendLobbyMessage(
