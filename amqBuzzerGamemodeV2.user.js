@@ -542,34 +542,33 @@ function displayRoundLeaderboard(result, correctIds, incorrectIds) {
     incorrect: incorrectIds.includes(item.gamePlayerId)
   }));
 
-  const sorted = leaderboardData.sort((a, b) => {
-    if (a.time === -1 && b.time === -1) return 0;
-    if (a.time === -1) return 1;
-    if (b.time === -1) return -1;
-    return a.time - b.time;
-  });
+  const correctPlayers = leaderboardData.filter(p => p.correct && p.time !== -1).sort((a, b) => a.time - b.time);
+  const incorrectPlayers = leaderboardData.filter(p => p.incorrect && p.time !== -1).sort((a, b) => a.time - b.time);
+  const noBuzzPlayers = leaderboardData.filter(p => p.time === -1);
+
+  const finalOrder = [...correctPlayers, ...incorrectPlayers, ...noBuzzPlayers];
 
   const emojiNumbers = ["1⃣", "2⃣", "3⃣", "4⃣", "5⃣", "6⃣", "7⃣", "8⃣", "9⃣", "🔟"];
-
+  
   setTimeout(() => {
     sendLobbyMessage(`===== ROUND ${currentSongNumber} =====`);
-
-    sorted.forEach((p, i) => {
+    
+    finalOrder.forEach((p, i) => {
       const place = i < emojiNumbers.length ? emojiNumbers[i] : `${i + 1}.`;
       let status;
-
+      
       if (p.time === -1) {
         status = "-";
       } else if (p.incorrect) {
-        status = "❌";
+        status = `❌ (${Math.round(p.time)}ms)`;
       } else if (p.correct) {
         status = `${Math.round(p.time)}ms`;
       } else {
         status = "-";
       }
-
+      
       const msg = `${place} ${p.name}: ${status}`;
-      setTimeout(() => sendLobbyMessage(msg), i * 150);
+      setTimeout(() => sendLobbyMessage(msg), (i + 1) * 150);
     });
   }, 100);
 }
