@@ -521,6 +521,7 @@ new Listener("answer results", (result) => {
   for (const item of displayCorrectPlayers) {
     const buzzTime = parseInt(item.time, 10);
     if (item.time === -1 || isNaN(buzzTime) || buzzTime < 0) continue;
+    if (buzzTime > 5000) continue; // Too slow: no points if buzz time > 5 seconds
 
     if (!playerData[item.gamePlayerId]) continue;
     playerData[item.gamePlayerId].score += 1;
@@ -539,26 +540,30 @@ function displayRoundLeaderboard(result, correctIds, incorrectIds) {
   const leaderboardData = fastestLeaderboard.map((item) => ({
     ...item,
     correct: correctIds.includes(item.gamePlayerId),
-    incorrect: incorrectIds.includes(item.gamePlayerId)
+    incorrect: incorrectIds.includes(item.gamePlayerId),
+    tooSlow: item.time > 5000
   }));
 
-  const correctPlayers = leaderboardData.filter(p => p.correct && p.time !== -1).sort((a, b) => a.time - b.time);
-  const incorrectPlayers = leaderboardData.filter(p => p.incorrect && p.time !== -1).sort((a, b) => a.time - b.time);
+  const correctPlayers = leaderboardData.filter(p => p.correct && p.time !== -1 && !p.tooSlow).sort((a, b) => a.time - b.time);
+  const tooSlowPlayers = leaderboardData.filter(p => p.time > 5000).sort((a, b) => a.time - b.time);
+  const incorrectPlayers = leaderboardData.filter(p => p.incorrect && p.time !== -1 && !p.tooSlow).sort((a, b) => a.time - b.time);
   const noBuzzPlayers = leaderboardData.filter(p => p.time === -1);
 
-  const finalOrder = [...correctPlayers, ...incorrectPlayers, ...noBuzzPlayers];
+  const finalOrder = [...correctPlayers, ...tooSlowPlayers, ...incorrectPlayers, ...noBuzzPlayers];
 
   const emojiNumbers = ["1⃣", "2⃣", "3⃣", "4⃣", "5⃣", "6⃣", "7⃣", "8⃣", "9⃣", "🔟"];
-
+  
   setTimeout(() => {
     sendLobbyMessage(`===== ROUND ${currentSongNumber} =====`);
-
+    
     finalOrder.forEach((p, i) => {
       const place = i < emojiNumbers.length ? emojiNumbers[i] : `${i + 1}.`;
       let status;
-
+      
       if (p.time === -1) {
         status = "-";
+      } else if (p.tooSlow) {
+        status = `❌ (${Math.round(p.time)}ms - too slow)`;
       } else if (p.incorrect) {
         status = `❌ (${Math.round(p.time)}ms)`;
       } else if (p.correct) {
@@ -566,7 +571,7 @@ function displayRoundLeaderboard(result, correctIds, incorrectIds) {
       } else {
         status = "-";
       }
-
+      
       const msg = `${place} ${p.name}: ${status}`;
       setTimeout(() => sendLobbyMessage(msg), (i + 1) * 150);
     });
