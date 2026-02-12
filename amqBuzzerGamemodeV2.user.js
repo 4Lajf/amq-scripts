@@ -2,7 +2,7 @@
 // @name         AMQ Buzzer Gamemode V2
 // @namespace    http://tampermonkey.net/
 // @version      2.0
-// @description  Hit your buzzer key to mute song, type your answer. Score = correct answers (primary), total answer time in ms (secondary). Anti-cheat: unmuting after buzz = no points.
+// @description  Hit your buzzer key to mute song, type your answer. Score = placement points per round (1st=5, 2nd=3, 3rd=2, 4th=1) + speed bonus. Anti-cheat: unmuting after buzz = no points.
 // @author       4Lajf
 // @match        https://*.animemusicquiz.com/*
 // @grant        none
@@ -14,8 +14,12 @@
 - /buzzer - open configuration modal, set your buzzer key
 - /buzzerinfo - disable the info message
 - /buzzerround - toggle per-round fastest leaderboard in chat (host only)
+- /buzzertime <seconds> - set time limit for valid buzzer responses (host only, default 5)
+- /buzzeroff - disable the script completely (behaves like it was never loaded)
+- /buzzeron - re-enable the script after /buzzeroff
 - Round starts unmuted. Press buzzer key to mute, then type your answer.
 - Song unmutes on replay phase. Unmuting after buzz = cheating, no points.
+- During guessing: buzzer times are shown in other players' answer boxes. After phase ends, normal answers are shown.
 */
 
 "use strict";
@@ -23,7 +27,11 @@
 const BUZZER_STORAGE_KEY = "amqBuzzerKey";
 const BUZZER_INFO_DISMISSED_KEY = "amqBuzzerInfoDismissed";
 const BUZZER_ROUND_LEADERBOARD_KEY = "amqBuzzerRoundLeaderboard";
-const MAX_BUZZ_TIME_MS = 5000;
+const BUZZER_DISABLED_KEY = "amqBuzzerDisabled";
+const ROUND_PLACEMENT_POINTS = [5, 3, 2, 1];
+const SPEED_BONUS_FAST_MS = 500;
+const SPEED_BONUS_SLOW_MS = 1500;
+let MAX_BUZZ_TIME_MS = 5000;
 
 let songStartTime = 0;
 let songMuteTime = 0;
@@ -41,6 +49,9 @@ let scoreboardReady = false;
 let playerDataReady = false;
 let displayPlayers = [];
 let currentSongNumber = 0;
+let hasShownTimeLimitMessage = false;
+let guessPhaseActive = false;
+let hasSentBuzzerThisRound = false;
 
 let quizReadyBuzzerTracker;
 let answerResultsBuzzerTracker;
@@ -105,6 +116,22 @@ function setRoundLeaderboardEnabled(enabled) {
   }
 }
 
+function isBuzzerDisabled() {
+  try {
+    return localStorage.getItem(BUZZER_DISABLED_KEY) === "true";
+  } catch (e) {
+    return false;
+  }
+}
+
+function setBuzzerDisabled(disabled) {
+  try {
+    localStorage.setItem(BUZZER_DISABLED_KEY, disabled ? "true" : "false");
+  } catch (e) {
+    console.error("[AMQ Buzzer] Failed to save disabled state:", e);
+  }
+}
+
 function sendLobbyMessage(message) {
   if (typeof socket !== "undefined") {
     socket.sendCommand({
@@ -116,8 +143,9 @@ function sendLobbyMessage(message) {
 }
 
 function hideBuzzerChatMessages() {
+  if (isBuzzerDisabled()) return;
   $("#gcMessageContainer li, #qpChatMessageContainer li").each(function () {
-    if ($(this).text().includes("[buzzer]")) {
+    if ($(this).text().includes("[buzzer]") || $(this).text().includes("[buzzer-time]")) {
       $(this).remove();
     }
   });
@@ -210,6 +238,13 @@ function setupMuteBuzzer() {
     if (muteButton.className === "fa fa-volume-off") {
       songMuteTime = Date.now();
       buzzerFired = true;
+      if (!quiz?.isSpectator && !hasSentBuzzerThisRound) {
+        const time = songMuteTime - songStartTime;
+        if (time >= 0) {
+          sendLobbyMessage(`[buzzer] ${time.toString()}`);
+          hasSentBuzzerThisRound = true;
+        }
+      }
     } else {
       if (buzzerFired && !_weAreUnmuting) {
         userUnmutedCheat = true;
@@ -244,8 +279,25 @@ function shutdownBuzzer() {
 }
 
 function processChatCommand(payload) {
-  if (!payload?.message?.startsWith("[buzzer]")) return;
+  if (isBuzzerDisabled()) return;
+  if (!payload?.message?.startsWith("[buzzer")) return;
   if (!quiz?.players) return;
+
+  if (payload.message.startsWith("[buzzer-time]")) {
+    const message = payload.message.substring(14).trim();
+    const timeSeconds = parseFloat(message);
+    if (!isNaN(timeSeconds) && timeSeconds > 0) {
+      MAX_BUZZ_TIME_MS = Math.round(timeSeconds * 1000);
+      if (!hasShownTimeLimitMessage) {
+        sendSystemMessage(`Buzzer time limit set to ${timeSeconds} seconds.`);
+        hasShownTimeLimitMessage = true;
+      }
+    }
+    hideBuzzerChatMessages();
+    return;
+  }
+
+  if (!payload.message.startsWith("[buzzer]")) return;
 
   const message = payload.message.substring(9).trim();
   let gamePlayerId = null;
@@ -258,6 +310,8 @@ function processChatCommand(payload) {
   }
 
   if (gamePlayerId == null) return;
+
+  fastestLeaderboard = fastestLeaderboard.filter((item) => item.gamePlayerId !== gamePlayerId);
 
   if (message === "none") {
     fastestLeaderboard.push({
@@ -273,6 +327,9 @@ function processChatCommand(payload) {
         name: payload.sender,
         time
       });
+      if (guessPhaseActive && quiz?.players?.[gamePlayerId]) {
+        quiz.players[gamePlayerId].answer = `${Math.round(time)}ms`;
+      }
     }
   }
   hideBuzzerChatMessages();
@@ -367,6 +424,22 @@ function showBuzzerConfigModal() {
 
 function handleChatCommand(message) {
   const msgLower = (message || "").toLowerCase().trim();
+  if (msgLower === "/buzzeroff") {
+    setBuzzerDisabled(true);
+    shutdownBuzzer();
+    stopBuzzerChatHideInterval();
+    clearScoreboard();
+    restoreScoreboardToGame();
+    clearPlayerData();
+    sendSystemMessage("Buzzer mode disabled. Type /buzzeron to re-enable.");
+    return true;
+  }
+  if (msgLower === "/buzzeron") {
+    setBuzzerDisabled(false);
+    sendSystemMessage("Buzzer mode re-enabled.");
+    return true;
+  }
+  if (isBuzzerDisabled()) return false;
   if (msgLower === "/buzzer") {
     showBuzzerConfigModal();
     return true;
@@ -382,6 +455,22 @@ function handleChatCommand(message) {
     sendSystemMessage(`Round leaderboard (fastest per round) ${next ? "enabled" : "disabled"}. Type /buzzerround to toggle.`);
     return true;
   }
+  if (msgLower.startsWith("/buzzertime ")) {
+    if (typeof lobby === "undefined" || !lobby?.isHost) {
+      sendSystemMessage("Only the host can set the buzzer time limit.");
+      return true;
+    }
+    const timeStr = msgLower.substring(12).trim();
+    const timeSeconds = parseFloat(timeStr);
+    if (isNaN(timeSeconds) || timeSeconds <= 0) {
+      sendSystemMessage("Invalid time. Usage: /buzzertime <seconds> (e.g., /buzzertime 5)");
+      return true;
+    }
+    MAX_BUZZ_TIME_MS = Math.round(timeSeconds * 1000);
+    sendLobbyMessage(`[buzzer-time] ${timeSeconds}`);
+    sendSystemMessage(`Buzzer time limit set to ${timeSeconds} seconds and broadcasted to players.`);
+    return true;
+  }
   return false;
 }
 
@@ -392,6 +481,22 @@ function setupBuzzerSocketInterceptor() {
     if (command?.type === "lobby" && command?.command === "game chat message") {
       const msg = (command?.data?.msg || "").trim();
       const msgLower = msg.toLowerCase();
+      if (msgLower === "/buzzeroff") {
+        setBuzzerDisabled(true);
+        shutdownBuzzer();
+        stopBuzzerChatHideInterval();
+        clearScoreboard();
+        restoreScoreboardToGame();
+        clearPlayerData();
+        sendSystemMessage("Buzzer mode disabled. Type /buzzeron to re-enable.");
+        return;
+      }
+      if (msgLower === "/buzzeron") {
+        setBuzzerDisabled(false);
+        sendSystemMessage("Buzzer mode re-enabled.");
+        return;
+      }
+      if (isBuzzerDisabled()) return originalSendCommand.call(this, command);
       if (msgLower === "/buzzer") {
         showBuzzerConfigModal();
         return;
@@ -405,6 +510,22 @@ function setupBuzzerSocketInterceptor() {
         const next = !isRoundLeaderboardEnabled();
         setRoundLeaderboardEnabled(next);
         sendSystemMessage(`Round leaderboard (fastest per round) ${next ? "enabled" : "disabled"}. Type /buzzerround to toggle.`);
+        return;
+      }
+      if (msgLower.startsWith("/buzzertime ")) {
+        if (typeof lobby === "undefined" || !lobby?.isHost) {
+          sendSystemMessage("Only the host can set the buzzer time limit.");
+          return;
+        }
+        const timeStr = msgLower.substring(12).trim();
+        const timeSeconds = parseFloat(timeStr);
+        if (isNaN(timeSeconds) || timeSeconds <= 0) {
+          sendSystemMessage("Invalid time. Usage: /buzzertime <seconds> (e.g., /buzzertime 5)");
+          return;
+        }
+        MAX_BUZZ_TIME_MS = Math.round(timeSeconds * 1000);
+        sendLobbyMessage(`[buzzer-time] ${timeSeconds}`);
+        sendSystemMessage(`Buzzer time limit set to ${timeSeconds} seconds and broadcasted to players.`);
         return;
       }
     }
@@ -421,7 +542,9 @@ function showBuzzerInfoIfNeeded() {
 }
 
 new Listener("Game Starting", () => {
+  if (isBuzzerDisabled()) return;
   if (quiz?.isSpectator) return;
+  hasShownTimeLimitMessage = false;
   shutdownBuzzer();
   setupMuteBuzzer();
   setTimeout(showBuzzerInfoIfNeeded, 500);
@@ -429,6 +552,7 @@ new Listener("Game Starting", () => {
 }).bindListener();
 
 new Listener("rejoin game", (data) => {
+  if (isBuzzerDisabled()) return;
   if (quiz?.isSpectator) return;
   shutdownBuzzer();
   setupMuteBuzzer();
@@ -438,7 +562,9 @@ new Listener("rejoin game", (data) => {
 }).bindListener();
 
 new Listener("guess phase over", () => {
+  if (isBuzzerDisabled()) return;
   if (quiz?.isSpectator) return;
+  guessPhaseActive = false;
   if (muteObserver && muteButton) {
     muteObserver.disconnect();
   }
@@ -449,10 +575,13 @@ new Listener("guess phase over", () => {
 }).bindListener();
 
 new Listener("play next song", (payload) => {
+  if (isBuzzerDisabled()) return;
   buzzerFired = false;
   userUnmutedCheat = false;
+  hasSentBuzzerThisRound = false;
   fastestLeaderboard = [];
   displayPlayers = [];
+  guessPhaseActive = true;
 
   if (payload?.songNumber !== undefined) {
     currentSongNumber = payload.songNumber;
@@ -471,10 +600,22 @@ new Listener("play next song", (payload) => {
 
   songStartTime = Date.now();
   songMuteTime = 0;
+
+  // Reset to default at start of each round (host can override with /buzzertime)
+  if (typeof lobby === "undefined" || !lobby?.isHost) {
+    MAX_BUZZ_TIME_MS = 5000;
+  } else {
+    // Host broadcasts current time limit at start of round
+    const timeSeconds = MAX_BUZZ_TIME_MS / 1000;
+    sendLobbyMessage(`[buzzer-time] ${timeSeconds}`);
+  }
+  
   setTimeout(writeBuzzerToScoreboard, 300);
 }).bindListener();
 
+
 new Listener("player answers", function (data) {
+  if (isBuzzerDisabled()) return;
   if (!quiz.isSpectator) {
     if (userUnmutedCheat || buzzerFired === false || songMuteTime < 0) {
       sendLobbyMessage("[buzzer] none");
@@ -487,6 +628,7 @@ new Listener("player answers", function (data) {
 
 new Listener("Game Chat Message", (payload) => {
   if (handleChatCommand(payload.message)) return;
+  if (isBuzzerDisabled()) return;
   processChatCommand(payload);
 }).bindListener();
 
@@ -494,12 +636,14 @@ new Listener("game chat update", (payload) => {
   if (payload?.messages) {
     payload.messages.forEach((msg) => {
       if (handleChatCommand(msg?.message)) return;
+      if (isBuzzerDisabled()) return;
       processChatCommand(msg);
     });
   }
 }).bindListener();
 
 new Listener("answer results", (result) => {
+  if (isBuzzerDisabled()) return;
   if (quiz?.isSpectator) return;
 
   if (!playerDataReady) initialisePlayerData();
@@ -511,21 +655,36 @@ new Listener("answer results", (result) => {
   const correctIds = result.players.filter((p) => p.correct).map((p) => p.gamePlayerId);
   const incorrectIds = result.players.filter((p) => !p.correct).map((p) => p.gamePlayerId);
 
-  const displayCorrectPlayers = correctIds
-    .map((id) => fastestLeaderboard.find((item) => item.gamePlayerId === id))
-    .filter(Boolean);
+  const validCorrectPlayers = fastestLeaderboard
+    .filter(
+      (item) =>
+        correctIds.includes(item.gamePlayerId) &&
+        item.time !== -1 &&
+        item.time !== "none" &&
+        !isNaN(parseInt(item.time, 10)) &&
+        parseInt(item.time, 10) >= 0 &&
+        parseInt(item.time, 10) <= MAX_BUZZ_TIME_MS
+    )
+    .sort((a, b) => parseInt(a.time, 10) - parseInt(b.time, 10));
 
-  const displayIncorrectPlayers = incorrectIds
-    .map((id) => fastestLeaderboard.find((item) => item.gamePlayerId === id))
-    .filter(Boolean);
+  const roundPointsGained = {};
 
-  for (const item of displayCorrectPlayers) {
+  for (let rank = 0; rank < validCorrectPlayers.length; rank++) {
+    const item = validCorrectPlayers[rank];
     const buzzTime = parseInt(item.time, 10);
-    if (item.time === -1 || isNaN(buzzTime) || buzzTime < 0) continue;
-    if (buzzTime > MAX_BUZZ_TIME_MS) continue;
-
     if (!playerData[item.gamePlayerId]) continue;
-    playerData[item.gamePlayerId].score += 1;
+
+    const placementPoints = ROUND_PLACEMENT_POINTS[rank] ?? 1;
+    const speedBonus =
+      buzzTime <= SPEED_BONUS_FAST_MS
+        ? 1
+        : buzzTime >= SPEED_BONUS_SLOW_MS
+          ? 0
+          : 1 - (buzzTime - SPEED_BONUS_FAST_MS) / (SPEED_BONUS_SLOW_MS - SPEED_BONUS_FAST_MS);
+
+    const totalPoints = placementPoints + speedBonus;
+    roundPointsGained[item.gamePlayerId] = totalPoints;
+    playerData[item.gamePlayerId].score += totalPoints;
     playerData[item.gamePlayerId].time += buzzTime;
   }
 
@@ -533,11 +692,11 @@ new Listener("answer results", (result) => {
   setTimeout(writeBuzzerToScoreboard, 500);
 
   if (typeof lobby !== "undefined" && lobby?.isHost && isRoundLeaderboardEnabled() && fastestLeaderboard.length > 0) {
-    displayRoundLeaderboard(result, correctIds, incorrectIds);
+    displayRoundLeaderboard(result, correctIds, incorrectIds, roundPointsGained);
   }
 }).bindListener();
 
-function displayRoundLeaderboard(result, correctIds, incorrectIds) {
+function displayRoundLeaderboard(result, correctIds, incorrectIds, roundPointsGained = {}) {
   const leaderboardData = fastestLeaderboard.map((item) => ({
     ...item,
     correct: correctIds.includes(item.gamePlayerId),
@@ -570,7 +729,9 @@ function displayRoundLeaderboard(result, correctIds, incorrectIds) {
       } else if (p.incorrect || (p.correct && p.time > MAX_BUZZ_TIME_MS)) {
         status = `❌ (${Math.round(p.time)}ms)`;
       } else {
-        status = `${Math.round(p.time)}ms`;
+        const points = roundPointsGained[p.gamePlayerId];
+        const pointsStr = points !== undefined ? (Number.isInteger(points) ? points : points.toFixed(1)) : "?";
+        status = `${Math.round(p.time)}ms (+${pointsStr}pts)`;
       }
 
       const msg = `${place} ${p.name}: ${status}`;
@@ -580,6 +741,7 @@ function displayRoundLeaderboard(result, correctIds, incorrectIds) {
 }
 
 function quizEndBuzzerResult() {
+  if (isBuzzerDisabled()) return;
   const players = Object.entries(playerData)
     .filter(([, d]) => d.name)
     .map(([id, d]) => ({
@@ -599,8 +761,9 @@ function quizEndBuzzerResult() {
     sendLobbyMessage("=========== RESULTS ===========");
     const placeNumbers = ["🥇", "🥈", "🥉", "4.", "5.", "6.", "7.", "8.", "9.", "10."];
     for (let i = 0; i < Math.min(players.length, 10); i++) {
+      const scoreStr = Number.isInteger(players[i].score) ? players[i].score : players[i].score.toFixed(1);
       sendLobbyMessage(
-        `${placeNumbers[i]} ${players[i].name}: ${players[i].score} pts · ${players[i].time}ms`
+        `${placeNumbers[i]} ${players[i].name}: ${scoreStr} pts · ${players[i].time}ms`
       );
     }
     sendLobbyMessage("===============================");
@@ -617,21 +780,25 @@ new Listener("return lobby vote result", (result) => {
 }).bindListener();
 
 new Listener("quiz over", () => {
+  if (isBuzzerDisabled()) return;
   shutdownBuzzer();
   stopBuzzerChatHideInterval();
 }).bindListener();
 
 new Listener("leave game", () => {
+  if (isBuzzerDisabled()) return;
   shutdownBuzzer();
   stopBuzzerChatHideInterval();
 }).bindListener();
 
 new Listener("Spectate Game", () => {
+  if (isBuzzerDisabled()) return;
   shutdownBuzzer();
   stopBuzzerChatHideInterval();
 }).bindListener();
 
 new Listener("Host Game", () => {
+  if (isBuzzerDisabled()) return;
   shutdownBuzzer();
   stopBuzzerChatHideInterval();
 }).bindListener();
@@ -646,17 +813,12 @@ function writeBuzzerToScoreboard() {
 
       const score = data.score;
       const $scoreElement = entry.$scoreBoardEntryTextContainer?.find(".qpsPlayerScore");
-      const $secondary = (entry.$entry || entry.$scoreBoardEntryTextContainer?.closest(".qpScoreBoardEntry"))
-        ?.find(".qpsPlayerBuzzerTime");
 
       if ($scoreElement?.length) {
         if (entry._buzzerOriginalScore === undefined) {
           entry._buzzerOriginalScore = $scoreElement.text();
         }
-        $scoreElement.text(score);
-      }
-      if ($secondary?.length) {
-        $secondary.text(` · ${data.time}ms`);
+        $scoreElement.text(Number.isInteger(score) ? score : score.toFixed(1));
       }
     }
   } catch (e) {
@@ -667,6 +829,21 @@ function writeBuzzerToScoreboard() {
 function clearScoreboard() {
   $(".qpsPlayerBuzzerTime").remove();
   scoreboardReady = false;
+}
+
+function restoreScoreboardToGame() {
+  try {
+    const entries = quiz?.scoreboard?.playerEntries;
+    if (!entries) return;
+    for (const [, entry] of Object.entries(entries)) {
+      const $scoreElement = entry.$scoreBoardEntryTextContainer?.find(".qpsPlayerScore");
+      if ($scoreElement?.length && entry._buzzerOriginalScore !== undefined) {
+        $scoreElement.text(entry._buzzerOriginalScore);
+      }
+    }
+  } catch (e) {
+    console.error("[AMQ Buzzer] Error restoring scoreboard:", e);
+  }
 }
 
 function clearPlayerData() {
@@ -691,18 +868,12 @@ function initialiseScoreboard() {
   clearScoreboard();
   const entries = quiz?.scoreboard?.playerEntries;
   if (!entries) return;
-
-  for (const [, entry] of Object.entries(entries)) {
-    const $entry = entry.$entry;
-    if (!$entry?.length) continue;
-
-    const rig = $('<span class="qpsPlayerBuzzerTime"></span>');
-    $entry.find(".qpsPlayerName").before(rig);
-  }
   scoreboardReady = true;
 }
 
 quizReadyBuzzerTracker = new Listener("quiz ready", () => {
+  if (isBuzzerDisabled()) return;
+  hasShownTimeLimitMessage = false;
   clearPlayerData();
   clearScoreboard();
   answerResultsBuzzerTracker?.bindListener?.();
@@ -715,7 +886,9 @@ quizReadyBuzzerTracker = new Listener("quiz ready", () => {
 });
 
 joinLobbyListener = new Listener("Join Game", (payload) => {
+  if (isBuzzerDisabled()) return;
   if (payload?.error) return;
+  hasShownTimeLimitMessage = false;
   answerResultsBuzzerTracker?.unbindListener?.();
   clearPlayerData();
   clearScoreboard();
@@ -724,6 +897,7 @@ joinLobbyListener = new Listener("Join Game", (payload) => {
 answerResultsBuzzerTracker = new Listener("answer results", () => { });
 
 spectateLobbyListener = new Listener("Spectate Game", (payload) => {
+  if (isBuzzerDisabled()) return;
   if (payload?.error) return;
   answerResultsBuzzerTracker?.bindListener?.();
   clearPlayerData();
@@ -737,21 +911,15 @@ spectateLobbyListener?.bindListener?.();
 
 function setup() {
   setupBuzzerSocketInterceptor();
-  setupBuzzerChatObserver();
+  if (!isBuzzerDisabled()) {
+    setupBuzzerChatObserver();
+  }
 
-  AMQ_addStyle(`
-    .qpsPlayerBuzzerTime {
-      padding-right: 5px;
-      opacity: 0.7;
-      font-size: 0.9em;
-    }
-  `);
-
-  if (typeof AMQ_addScriptData === "function") {
+  if (!isBuzzerDisabled() && typeof AMQ_addScriptData === "function") {
     AMQ_addScriptData({
       name: "AMQ Buzzer Gamemode V2",
       author: "4Lajf",
-      description: `Race to recognize songs: press buzzer key to mute, type answer. Primary = correct answers; secondary = total buzz time (ms). /buzzer keybind, /buzzerinfo hide tip, /buzzerround toggle per-round leaderboard. Host posts fastest per round in chat. [buzzer] messages hidden from chat.`
+      description: `Race to recognize songs: press buzzer key to mute, type answer. Points = placement per round (1st=5, 2nd=3, 3rd=2, 4th=1) + speed bonus; tiebreak = total buzz time. /buzzer keybind, /buzzerinfo hide tip, /buzzerround toggle per-round leaderboard, /buzzeroff disable script. Host posts fastest per round in chat. [buzzer] messages hidden from chat.`
     });
   }
 }
