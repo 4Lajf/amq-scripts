@@ -8,6 +8,15 @@ A bridge script that connects AMQ (Anime Music Quiz) to [AMQ+](https://github.co
 - Train on any pool of songs using the website quiz creator and the training mode.
 
 ---
+
+### amqBuzzerGamemodeV2.js
+A competitive buzzer-style gamemode for Anime Music Quiz where players race to recognize songs first by pressing a buzzer key to mute the audio, then typing their answer.
+- **Scoring**: Points = placement per round (1st=5, 2nd=3, 3rd=2, 4th=1) + speed bonus (based on buzz time, max +1.0 for ≤500ms)
+- **Leaderboards**: Host can toggle per-round fastest leaderboard in chat; final results posted at quiz end
+- **Commands**: `/buzzer` to configure key, `/buzzerround` to toggle leaderboard, `/buzzertime <seconds>` to set time limit
+
+---
+
 ### amqBetterSongArtist.user.js (Under Rebuild)
 An improved version of [Zolhungaj]'s(https://github.com/amq-script-project) [amqSongArtist](https://github.com/amq-script-project/AMQ-Scripts/blob/master/gameplay/amqSongArtistMode.user.js)~~
 - Guess the anime song by title or aritst
@@ -27,11 +36,6 @@ A fork of [Zolhungaj]'s(https://github.com/amq-script-project) [amqPlayerAnswerT
 And decide to either send those stats to yourself only or to the entire chat. The settings for this script can be found where the usual settings are.
 ---
 
-### amqBuzzerGamemode.js
-Gameified version of Bob's [amqBuzzer](https://files.catbox.moe/lipeqk.js)
-- Every milisecond while the buzzer is not muted will add to your score. Person with the lowest score wins. Bascially a reaction speed contest instead of speed typing / shortcut memorization like quickdraw.
-
----
 ### amqTiebreakPoints.user.js
 - Awards additional tiebreak points (on the right side of your score in leaderboard) if you are the fastest one to get the answer right. This script is meant to serve as a way to tiebreak places.
 
