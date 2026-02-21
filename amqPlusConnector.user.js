@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.2.0
+// @version      1.2.1
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -100,6 +100,7 @@ let trainingState = {
   selectedQuizId: null,
   selectedQuizToken: null,
   requireDoubleClick: false, // Require double-click for rating buttons
+  isSubmittingRating: false, // Prevent double-click/multiple rapid clicks on rating buttons
   currentSession: {
     sessionId: null,
     quizId: null,
@@ -8670,6 +8671,9 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
           incorrectCount: 0,
           totalRated: 0 // Only count songs that were actually rated (not skipped)
         };
+        
+        // Reset the submission flag for the new session
+        trainingState.isSubmittingRating = false;
 
         saveTrainingSettings();
 
@@ -8780,6 +8784,9 @@ function endTrainingSession() {
   // Uncheck training mode checkbox
   $("#trainingModeToggle").prop("checked", false);
   isTrainingMode = false;
+  
+  // Reset the submission flag
+  trainingState.isSubmittingRating = false;
 
   // Restore auto skip replay state if it was previously enabled
   if (savedAutoSkipReplayState !== null && typeof options !== 'undefined' && options.$AUTO_VOTE_REPLAY) {
@@ -9059,6 +9066,13 @@ function findTrainingPlaylistIndexByAnnSongId(annSongId) {
 
 function submitTrainingRating(rating) {
   if (!trainingState.currentSession.sessionId) return;
+  
+  // Prevent double-clicking / multiple rapid clicks
+  if (trainingState.isSubmittingRating) {
+    console.log("[AMQ+ Training] Rating submission already in progress, ignoring duplicate click");
+    return;
+  }
+  trainingState.isSubmittingRating = true;
 
   const playlistIndex = trainingState.currentSession.currentIndex;
   const playlistSong = trainingState.currentSession.playlist[playlistIndex];
@@ -9138,6 +9152,11 @@ function submitTrainingRating(rating) {
   });
   console.log("[AMQ+ Training] Rating submitted, skip vote sent to advance");
 
+  // Reset the submission flag after a short delay to allow UI updates
+  setTimeout(() => {
+    trainingState.isSubmittingRating = false;
+  }, 500);
+
   // Check if session is complete
   if (trainingState.currentSession.currentIndex >= trainingState.currentSession.playlist.length) {
     setTimeout(() => {
@@ -9148,6 +9167,13 @@ function submitTrainingRating(rating) {
 
 function skipTrainingRating() {
   if (!trainingState.currentSession.sessionId) return;
+  
+  // Prevent double-clicking / multiple rapid clicks
+  if (trainingState.isSubmittingRating) {
+    console.log("[AMQ+ Training] Skip action already in progress, ignoring duplicate click");
+    return;
+  }
+  trainingState.isSubmittingRating = true;
 
   const playlistIndex = trainingState.currentSession.currentIndex;
   const currentSong = trainingState.currentSession.playlist[playlistIndex];
@@ -9208,6 +9234,11 @@ function skipTrainingRating() {
     data: { skipVote: true }
   });
   console.log("[AMQ+ Training] Rating skipped, skip vote sent to advance");
+
+  // Reset the submission flag after a short delay to allow UI updates
+  setTimeout(() => {
+    trainingState.isSubmittingRating = false;
+  }, 500);
 
   // Check if session is complete
   if (trainingState.currentSession.currentIndex >= trainingState.currentSession.playlist.length) {
@@ -9388,6 +9419,9 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
       function () { $(this).css("opacity", "1"); }
     );
   }
+
+  // Reset the submission flag for the new song
+  trainingState.isSubmittingRating = false;
 
   // Show rating buttons - skip vote will be sent when user clicks a rating
   ratingContainer.fadeIn(300);
