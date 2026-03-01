@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.2.1
+// @version      1.2.2
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -8671,7 +8671,7 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
           incorrectCount: 0,
           totalRated: 0 // Only count songs that were actually rated (not skipped)
         };
-        
+
         // Reset the submission flag for the new session
         trainingState.isSubmittingRating = false;
 
@@ -8718,33 +8718,87 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
               quizSavedListener.unbindListener();
 
               const newQuizId = payload.quizId;
-              const songCount = payload.quizSave?.ruleBlocks?.[0]?.blocks?.length || 0;
-
-              // Send message to chat that training quiz is ready
-              if (songCount > 0) {
-                sendSystemMessage(`✅ Training quiz ready! ${songCount} song${songCount !== 1 ? 's' : ''} loaded. Starting automatically...`);
-              }
 
               applyQuizToLobby(newQuizId, quizName);
 
-              // Set up listener for quiz selection to auto-start
+              // After the quiz is loaded into the game, load it back from AMQ to verify
+              // which songs AMQ actually accepted, reconcile the playlist, then start.
               const quizSelectedListener = new Listener("custom quiz selected", (selectPayload) => {
                 const selectedQuizName = selectPayload.quizName || selectPayload.data?.quizName || selectPayload.quizDescription?.name;
                 if (selectedQuizName === quizName) {
-                  console.log("[AMQ+ Training] Training quiz selected, starting game...");
+                  console.log("[AMQ+ Training] Training quiz selected, loading back to verify songs...");
                   quizSelectedListener.unbindListener();
 
-                  setTimeout(() => {
-                    console.log("[AMQ+ Training] Starting game automatically...");
-                    if (typeof lobby.fireMainButtonEvent === 'function') {
-                      lobby.fireMainButtonEvent(false);
-                    } else if (typeof startQuiz === 'function') {
-                      startQuiz();
+                  let loadQuizHandled = false;
+
+                  const startGame = (finalSongCount) => {
+                    if (finalSongCount > 0) {
+                      sendSystemMessage(`✅ Training quiz ready! ${finalSongCount} song${finalSongCount !== 1 ? 's' : ''} loaded. Starting automatically...`);
+                    }
+                    setTimeout(() => {
+                      console.log("[AMQ+ Training] Starting game automatically...");
+                      if (typeof lobby.fireMainButtonEvent === 'function') {
+                        lobby.fireMainButtonEvent(false);
+                      } else if (typeof startQuiz === 'function') {
+                        startQuiz();
+                      }
+                      sendSystemMessage(`Training quiz started: ${quizName}`);
+                    }, 500);
+                  };
+
+                  const loadQuizListener = new Listener("load custom quiz", (loadPayload) => {
+                    if (loadQuizHandled) return;
+                    const loadedId = loadPayload.quizId || loadPayload.data?.quizId;
+                    if (loadedId !== newQuizId) return;
+
+                    loadQuizHandled = true;
+                    loadQuizListener.unbindListener();
+
+                    const loadedSave = loadPayload.quizSave || loadPayload.data?.quizSave;
+                    const amqBlocks = loadedSave?.ruleBlocks?.[0]?.blocks || [];
+
+                    console.log("[AMQ+ Training] Loaded quiz back from AMQ:", amqBlocks.length, "songs");
+
+                    if (amqBlocks.length === 0) {
+                      console.error("[AMQ+ Training] AMQ returned 0 songs — aborting training session");
+                      sendSystemMessage("❌ Training aborted: AMQ accepted none of the songs. The songs may not exist in AMQ's database.");
+                      endTrainingSession();
+                      return;
                     }
 
-                    sendSystemMessage(`Training quiz started: ${quizName}`);
-                    // Keep training mode enabled during session
-                  }, 500);
+                    const { reconciledPlaylist, droppedSongs } = reconcilePlaylistWithAmq(
+                      amqBlocks,
+                      trainingState.currentSession.playlist
+                    );
+
+                    if (droppedSongs.length > 0) {
+                      console.warn("[AMQ+ Training] AMQ dropped", droppedSongs.length, "songs:",
+                        droppedSongs.map(s => `${s.songName} (${s.annSongId})`));
+                      sendSystemMessage(`⚠️ AMQ dropped ${droppedSongs.length} song${droppedSongs.length !== 1 ? 's' : ''} it doesn't have. Session adjusted to ${reconciledPlaylist.length} songs.`);
+                    }
+
+                    trainingState.currentSession.playlist = reconciledPlaylist;
+                    console.log("[AMQ+ Training] Playlist reconciled:", reconciledPlaylist.length, "songs");
+
+                    startGame(reconciledPlaylist.length);
+                  });
+                  loadQuizListener.bindListener();
+
+                  // Timeout: if AMQ doesn't respond within 5s, fall back to original playlist
+                  setTimeout(() => {
+                    if (loadQuizHandled) return;
+                    loadQuizHandled = true;
+                    loadQuizListener.unbindListener();
+                    console.warn("[AMQ+ Training] load custom quiz timed out, proceeding with original playlist");
+                    sendSystemMessage("⚠️ Could not verify quiz with AMQ (timeout). Proceeding with original playlist.");
+                    startGame(trainingState.currentSession.playlist.length);
+                  }, 5000);
+
+                  socket.sendCommand({
+                    command: "load custom quiz",
+                    type: "quizCreator",
+                    data: { quizId: newQuizId }
+                  });
                 }
               });
               quizSelectedListener.bindListener();
@@ -8784,7 +8838,7 @@ function endTrainingSession() {
   // Uncheck training mode checkbox
   $("#trainingModeToggle").prop("checked", false);
   isTrainingMode = false;
-  
+
   // Reset the submission flag
   trainingState.isSubmittingRating = false;
 
@@ -9064,9 +9118,39 @@ function findTrainingPlaylistIndexByAnnSongId(annSongId) {
   );
 }
 
+/**
+ * Reconcile the server-generated training playlist with what AMQ actually saved.
+ * AMQ may silently drop songs it doesn't have, so the loaded quiz is the source of truth.
+ * Returns the filtered playlist in AMQ's block order plus any dropped songs.
+ */
+function reconcilePlaylistWithAmq(amqBlocks, serverPlaylist) {
+  const serverMap = new Map();
+  for (const entry of serverPlaylist) {
+    serverMap.set(String(entry.annSongId), entry);
+  }
+
+  const reconciledPlaylist = [];
+  const amqAnnSongIds = new Set();
+
+  for (const block of amqBlocks) {
+    const id = String(block.annSongId);
+    amqAnnSongIds.add(id);
+    const serverEntry = serverMap.get(id);
+    if (serverEntry) {
+      reconciledPlaylist.push(serverEntry);
+    }
+  }
+
+  const droppedSongs = serverPlaylist.filter(
+    (entry) => !amqAnnSongIds.has(String(entry.annSongId))
+  );
+
+  return { reconciledPlaylist, droppedSongs };
+}
+
 function submitTrainingRating(rating) {
   if (!trainingState.currentSession.sessionId) return;
-  
+
   // Prevent double-clicking / multiple rapid clicks
   if (trainingState.isSubmittingRating) {
     console.log("[AMQ+ Training] Rating submission already in progress, ignoring duplicate click");
@@ -9167,7 +9251,7 @@ function submitTrainingRating(rating) {
 
 function skipTrainingRating() {
   if (!trainingState.currentSession.sessionId) return;
-  
+
   // Prevent double-clicking / multiple rapid clicks
   if (trainingState.isSubmittingRating) {
     console.log("[AMQ+ Training] Skip action already in progress, ignoring duplicate click");
@@ -9865,4 +9949,5 @@ function importOldTrainingData() {
 }
 
 console.log("[AMQ+ Training] Training mode initialized");
+
 
