@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.2.2
+// @version      1.2.3
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -6103,13 +6103,13 @@ function setupListeners() {
       updateExportButtonVisibility();
 
       // Try to rebuild song source map if this is an AMQ+ quiz
-      if (quizSave.name && quizSave.name.startsWith("AMQ+") && currentQuizId) {
+      // Skip during active training sessions — training manages its own playlist and
+      // re-fetching would overwrite the training subset with the full base quiz
+      if (quizSave.name && quizSave.name.startsWith("AMQ+") && currentQuizId && !trainingState.currentSession?.sessionId) {
         console.log("[AMQ+] AMQ+ quiz loaded, attempting to rebuild song source map");
-        // Fetch fresh data to get source information
         fetchQuiz(currentQuizId).then(data => {
           if (data) {
             buildSongSourceMap(data, quizSave);
-            // Display source info for all songs
             displayAllSongSources(quizSave);
           }
         }).catch(err => {
@@ -6274,14 +6274,14 @@ function setupListeners() {
 
       updateModalStatus("Quiz saved successfully - Applying to lobby...");
 
-      // Get song count for the message
-      const songCount = payload.quizSave?.ruleBlocks?.[0]?.blocks?.length || 0;
-
-      // Send message to chat that quiz is ready
-      if (songCount > 0) {
-        sendSystemMessage(`✅ Quiz ready! ${songCount} song${songCount !== 1 ? 's' : ''} loaded. Press Start to begin.`);
-      } else {
-        sendSystemMessage("✅ Quiz ready! Press Start to begin.");
+      // Send message to chat that quiz is ready (skip during training — training has its own message)
+      if (!trainingState.currentSession?.sessionId) {
+        const songCount = payload.quizSave?.ruleBlocks?.[0]?.blocks?.length || 0;
+        if (songCount > 0) {
+          sendSystemMessage(`✅ Quiz ready! ${songCount} song${songCount !== 1 ? 's' : ''} loaded. Press Start to begin.`);
+        } else {
+          sendSystemMessage("✅ Quiz ready! Press Start to begin.");
+        }
       }
 
       setTimeout(() => {
