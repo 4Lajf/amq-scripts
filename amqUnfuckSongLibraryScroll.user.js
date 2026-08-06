@@ -5,11 +5,13 @@
 // @description  Stops the Song Library list from jumping/skipping entries when an anime (or song) entry is expanded. Teaches Clusterize.js about variable row heights instead of assuming every row is the same height.
 // @author       4Lajf
 // @match        https://animemusicquiz.com/*
-// @downloadURL  https://github.com/4Lajf/amq-scripts
-// @updateURL    https://github.com/4Lajf/amq-scripts
+// @downloadURL  https://github.com/4Lajf/amq-scripts/raw/refs/heads/main/amqUnfuckSongLibraryScroll.user.js
+// @updateURL    https://github.com/4Lajf/amq-scripts/raw/refs/heads/main/amqUnfuckSongLibraryScroll.user.js
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==
+
+// slopped with Opus 5
 
 /*
  * WHY THE LIST JUMPS
