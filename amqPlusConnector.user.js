@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.2.3
+// @version      1.3.3
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -29,6 +29,39 @@ let loadInterval = setInterval(() => {
 const API_BASE_URL = "https://amqplus.moe";
 // const API_BASE_URL = "http://localhost:5173";
 console.log("[AMQ+] Using API base URL:", API_BASE_URL);
+
+/**
+ * Check if script should be disabled based on game mode
+ * Disables script in Jam, Ranked, or Themed mode
+ */
+function getConnectorVersion() {
+  try {
+    if (typeof GM_info !== "undefined" && GM_info?.script?.version) {
+      return String(GM_info.script.version);
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  return "0.0.0";
+}
+
+/** Compare dotted numeric versions (1.3.0 vs 1.3.2). Non-numeric junk is treated as 0. */
+function isConnectorVersionAtLeast(required) {
+  const parse = (v) =>
+    String(v || "0")
+      .split(".")
+      .map((part) => parseInt(part.replace(/[^0-9].*$/, ""), 10) || 0);
+  const a = parse(getConnectorVersion());
+  const b = parse(required);
+  const len = Math.max(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const left = a[i] || 0;
+    const right = b[i] || 0;
+    if (left > right) return true;
+    if (left < right) return false;
+  }
+  return true;
+}
 
 /**
  * Check if script should be disabled based on game mode
@@ -93,6 +126,7 @@ let trainingState = {
   newSongPercentage: 30,
   dueSongPercentage: 70,
   revisionSongPercentage: 0,
+  shelvedSongPercentage: 0,
   urlLoadedQuizId: null,
   urlLoadedQuizToken: null, // Store play token for URL-loaded quizzes
   urlLoadedQuizName: null,
@@ -226,6 +260,9 @@ function loadTrainingSettings() {
       if (state.revisionSongPercentage !== undefined) {
         trainingState.revisionSongPercentage = state.revisionSongPercentage;
       }
+      if (state.shelvedSongPercentage !== undefined) {
+        trainingState.shelvedSongPercentage = state.shelvedSongPercentage;
+      }
       // Load URL-loaded quiz info if saved
       if (state.urlLoadedQuizId) {
         trainingState.urlLoadedQuizId = state.urlLoadedQuizId;
@@ -270,6 +307,7 @@ function saveTrainingSettings() {
       newSongPercentage: trainingState.newSongPercentage,
       dueSongPercentage: trainingState.dueSongPercentage,
       revisionSongPercentage: trainingState.revisionSongPercentage,
+      shelvedSongPercentage: trainingState.shelvedSongPercentage,
       urlLoadedQuizId: trainingState.urlLoadedQuizId,
       urlLoadedQuizToken: trainingState.urlLoadedQuizToken,
       urlLoadedQuizName: trainingState.urlLoadedQuizName,
@@ -1479,17 +1517,31 @@ function createTrainingModalHTML() {
                             <input type="number" id="trainingRevisionPercentage" class="form-control" value="0" min="0" max="100"
                                    style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; width: 100%; font-size: 13px;">
                           </div>
+
+                          <div style="flex: 1; min-width: 140px;">
+                            <label style="display: block; margin-bottom: 4px; color: rgba(255,255,255,0.9); font-size: 12px;">
+                              <i class="fa fa-archive" style="color: #34d399;"></i> Shelved Songs %:
+                            </label>
+                            <input type="number" id="trainingShelvedPercentage" class="form-control" value="0" min="0" max="100"
+                                   style="background-color: #1a1a2e; border: 1px solid #2d3748; color: #e2e8f0; border-radius: 4px; padding: 5px 8px; width: 100%; font-size: 13px;">
+                          </div>
                         </div>
 
                         <div style="margin-top: 10px; font-size: 11px; color: rgba(255,255,255,0.6);">
                           <i class="fa fa-lightbulb"></i> Tip: These percentages are applied to the total song count.
+                          Shelved songs are ones parked by "Reset Review Dates" — set a share here to work them back in.
                         </div>
                       </div>
                     </div>
 
-                    <button id="trainingStartBtn" class="btn btn-success" style="background-color: #10b981; border-color: #10b981; padding: 8px 24px; white-space: nowrap; flex-shrink: 0;">
-                      <i class="fa fa-play"></i> Start Training
-                    </button>
+                    <div style="display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;">
+                      <button id="trainingStartBtn" class="btn btn-success" style="background-color: #10b981; border-color: #10b981; padding: 8px 24px; white-space: nowrap;">
+                        <i class="fa fa-play"></i> Start Training
+                      </button>
+                      <button id="trainingCatchUpBtn" class="btn btn-default" title="All due songs, nothing new — for digging out of a backlog" style="background-color: #2d3748; border: 1px solid #4a5568; color: #e2e8f0; padding: 6px 24px; white-space: nowrap; font-size: 12px;">
+                        <i class="fa fa-fast-forward"></i> Catch Up
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -8000,11 +8052,13 @@ function attachTrainingModalHandlers() {
     const newSongPercentage = parseInt($("#trainingNewPercentage").val());
     const dueSongPercentage = parseInt($("#trainingDuePercentage").val());
     const revisionSongPercentage = parseInt($("#trainingRevisionPercentage").val());
+    const shelvedSongPercentage = parseInt($("#trainingShelvedPercentage").val());
 
     // Save percentages to state
     if (!isNaN(newSongPercentage)) trainingState.newSongPercentage = Math.max(0, Math.min(100, newSongPercentage));
     if (!isNaN(dueSongPercentage)) trainingState.dueSongPercentage = Math.max(0, Math.min(100, dueSongPercentage));
     if (!isNaN(revisionSongPercentage)) trainingState.revisionSongPercentage = Math.max(0, Math.min(100, revisionSongPercentage));
+    if (!isNaN(shelvedSongPercentage)) trainingState.shelvedSongPercentage = Math.max(0, Math.min(100, shelvedSongPercentage));
 
     // Validate session length
     if (sessionLength < 5 || sessionLength > 100) {
@@ -8024,7 +8078,8 @@ function attachTrainingModalHandlers() {
         mode: 'manual',
         dueSongPercentage: trainingState.dueSongPercentage,
         newSongPercentage: trainingState.newSongPercentage,
-        revisionSongPercentage: trainingState.revisionSongPercentage
+        revisionSongPercentage: trainingState.revisionSongPercentage,
+        shelvedSongPercentage: trainingState.shelvedSongPercentage
       };
 
       console.log("[AMQ+ Training] Starting with manual settings:", settingsConfig);
@@ -8047,6 +8102,44 @@ function attachTrainingModalHandlers() {
     startBtn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Starting...');
 
     console.log("[AMQ+ Training] Starting session with quizToken:", selectedQuizToken, "sessionLength:", sessionLength);
+    startTrainingSession(selectedQuizToken, sessionLength, settingsConfig);
+  });
+
+  // Catch Up: 100% due, nothing new, nothing not-yet-due.
+  $("#trainingCatchUpBtn").off("click").on("click", () => {
+    let selectedQuizToken = trainingState.urlLoadedQuizToken || trainingState.selectedQuizToken;
+    if (!selectedQuizToken) {
+      const selectedCard = $("#trainingQuizList .training-quiz-card.selected");
+      selectedQuizToken = selectedCard.data("play-token");
+    }
+
+    if (!selectedQuizToken) {
+      alert("Please select a quiz to practice or load one from URL");
+      return;
+    }
+
+    const sessionLength = parseInt($("#trainingSessionLength").val()) || 20;
+
+    if (sessionLength < 5 || sessionLength > 100) {
+      alert("Session length must be between 5 and 100 songs");
+      return;
+    }
+
+    const settingsConfig = {
+      mode: 'manual',
+      dueSongPercentage: 100,
+      newSongPercentage: 0,
+      revisionSongPercentage: 0,
+      shelvedSongPercentage: 0
+    };
+
+    const catchUpBtn = $("#trainingCatchUpBtn");
+    catchUpBtn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Starting...');
+
+    const startBtn = $("#trainingStartBtn");
+    startBtn.prop("disabled", true).html('<i class="fa fa-spinner fa-spin"></i> Starting...');
+
+    console.log("[AMQ+ Training] Catch Up: starting 100% due session, length:", sessionLength);
     startTrainingSession(selectedQuizToken, sessionLength, settingsConfig);
   });
 
@@ -8100,6 +8193,20 @@ function showTrainingStatus(message, type = "info") {
   `);
 }
 
+/**
+ * Show a training error the user cannot miss.
+ * Uses AMQ's native messageDisplayer so the user always sees it.
+ */
+function showTrainingError(title, message) {
+  console.error(`[AMQ+ Training] ${title}: ${message}`);
+  if (typeof messageDisplayer !== "undefined" && messageDisplayer.displayMessage) {
+    messageDisplayer.displayMessage(title, message);
+  } else {
+    $("#amqPlusTrainingModal").modal("show");
+    showTrainingStatus(message, "error");
+  }
+}
+
 function validateTrainingToken() {
   if (!trainingState.authToken) {
     showTrainingStatus("No token found", "error");
@@ -8136,6 +8243,7 @@ function validateTrainingToken() {
         $("#trainingDuePercentage").val(trainingState.dueSongPercentage);
         $("#trainingNewPercentage").val(trainingState.newSongPercentage);
         $("#trainingRevisionPercentage").val(trainingState.revisionSongPercentage);
+        $("#trainingShelvedPercentage").val(trainingState.shelvedSongPercentage);
 
         // Restore URL quiz display if saved
         restoreUrlQuizDisplay();
@@ -8604,6 +8712,10 @@ function loadTrainingFromUrl() {
 // Store the previous auto skip replay state to restore after training
 let savedAutoSkipReplayState = null;
 
+function resetCatchUpButton() {
+  $("#trainingCatchUpBtn").prop("disabled", false).html('<i class="fa fa-fast-forward"></i> Catch Up');
+}
+
 function startTrainingSession(quizId, sessionLength, settingsConfig) {
   showTrainingStatus("Starting training session...", "info");
   // Check the training mode checkbox and update flag
@@ -8634,9 +8746,251 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
     requestData.dueSongPercentage = settingsConfig.dueSongPercentage;
     requestData.newSongPercentage = settingsConfig.newSongPercentage;
     requestData.revisionSongPercentage = settingsConfig.revisionSongPercentage;
+    requestData.shelvedSongPercentage = settingsConfig.shelvedSongPercentage || 0;
   } else {
     requestData.mode = 'auto';
     requestData.dueSongPercentage = settingsConfig.dueSongPercentage || 70;
+  }
+
+  function resetStartButtons() {
+    $("#trainingStartBtn").prop("disabled", false).html('<i class="fa fa-play"></i> Start Training');
+    $("#trainingLoadFromUrlBtn").prop("disabled", false).html('<i class="fa fa-arrow-right"></i> Load');
+    resetCatchUpButton();
+  }
+
+  function failSessionStart(errorMsg, title) {
+    $("#trainingModeToggle").prop("checked", false);
+    isTrainingMode = false;
+    resetStartButtons();
+    showTrainingStatus(errorMsg, "error");
+    showTrainingError(title || "Session Failed to Start", `The training session could not be started\nError: ${errorMsg}`);
+  }
+
+  function applyReadySession(data) {
+    if (data.minConnectorVersion && !isConnectorVersionAtLeast(data.minConnectorVersion)) {
+      const current = getConnectorVersion();
+      failSessionStart(
+        `Please update the AMQ+ connector (need ≥ ${data.minConnectorVersion}, you have ${current}).`,
+        "Training: Connector Update Required"
+      );
+      return;
+    }
+
+    console.log("[AMQ+ Training] Received playlist metadata:", data.playlist);
+
+    trainingState.currentSession = {
+      sessionId: data.sessionId,
+      quizId: quizId,
+      quizName: data.quizName,
+      playlist: data.playlist,
+      currentIndex: 0,
+      startTime: Date.now(),
+      correctCount: 0,
+      incorrectCount: 0,
+      totalRated: 0
+    };
+
+    trainingState.isSubmittingRating = false;
+    saveTrainingSettings();
+    resetStartButtons();
+
+    if (data.warnings && data.warnings.length > 0) {
+      data.warnings.forEach((warning) => sendSystemMessage("⚠️ Training: " + warning));
+    }
+
+    if (data.composition) {
+      const comp = data.composition;
+      const poolSize = data.available?.totalPoolSize || "unknown";
+      let compositionMsg = `🎵 Session: ${comp.due} already played (${comp.duePercentage}%), ${comp.new} new (${comp.newPercentage}%)`;
+      if (comp.revision > 0) {
+        compositionMsg += `, ${comp.revision} revision (${comp.revisionPercentage}%)`;
+      }
+      compositionMsg += ` | Pool size: ${poolSize}`;
+      sendSystemMessage(compositionMsg);
+    }
+
+    const quizName = data.command.data.quizSave.name;
+
+    if (!data.playlist || data.playlist.length === 0) {
+      $("#trainingModeToggle").prop("checked", false);
+      isTrainingMode = false;
+      trainingState.currentSession = null;
+      const poolInfo = data.available ? ` (pool size: ${data.available.totalPoolSize ?? 0})` : "";
+      showTrainingStatus(
+        `No songs available for this training session${poolInfo}. Try adjusting your quiz filters or rating more songs.`,
+        "error"
+      );
+      showTrainingError(
+        "Training: No Songs Available",
+        `The training session could not start because no songs were found${poolInfo}.`
+      );
+      return;
+    }
+
+    $("#amqPlusTrainingModal").modal("hide");
+    sendSystemMessage(`Creating training quiz: ${data.quizName} (${data.totalSongs} songs)...`);
+    createOrUpdateQuiz({ command: data.command });
+
+    const quizSavedListener = new Listener("save custom quiz", (payload) => {
+      if (!payload.success) {
+        quizSavedListener.unbindListener();
+        console.error("[AMQ+ Training] Quiz save failed:", payload);
+        endTrainingSession();
+        showTrainingError(
+          "Training: Quiz Save Failed",
+          "AMQ failed to save the training quiz. This is usually caused by having no free " +
+            "community quiz slots.<br><br>" +
+            "Please delete an unused quiz from your AMQ quiz list and try starting the training session again."
+        );
+        return;
+      }
+
+      const savedQuizName = payload.quizSave?.name || quizName;
+      if (savedQuizName !== quizName) return;
+
+      console.log("[AMQ+ Training] Training quiz saved, applying to lobby...");
+      quizSavedListener.unbindListener();
+      const newQuizId = payload.quizId;
+      applyQuizToLobby(newQuizId, quizName);
+
+      const quizSelectedListener = new Listener("custom quiz selected", (selectPayload) => {
+        const selectedQuizName =
+          selectPayload.quizName || selectPayload.data?.quizName || selectPayload.quizDescription?.name;
+        if (selectedQuizName !== quizName) return;
+
+        console.log("[AMQ+ Training] Training quiz selected, loading back to verify songs...");
+        quizSelectedListener.unbindListener();
+
+        let loadQuizHandled = false;
+        const startGame = (finalSongCount) => {
+          if (finalSongCount > 0) {
+            sendSystemMessage(
+              `✅ Training quiz ready! ${finalSongCount} song${finalSongCount !== 1 ? "s" : ""} loaded. Starting automatically...`
+            );
+          }
+          setTimeout(() => {
+            if (typeof lobby.fireMainButtonEvent === "function") {
+              lobby.fireMainButtonEvent(false);
+            } else if (typeof startQuiz === "function") {
+              startQuiz();
+            }
+            sendSystemMessage(`Training quiz started: ${quizName}`);
+          }, 500);
+        };
+
+        const loadQuizListener = new Listener("load custom quiz", (loadPayload) => {
+          if (loadQuizHandled) return;
+          const loadedId = loadPayload.quizId || loadPayload.data?.quizId;
+          if (loadedId !== newQuizId) return;
+
+          loadQuizHandled = true;
+          loadQuizListener.unbindListener();
+
+          const loadedSave = loadPayload.quizSave || loadPayload.data?.quizSave;
+          const amqBlocks = loadedSave?.ruleBlocks?.[0]?.blocks || [];
+
+          if (amqBlocks.length === 0) {
+            endTrainingSession();
+            showTrainingError(
+              "Training: Quiz Loaded 0 Songs",
+              "AMQ accepted none of the songs from the training quiz."
+            );
+            return;
+          }
+
+          const { reconciledPlaylist, droppedSongs } = reconcilePlaylistWithAmq(
+            amqBlocks,
+            trainingState.currentSession.playlist
+          );
+
+          if (droppedSongs.length > 0) {
+            sendSystemMessage(
+              `⚠️ AMQ dropped ${droppedSongs.length} song${droppedSongs.length !== 1 ? "s" : ""} it doesn't have. Session adjusted to ${reconciledPlaylist.length} songs.`
+            );
+          }
+
+          trainingState.currentSession.playlist = reconciledPlaylist;
+          if (reconciledPlaylist.length === 0) {
+            endTrainingSession();
+            showTrainingError(
+              "Training: No Songs Remaining",
+              "AMQ dropped all songs from the training quiz."
+            );
+            return;
+          }
+
+          startGame(reconciledPlaylist.length);
+        });
+        loadQuizListener.bindListener();
+
+        setTimeout(() => {
+          if (loadQuizHandled) return;
+          loadQuizHandled = true;
+          loadQuizListener.unbindListener();
+          sendSystemMessage("⚠️ Could not verify quiz with AMQ (timeout). Proceeding with original playlist.");
+          startGame(trainingState.currentSession.playlist.length);
+        }, 5000);
+
+        socket.sendCommand({
+          command: "load custom quiz",
+          type: "quizCreator",
+          data: { quizId: newQuizId }
+        });
+      });
+      quizSelectedListener.bindListener();
+    });
+    quizSavedListener.bindListener();
+  }
+
+  // Server returns 202 quickly and builds the playlist in the background so
+  // Cloudflare's 100s origin timeout cannot kill large-pool generation.
+  const POLL_INTERVAL_MS = 2000;
+  const POLL_TIMEOUT_MS = 10 * 60 * 1000;
+
+  function pollSessionJob(jobId, startedAt) {
+    if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+      failSessionStart(
+        "Building this training session took too long. Try a shorter session or a smaller quiz.",
+        "Training: Job Timed Out"
+      );
+      return;
+    }
+
+    GM_xmlhttpRequest({
+      method: "GET",
+      url: `${API_BASE_URL}/api/training/session/job/${encodeURIComponent(jobId)}?token=${encodeURIComponent(trainingState.authToken)}`,
+      timeout: 30000,
+      onload: function (pollResponse) {
+        let data;
+        try {
+          data = JSON.parse(pollResponse.responseText);
+        } catch (e) {
+          failSessionStart("The AMQ+ server returned an invalid job status response.", "Training: Bad Response");
+          return;
+        }
+
+        if (pollResponse.status === 200 && data.status === "ready") {
+          showTrainingStatus("Session ready — creating quiz…", "success");
+          applyReadySession(data);
+          return;
+        }
+
+        if (data.status === "pending" || pollResponse.status === 202) {
+          showTrainingStatus(data.message || "Generating session…", "info");
+          setTimeout(() => pollSessionJob(jobId, startedAt), POLL_INTERVAL_MS);
+          return;
+        }
+
+        failSessionStart(data.error || `Job failed (HTTP ${pollResponse.status})`, "Session Failed to Start");
+      },
+      ontimeout: function () {
+        // Transient poll timeout — keep trying until the overall budget expires.
+        setTimeout(() => pollSessionJob(jobId, startedAt), POLL_INTERVAL_MS);
+      },
+      onerror: function () {
+        failSessionStart("Could not reach the AMQ+ server while waiting for the session.", "Training: Connection Error");
+      }
+    });
   }
 
   GM_xmlhttpRequest({
@@ -8646,188 +9000,55 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
       "Content-Type": "application/json"
     },
     data: JSON.stringify(requestData),
+    // Accept should return in seconds; generation continues as a background job.
+    timeout: 60000,
     onload: function (response) {
-      // Reset button states
-      const startBtn = $("#trainingStartBtn");
-      startBtn.prop("disabled", false).html('<i class="fa fa-play"></i> Start Training');
-
-      const loadBtn = $("#trainingLoadFromUrlBtn");
-      loadBtn.prop("disabled", false).html('<i class="fa fa-arrow-right"></i> Load');
-
-      if (response.status === 200) {
-        const data = JSON.parse(response.responseText);
-
-        // Use playlist metadata from server (includes proper songKey format)
-        console.log("[AMQ+ Training] Received playlist metadata:", data.playlist);
-
-        trainingState.currentSession = {
-          sessionId: data.sessionId,
-          quizId: quizId,
-          quizName: data.quizName,
-          playlist: data.playlist, // Use server's playlist metadata with proper songKey format
-          currentIndex: 0,
-          startTime: Date.now(),
-          correctCount: 0,
-          incorrectCount: 0,
-          totalRated: 0 // Only count songs that were actually rated (not skipped)
-        };
-
-        // Reset the submission flag for the new session
-        trainingState.isSubmittingRating = false;
-
-        saveTrainingSettings();
-
-        // Display warnings if any
-        if (data.warnings && data.warnings.length > 0) {
-          console.log("[AMQ+ Training] Warnings from API:", data.warnings);
-          data.warnings.forEach(warning => {
-            sendSystemMessage("⚠️ Training: " + warning);
-          });
-        }
-
-        // Display composition info
-        if (data.composition) {
-          const comp = data.composition;
-          const poolSize = data.available?.totalPoolSize || 'unknown';
-          let compositionMsg = `🎵 Session: ${comp.due} already played (${comp.duePercentage}%), ${comp.new} new (${comp.newPercentage}%)`;
-          if (comp.revision > 0) {
-            compositionMsg += `, ${comp.revision} revision (${comp.revisionPercentage}%)`;
-          }
-          compositionMsg += ` | Pool size: ${poolSize}`;
-          sendSystemMessage(compositionMsg);
-        }
-
-        // Use the command object directly from the API response
-        console.log("[AMQ+ Training] Command received from server");
-        console.log("[AMQ+ Training] Full command from server:", JSON.stringify(data.command, null, 2));
-        const quizName = data.command.data.quizSave.name;
-
-        // Close modal
-        $("#amqPlusTrainingModal").modal("hide");
-        sendSystemMessage(`Creating training quiz: ${data.quizName} (${data.totalSongs} songs)...`);
-
-        // Use existing createOrUpdateQuiz function with the server-provided command
-        createOrUpdateQuiz({ command: data.command });
-
-        // Set up one-time listener for quiz save completion to apply and start training quiz
-        const quizSavedListener = new Listener("save custom quiz", (payload) => {
-          if (payload.success) {
-            const savedQuizName = payload.quizSave?.name || quizName;
-            if (savedQuizName === quizName) {
-              console.log("[AMQ+ Training] Training quiz saved, applying to lobby...");
-              quizSavedListener.unbindListener();
-
-              const newQuizId = payload.quizId;
-
-              applyQuizToLobby(newQuizId, quizName);
-
-              // After the quiz is loaded into the game, load it back from AMQ to verify
-              // which songs AMQ actually accepted, reconcile the playlist, then start.
-              const quizSelectedListener = new Listener("custom quiz selected", (selectPayload) => {
-                const selectedQuizName = selectPayload.quizName || selectPayload.data?.quizName || selectPayload.quizDescription?.name;
-                if (selectedQuizName === quizName) {
-                  console.log("[AMQ+ Training] Training quiz selected, loading back to verify songs...");
-                  quizSelectedListener.unbindListener();
-
-                  let loadQuizHandled = false;
-
-                  const startGame = (finalSongCount) => {
-                    if (finalSongCount > 0) {
-                      sendSystemMessage(`✅ Training quiz ready! ${finalSongCount} song${finalSongCount !== 1 ? 's' : ''} loaded. Starting automatically...`);
-                    }
-                    setTimeout(() => {
-                      console.log("[AMQ+ Training] Starting game automatically...");
-                      if (typeof lobby.fireMainButtonEvent === 'function') {
-                        lobby.fireMainButtonEvent(false);
-                      } else if (typeof startQuiz === 'function') {
-                        startQuiz();
-                      }
-                      sendSystemMessage(`Training quiz started: ${quizName}`);
-                    }, 500);
-                  };
-
-                  const loadQuizListener = new Listener("load custom quiz", (loadPayload) => {
-                    if (loadQuizHandled) return;
-                    const loadedId = loadPayload.quizId || loadPayload.data?.quizId;
-                    if (loadedId !== newQuizId) return;
-
-                    loadQuizHandled = true;
-                    loadQuizListener.unbindListener();
-
-                    const loadedSave = loadPayload.quizSave || loadPayload.data?.quizSave;
-                    const amqBlocks = loadedSave?.ruleBlocks?.[0]?.blocks || [];
-
-                    console.log("[AMQ+ Training] Loaded quiz back from AMQ:", amqBlocks.length, "songs");
-
-                    if (amqBlocks.length === 0) {
-                      console.error("[AMQ+ Training] AMQ returned 0 songs — aborting training session");
-                      sendSystemMessage("❌ Training aborted: AMQ accepted none of the songs. The songs may not exist in AMQ's database.");
-                      endTrainingSession();
-                      return;
-                    }
-
-                    const { reconciledPlaylist, droppedSongs } = reconcilePlaylistWithAmq(
-                      amqBlocks,
-                      trainingState.currentSession.playlist
-                    );
-
-                    if (droppedSongs.length > 0) {
-                      console.warn("[AMQ+ Training] AMQ dropped", droppedSongs.length, "songs:",
-                        droppedSongs.map(s => `${s.songName} (${s.annSongId})`));
-                      sendSystemMessage(`⚠️ AMQ dropped ${droppedSongs.length} song${droppedSongs.length !== 1 ? 's' : ''} it doesn't have. Session adjusted to ${reconciledPlaylist.length} songs.`);
-                    }
-
-                    trainingState.currentSession.playlist = reconciledPlaylist;
-                    console.log("[AMQ+ Training] Playlist reconciled:", reconciledPlaylist.length, "songs");
-
-                    startGame(reconciledPlaylist.length);
-                  });
-                  loadQuizListener.bindListener();
-
-                  // Timeout: if AMQ doesn't respond within 5s, fall back to original playlist
-                  setTimeout(() => {
-                    if (loadQuizHandled) return;
-                    loadQuizHandled = true;
-                    loadQuizListener.unbindListener();
-                    console.warn("[AMQ+ Training] load custom quiz timed out, proceeding with original playlist");
-                    sendSystemMessage("⚠️ Could not verify quiz with AMQ (timeout). Proceeding with original playlist.");
-                    startGame(trainingState.currentSession.playlist.length);
-                  }, 5000);
-
-                  socket.sendCommand({
-                    command: "load custom quiz",
-                    type: "quizCreator",
-                    data: { quizId: newQuizId }
-                  });
-                }
-              });
-              quizSelectedListener.bindListener();
-            }
-          }
-        });
-        quizSavedListener.bindListener();
-
-        console.log("[AMQ+ Training] Session started:", data);
-      } else {
-        // Uncheck training mode on error
-        $("#trainingModeToggle").prop("checked", false);
-        isTrainingMode = false; // Reset flag on error
-        const errorData = JSON.parse(response.responseText);
-        showTrainingStatus(errorData.error || "Failed to start session. Please try again.", "error");
+      let data;
+      try {
+        data = JSON.parse(response.responseText);
+      } catch (e) {
+        const isTimeout = response.status === 524 || response.status === 504 || response.status === 408;
+        failSessionStart(
+          isTimeout
+            ? "The AMQ+ server timed out accepting this session. Please try again."
+            : `The AMQ+ server returned an error (HTTP ${response.status}).`,
+          isTimeout ? "Training: Server Timed Out" : "Session Failed to Start"
+        );
+        return;
       }
+
+      if (response.status === 202 && data.jobId) {
+        if (data.minConnectorVersion && !isConnectorVersionAtLeast(data.minConnectorVersion)) {
+          failSessionStart(
+            `Please update the AMQ+ connector (need ≥ ${data.minConnectorVersion}, you have ${getConnectorVersion()}).`,
+            "Training: Connector Update Required"
+          );
+          return;
+        }
+        showTrainingStatus(data.message || "Generating session…", "info");
+        pollSessionJob(data.jobId, Date.now());
+        return;
+      }
+
+      // Back-compat: older servers still return 200 with the full session.
+      if (response.status === 200 && data.sessionId) {
+        applyReadySession(data);
+        return;
+      }
+
+      failSessionStart(data.error || `Unexpected response (HTTP ${response.status})`, "Session Failed to Start");
+    },
+    ontimeout: function () {
+      failSessionStart(
+        "The AMQ+ server did not accept the session request in time. Please try again.",
+        "Training: Request Timed Out"
+      );
     },
     onerror: function () {
-      // Uncheck training mode on error
-      $("#trainingModeToggle").prop("checked", false);
-      isTrainingMode = false; // Reset flag on error
-      // Reset button states on error
-      const startBtn = $("#trainingStartBtn");
-      startBtn.prop("disabled", false).html('<i class="fa fa-play"></i> Start Training');
-
-      const loadBtn = $("#trainingLoadFromUrlBtn");
-      loadBtn.prop("disabled", false).html('<i class="fa fa-arrow-right"></i> Load');
-
-      showTrainingStatus("Connection error. Please try again.", "error");
+      failSessionStart(
+        "Could not reach the AMQ+ server. Please check your internet connection and try again.",
+        "Training: Connection Error"
+      );
     }
   });
 }
