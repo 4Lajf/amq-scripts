@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.3.3
+// @version      1.4.2
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -89,6 +89,17 @@ function shouldDisableScript() {
 // Settings state
 let amqPlusEnabled = false; // Always start disabled on page refresh
 let songSourceMessagesEnabled = true;
+// R15 (Muenstier, Jul 5). Enabling AMQ+ also rearranges the lobby's top menu and
+// blanks out the Genres/Tags panels. Those are two different opinions bundled
+// into one switch, and some people only want the first. Default true keeps the
+// behaviour everyone already has.
+let lobbyUiOverrideEnabled = true;
+// R14. The list a `/amqplus addsong` with no target goes to, so adding a run of
+// songs to the same list is one command each rather than one command plus a
+// choice each. Persisted, because "the list I am collecting into" outlives a
+// page refresh.
+let lastUsedSongListId = null;
+let cachedUserSongLists = [];
 let liveNodeSongSelectionMode = 'default';
 let amqPlusCreditsSent = false;
 let amqQuizLikesStorage = null;
@@ -135,6 +146,11 @@ let trainingState = {
   selectedQuizToken: null,
   requireDoubleClick: false, // Require double-click for rating buttons
   isSubmittingRating: false, // Prevent double-click/multiple rapid clicks on rating buttons
+  // N10: which playlist song the rating overlay is currently about. Must be
+  // pinned from the answer-results event — live currentSongNumber / currentIndex
+  // can get ahead (rate/skip) or lag (unrated advance), which painted the next
+  // song's FSRS intervals onto the card still on screen.
+  ratingAnnSongId: null,
   currentSession: {
     sessionId: null,
     quizId: null,
@@ -206,6 +222,8 @@ function loadSettings() {
       songSourceMessagesEnabled = data.songSourceMessagesEnabled ?? true;
       liveNodeSongSelectionMode = data.liveNodeSongSelectionMode ?? 'default';
       basicSettingsMode = data.basicSettingsMode ?? false;
+      lobbyUiOverrideEnabled = data.lobbyUiOverrideEnabled ?? true;
+      lastUsedSongListId = data.lastUsedSongListId ?? null;
       console.log("[AMQ+] Settings loaded from localStorage (AMQ+ always starts disabled):", data);
     } catch (e) {
       console.error("[AMQ+] Failed to load settings:", e);
@@ -338,7 +356,9 @@ function saveSettings() {
     // Don't save enabled state - always starts disabled on page refresh
     songSourceMessagesEnabled: songSourceMessagesEnabled,
     liveNodeSongSelectionMode: liveNodeSongSelectionMode,
-    basicSettingsMode: basicSettingsMode
+    basicSettingsMode: basicSettingsMode,
+    lobbyUiOverrideEnabled: lobbyUiOverrideEnabled,
+    lastUsedSongListId: lastUsedSongListId
   }));
 }
 
@@ -551,6 +571,8 @@ function setupRoomSettingsHijackOnLobbyEnter() {
  * Replaces "Empty" text in Genres and Tags with an informational message
  */
 function updateBasicModeSettingsUI() {
+  if (!lobbyUiOverrideEnabled) return;
+
   const message = "This feature is not available in Basic Mode, switch to Advanced or turn AMQ+ off.";
   const css = {
     "opacity": "1",
@@ -600,6 +622,8 @@ function updateBasicModeSettingsUI() {
  * Applies visibility rules for Settings vs Load Quiz tabs
  */
 function renderAmqPlusHostModalView() {
+  if (!lobbyUiOverrideEnabled) return;
+
   const isAdvancedMode = amqPlusEnabled && !basicSettingsMode;
   if (!isAdvancedMode) {
     return;
@@ -728,7 +752,10 @@ function updateAdvancedModeSettingsUI() {
     return;
   }
 
-  const isAdvancedMode = amqPlusEnabled && !basicSettingsMode;
+  // R15: with the override off this falls to the `else` branch below, which is
+  // already the "put everything back" path — so opting out reuses the same
+  // restore code that turning AMQ+ off uses, rather than a second one.
+  const isAdvancedMode = amqPlusEnabled && !basicSettingsMode && lobbyUiOverrideEnabled;
   const tabContainer = $(".tabContainer.quizBuilderHidden");
   const quickTab = $("#mhQuickTab");
   const advancedTab = $("#mhAdvancedTab");
@@ -1575,21 +1602,22 @@ function createTrainingModalHTML() {
                   <div style="display: flex; gap: 10px; justify-content: center;">
                     <button class="trainingRatingBtn btn" data-rating="1" style="flex: 1; background: #dc3545; color: white; border: none; padding: 15px 10px; font-weight: bold; transition: all 0.2s;">
                       <i class="fa fa-times" style="font-size: 20px; display: block; margin-bottom: 5px;"></i>
-                      Again<br><small style="opacity: 0.9; font-size: 11px;">Forgot</small>
+                      Again<br><small class="trainingRatingInterval" data-rating="1" style="opacity: 0.9; font-size: 11px;">Forgot</small>
                     </button>
                     <button class="trainingRatingBtn btn" data-rating="2" style="flex: 1; background: #ffc107; color: white; border: none; padding: 15px 10px; font-weight: bold; transition: all 0.2s;">
                       <i class="fa fa-meh" style="font-size: 20px; display: block; margin-bottom: 5px;"></i>
-                      Hard<br><small style="opacity: 0.9; font-size: 11px;">Difficult</small>
+                      Hard<br><small class="trainingRatingInterval" data-rating="2" style="opacity: 0.9; font-size: 11px;">Difficult</small>
                     </button>
                     <button class="trainingRatingBtn btn" data-rating="3" style="flex: 1; background: #10b981; color: white; border: none; padding: 15px 10px; font-weight: bold; transition: all 0.2s;">
                       <i class="fa fa-check" style="font-size: 20px; display: block; margin-bottom: 5px;"></i>
-                      Good<br><small style="opacity: 0.9; font-size: 11px;">Recalled</small>
+                      Good<br><small class="trainingRatingInterval" data-rating="3" style="opacity: 0.9; font-size: 11px;">Recalled</small>
                     </button>
                     <button class="trainingRatingBtn btn" data-rating="4" style="flex: 1; background: #6366f1; color: white; border: none; padding: 15px 10px; font-weight: bold; transition: all 0.2s;">
                       <i class="fa fa-star" style="font-size: 20px; display: block; margin-bottom: 5px;"></i>
-                      Easy<br><small style="opacity: 0.9; font-size: 11px;">Perfect</small>
+                      Easy<br><small class="trainingRatingInterval" data-rating="4" style="opacity: 0.9; font-size: 11px;">Perfect</small>
                     </button>
                   </div>
+                  <p id="trainingCardStateModal" style="display: none; text-align: center; margin: 10px 0 0 0; color: rgba(255,255,255,0.75); font-size: 11px;"></p>
                   <p style="text-align: center; margin: 12px 0 0 0; color: rgba(255,255,255,0.8); font-size: 12px;">
                     <i class="fa fa-lightbulb"></i> Choose how well you remembered the song
                   </p>
@@ -1687,6 +1715,22 @@ function createModalHTML() {
                             </small>
                         </div>
 
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="display: flex; align-items: center; cursor: pointer;">
+                                <div class="customCheckbox" style="margin-right: 10px;">
+                                    <input type="checkbox" id="amqPlusLobbyUiToggle" ${lobbyUiOverrideEnabled ? 'checked' : ''}>
+                                    <label for="amqPlusLobbyUiToggle">
+                                        <i class="fa fa-check" aria-hidden="true"></i>
+                                    </label>
+                                </div>
+                                <span style="font-size: 14px; color: #fff;">Use the AMQ+ lobby layout</span>
+                            </label>
+                            <small style="color: rgba(255,255,255,0.6); font-size: 12px;">
+                                Moves Room Settings, adds the Load Quiz button and replaces the Genres/Tags panels.
+                                Turn this off to keep AMQ's own lobby while still using AMQ+ (<code>/amqplus lobbyui</code>).
+                            </small>
+                        </div>
+
                         <div class="form-group">
                             <label for="amqPlusUrlInput" style="color: #fff; font-weight: bold;">Enter AMQ+ Play URL:</label>
                             <input type="text" class="form-control" id="amqPlusUrlInput"
@@ -1756,6 +1800,9 @@ function createModalHTML() {
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus info</strong> - Display quiz metadata in chat</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus sources</strong> - Toggle song source messages</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus distribution</strong> (or <strong style="color: #fff;">/amqplus dist</strong>) - Toggle song distribution output</div>
+                                <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus lobbyui</strong> (or <strong style="color: #fff;">/amqplus ui</strong>) - Toggle the AMQ+ lobby layout</div>
+                                <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus lists</strong> - Show your AMQ+ song lists</div>
+                                <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus addsong [number|name]</strong> - Add the current song to a song list</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/amqplus [url]</strong> - Fetch quiz from URL</div>
                                 <div style="margin-top: 10px; margin-bottom: 6px; color: #10b981; font-weight: bold;">Player List Commands (Live Node):</div>
                                 <div style="margin-bottom: 6px; color: #e2e8f0;"><strong style="color: #fff;">/add [status...]</strong> - Add list statuses</div>
@@ -3682,7 +3729,58 @@ function checkAndWarnUserLists() {
  * Hijack Room Settings button to show Users' Lists/Load Quiz button and force Standard Quiz view
  * Button text changes based on mode: "Load Quiz" in Advanced mode, "Users' Lists" in Basic mode
  */
+/**
+ * Bring the lobby in line with the current override preference, either way.
+ * Safe to call when not in a lobby — every step is a no-op without the elements.
+ */
+function applyLobbyUiOverridePreference() {
+  if (lobbyUiOverrideEnabled) {
+    if (amqPlusEnabled && typeof lobby !== "undefined" && lobby.inLobby && !shouldDisableScript()) {
+      hijackRoomSettings();
+    }
+  } else {
+    restoreLobbyUi();
+  }
+  updateAdvancedModeSettingsUI();
+}
+
+/**
+ * Put the lobby's top menu and settings panels back the way AMQ left them.
+ *
+ * Called when the lobby UI override is switched off, so turning it off is
+ * visibly a return to vanilla rather than "the buttons stay where AMQ+ moved
+ * them until you reload".
+ */
+function restoreLobbyUi() {
+  $("#amqPlusUsersListsBtn").remove();
+  $("#amqPlusAdvancedModeInfo").remove();
+
+  const settingsContainer = $("#lnSettingsButtonContainer");
+  if (settingsContainer.length > 0) {
+    settingsContainer.css({ position: "", right: "", top: "", "z-index": "" });
+    settingsContainer.find(".clickAble").off("click.amqPlus");
+  }
+
+  // updateBasicModeSettingsUI stashed the original copy on the element itself.
+  for (const selector of ["#mhGenreFilter .filterEmptyText", "#mhTagFilter .filterEmptyText"]) {
+    const el = $(selector);
+    if (!el.length || !el.data("amq-plus-modified")) continue;
+    el.text(el.data("original-text") || "Empty");
+    el.css({ opacity: "", color: "", "font-size": "", "text-align": "", padding: "" });
+    el.removeData("amq-plus-modified");
+  }
+
+  roomSettingsHijacked = false;
+  console.log("[AMQ+] Lobby UI restored to vanilla");
+}
+
 function hijackRoomSettings() {
+  // R15: opt out of the lobby rearrangement without giving up AMQ+ itself.
+  if (!lobbyUiOverrideEnabled) {
+    console.log("[AMQ+] Lobby UI override disabled, leaving the lobby alone");
+    return;
+  }
+
   console.log("[AMQ+] Setting up Room Settings and Users' Lists/Load Quiz buttons...");
 
   // Move Room Settings button to the far right
@@ -4141,8 +4239,22 @@ function attachModalHandlers() {
     }
   });
 
+  // R15: the lobby layout is a separate opinion from AMQ+ itself, so this
+  // toggle stands alone and takes effect without leaving the modal.
+  $("#amqPlusLobbyUiToggle").off("change").change(function () {
+    lobbyUiOverrideEnabled = $(this).is(":checked");
+    saveSettings();
+    applyLobbyUiOverridePreference();
+    sendSystemMessage(
+      lobbyUiOverrideEnabled
+        ? "AMQ+ lobby layout enabled."
+        : "AMQ+ lobby layout disabled — AMQ's own lobby is back. AMQ+ itself is still on."
+    );
+  });
+
   $("#amqPlusModal").off("show.bs.modal").on("show.bs.modal", function () {
     $("#amqPlusEnableToggle").prop("checked", amqPlusEnabled);
+    $("#amqPlusLobbyUiToggle").prop("checked", lobbyUiOverrideEnabled);
     $("#amqPlusSongSelectionMode").val(liveNodeSongSelectionMode);
     if (!isWaitingForQuizList && !pendingQuizData) {
       updateModalStatus(null);
@@ -4229,6 +4341,8 @@ function updateToggleButton() {
  * Update Users' Lists button visibility and text based on AMQ+ enabled state and mode
  */
 function updateUsersListsButtonVisibility() {
+  if (!lobbyUiOverrideEnabled) return;
+
   const usersListsBtn = $("#amqPlusUsersListsBtn");
   if (usersListsBtn.length > 0) {
     if (amqPlusEnabled && !isTrainingMode) {
@@ -6124,6 +6238,22 @@ function handleChatCommand(msg) {
     songSourceMessagesEnabled = !songSourceMessagesEnabled;
     saveSettings();
     sendSystemMessage("Song source messages " + (songSourceMessagesEnabled ? "enabled" : "disabled"));
+  } else if (parts[1] === "lobbyui" || parts[1] === "ui") {
+    console.log("[AMQ+] Lobby UI override command received");
+    lobbyUiOverrideEnabled = !lobbyUiOverrideEnabled;
+    saveSettings();
+    applyLobbyUiOverridePreference();
+    sendSystemMessage(
+      lobbyUiOverrideEnabled
+        ? "AMQ+ lobby UI enabled — Room Settings moves and the Load Quiz button is back."
+        : "AMQ+ lobby UI disabled — the lobby stays vanilla. AMQ+ itself is still on."
+    );
+  } else if (parts[1] === "addsong") {
+    console.log("[AMQ+] Add song to list command received");
+    handleAddSongToListCommand(parts.slice(2).join(" ").trim());
+  } else if (parts[1] === "lists") {
+    console.log("[AMQ+] Song lists command received");
+    fetchUserSongLists({ announce: true });
   } else if (parts[1] === "distribution" || parts[1] === "dist") {
     console.log("[AMQ+] Distribution command received");
     distributionOutputEnabled = !distributionOutputEnabled;
@@ -7890,6 +8020,7 @@ let lastTrainingAutoDisableAt = 0;
 let lastTrainingAutoDisableReason = null;
 
 function hideTrainingRatingUI(removeContainer = false) {
+  trainingState.ratingAnnSongId = null;
   $("#trainingRatingSection").stop(true, true).fadeOut(100);
   $("#trainingRatingContainer").stop(true, true).fadeOut(100, function () {
     if (removeContainer) {
@@ -8737,7 +8868,10 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
   const requestData = {
     token: trainingState.authToken,
     quizId: quizId,
-    sessionLength: sessionLength
+    sessionLength: sessionLength,
+    // Lets the server tell "still broken" apart from "hasn't updated", and
+    // reject a stale script with a real message before it wastes a generation.
+    connectorVersion: getConnectorVersion()
   };
 
   // Add configuration based on mode
@@ -8946,8 +9080,11 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
   // Cloudflare's 100s origin timeout cannot kill large-pool generation.
   const POLL_INTERVAL_MS = 2000;
   const POLL_TIMEOUT_MS = 10 * 60 * 1000;
+  // A dropped poll is not a dead session — generation keeps running server-side.
+  // Only give up after this many consecutive failures.
+  const POLL_MAX_CONSECUTIVE_FAILURES = 5;
 
-  function pollSessionJob(jobId, startedAt) {
+  function pollSessionJob(jobId, startedAt, consecutiveFailures = 0) {
     if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
       failSessionStart(
         "Building this training session took too long. Try a shorter session or a smaller quiz.",
@@ -8956,16 +9093,42 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
       return;
     }
 
+    // Retry a transient poll failure rather than killing a session that is
+    // still being built. Backs off so a real outage does not spin at 2s.
+    const retryAfterFailure = (reason) => {
+      const failures = consecutiveFailures + 1;
+
+      if (failures >= POLL_MAX_CONSECUTIVE_FAILURES) {
+        failSessionStart(
+          "Could not reach the AMQ+ server while waiting for the session. Please check your connection and try again.",
+          "Training: Connection Error"
+        );
+        return;
+      }
+
+      const delay = POLL_INTERVAL_MS * Math.pow(2, failures - 1);
+      console.warn(`[AMQ+ Training] Poll failed (${reason}), retry ${failures}/${POLL_MAX_CONSECUTIVE_FAILURES} in ${delay}ms`);
+      showTrainingStatus("Lost contact with the server, retrying…", "info");
+      setTimeout(() => pollSessionJob(jobId, startedAt, failures), delay);
+    };
+
     GM_xmlhttpRequest({
       method: "GET",
-      url: `${API_BASE_URL}/api/training/session/job/${encodeURIComponent(jobId)}?token=${encodeURIComponent(trainingState.authToken)}`,
+      url: `${API_BASE_URL}/api/training/session/job/${encodeURIComponent(jobId)}`,
+      // Token goes in a header, never the query string: this endpoint is polled
+      // every 2s for up to 10 minutes and a `?token=` would land in every
+      // access log along the way.
+      headers: {
+        "X-Training-Token": trainingState.authToken
+      },
       timeout: 30000,
       onload: function (pollResponse) {
         let data;
         try {
           data = JSON.parse(pollResponse.responseText);
         } catch (e) {
-          failSessionStart("The AMQ+ server returned an invalid job status response.", "Training: Bad Response");
+          // A proxy error page rather than our JSON — treat as transient.
+          retryAfterFailure(`unparseable HTTP ${pollResponse.status}`);
           return;
         }
 
@@ -8977,18 +9140,23 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
 
         if (data.status === "pending" || pollResponse.status === 202) {
           showTrainingStatus(data.message || "Generating session…", "info");
-          setTimeout(() => pollSessionJob(jobId, startedAt), POLL_INTERVAL_MS);
+          setTimeout(() => pollSessionJob(jobId, startedAt, 0), POLL_INTERVAL_MS);
+          return;
+        }
+
+        // 5xx is the server having a bad moment; the job may still be fine.
+        if (pollResponse.status >= 500 && data.status !== "error") {
+          retryAfterFailure(`HTTP ${pollResponse.status}`);
           return;
         }
 
         failSessionStart(data.error || `Job failed (HTTP ${pollResponse.status})`, "Session Failed to Start");
       },
       ontimeout: function () {
-        // Transient poll timeout — keep trying until the overall budget expires.
-        setTimeout(() => pollSessionJob(jobId, startedAt), POLL_INTERVAL_MS);
+        retryAfterFailure("timeout");
       },
       onerror: function () {
-        failSessionStart("Could not reach the AMQ+ server while waiting for the session.", "Training: Connection Error");
+        retryAfterFailure("network error");
       }
     });
   }
@@ -9381,7 +9549,8 @@ function submitTrainingRating(rating) {
 
   const playlistIndex = trainingState.currentSession.currentIndex;
   const playlistSong = trainingState.currentSession.playlist[playlistIndex];
-  const actualAnnSongId = getCurrentTrainingAnnSongId();
+  const pinnedAnnSongId = trainingState.ratingAnnSongId;
+  const actualAnnSongId = pinnedAnnSongId || getCurrentTrainingAnnSongId();
   const resolvedIndex = actualAnnSongId
     ? findTrainingPlaylistIndexByAnnSongId(actualAnnSongId)
     : playlistIndex;
@@ -9446,6 +9615,7 @@ function submitTrainingRating(rating) {
   updateTrainingAccuracy();
 
   // Hide rating section (both modal and video container versions)
+  trainingState.ratingAnnSongId = null;
   $("#trainingRatingSection").fadeOut(300);
   $("#trainingRatingContainer").fadeOut(300);
 
@@ -9483,7 +9653,7 @@ function skipTrainingRating() {
   const playlistIndex = trainingState.currentSession.currentIndex;
   const currentSong = trainingState.currentSession.playlist[playlistIndex];
   const songKey = currentSong ? currentSong.songKey : null;
-  const actualAnnSongId = getCurrentTrainingAnnSongId();
+  const actualAnnSongId = trainingState.ratingAnnSongId || getCurrentTrainingAnnSongId();
   let removedIndex = -1;
 
   // Try to get song name from AMQ quiz data if available by matching annSongId
@@ -9529,6 +9699,7 @@ function skipTrainingRating() {
   updateTrainingAccuracy();
 
   // Hide rating section (both modal and video container versions)
+  trainingState.ratingAnnSongId = null;
   $("#trainingRatingSection").fadeOut(300);
   $("#trainingRatingContainer").fadeOut(300);
 
@@ -9607,6 +9778,12 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     return;
   }
 
+  // N10: pin the rating card to the song that produced these answer results,
+  // before anything else advances currentSongNumber / currentIndex.
+  trainingState.ratingAnnSongId = resultAnnSongId
+    ? String(resultAnnSongId)
+    : (expectedAnnSongId ? String(expectedAnnSongId) : null);
+
   console.log("[AMQ+ Training] Answer results received, showing rating UI");
 
   // Merge previously captured answer from "player answers" with result data
@@ -9667,27 +9844,38 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
   if (ratingContainer.length === 0) {
     const ratingHTML = `
       <div id="trainingRatingContainer" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1000; display: none; pointer-events: auto;">
-        <div style="display: flex; gap: 8px; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.7); padding: 12px 16px; border-radius: 8px; backdrop-filter: blur(4px);">
+        <div style="background: rgba(0, 0, 0, 0.7); padding: 12px 16px; border-radius: 8px; backdrop-filter: blur(4px);">
+        <div id="trainingCardStateInGame" style="display: none; text-align: center; color: rgba(255,255,255,0.75); font-size: 10px; margin-bottom: 6px;"></div>
+        <div style="display: flex; gap: 8px; justify-content: center; align-items: center;">
           <button class="trainingRatingBtn btn" data-rating="1" style="min-width: 60px; padding: 8px 12px; background: #dc3545; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-times" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Again
+            <span class="trainingRatingInterval" data-rating="1" style="display: block; font-size: 10px; font-weight: 400; opacity: 0.85; margin-top: 2px;"></span>
           </button>
           <button class="trainingRatingBtn btn" data-rating="2" style="min-width: 60px; padding: 8px 12px; background: #ffc107; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-exclamation-triangle" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Hard
+            <span class="trainingRatingInterval" data-rating="2" style="display: block; font-size: 10px; font-weight: 400; opacity: 0.85; margin-top: 2px;"></span>
           </button>
           <button class="trainingRatingBtn btn" data-rating="3" style="min-width: 60px; padding: 8px 12px; background: #10b981; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-check" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Good
+            <span class="trainingRatingInterval" data-rating="3" style="display: block; font-size: 10px; font-weight: 400; opacity: 0.85; margin-top: 2px;"></span>
           </button>
           <button class="trainingRatingBtn btn" data-rating="4" style="min-width: 60px; padding: 8px 12px; background: #6366f1; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-star" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Easy
+            <span class="trainingRatingInterval" data-rating="4" style="display: block; font-size: 10px; font-weight: 400; opacity: 0.85; margin-top: 2px;"></span>
           </button>
           <button class="trainingSkipBtn btn" data-skip="true" style="min-width: 50px; padding: 8px 12px; background: #6c757d; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s; margin-left: 4px;">
             <i class="fa fa-forward" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Skip
           </button>
+          <button class="trainingAddToListBtn btn" data-add-to-list="true" title="Add this song to your last-used AMQ+ song list (/amqplus addsong)" style="min-width: 50px; padding: 8px 12px; background: #0ea5e9; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s; margin-left: 4px;">
+            <i class="fa fa-plus" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
+            List
+          </button>
+        </div>
         </div>
       </div>
     `;
@@ -9718,8 +9906,15 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
       });
     }
 
+    // R14: the same action as /amqplus addsong, without leaving the video.
+    // Not double-click gated: appending is additive and the server dedupes, so a
+    // stray click is an idempotent no-op rather than a lost rating.
+    $(".trainingAddToListBtn").off("click").on("click", function () {
+      handleAddSongToListCommand("");
+    });
+
     // Add hover effects
-    $(".trainingRatingBtn, .trainingSkipBtn").hover(
+    $(".trainingRatingBtn, .trainingSkipBtn, .trainingAddToListBtn").hover(
       function () { $(this).css("opacity", "0.8"); },
       function () { $(this).css("opacity", "1"); }
     );
@@ -9728,10 +9923,243 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
   // Reset the submission flag for the new song
   trainingState.isSubmittingRating = false;
 
+  // R13: label the buttons with what each one actually schedules.
+  updateTrainingRatingPreview();
+
   // Show rating buttons - skip vote will be sent when user clicks a rating
   ratingContainer.fadeIn(300);
   console.log("[AMQ+ Training] Rating buttons shown, waiting for user input");
 });
+
+// ============================================================================
+// R14: add the song that just played to an AMQ+ song list, from in-game
+//
+// 3shine and 4lajf both scoped this on Mar 5 2026 and it was never built. The
+// server does the read-modify-write against Pixeldrain; this side only has to
+// know which song is on screen and which list the user meant.
+// ============================================================================
+
+/**
+ * Fetch (and cache) the user's song lists.
+ *
+ * @param {{ announce?: boolean, then?: (lists: any[]) => void }} [opts]
+ */
+function fetchUserSongLists(opts = {}) {
+  const { announce = false, then = null } = opts;
+
+  if (!trainingState.authToken) {
+    sendSystemMessage("⚠️ Link your AMQ+ account first (Training tab) to use song lists.");
+    return;
+  }
+
+  makeApiRequest({
+    url: `${API_BASE_URL}/api/training/song-lists`,
+    method: 'POST',
+    data: { token: trainingState.authToken },
+    errorPrefix: 'Song Lists',
+    onSuccess: (data) => {
+      cachedUserSongLists = data.lists || [];
+
+      if (announce) {
+        if (cachedUserSongLists.length === 0) {
+          sendSystemMessage("You have no AMQ+ song lists yet. Create one on the website first.");
+        } else {
+          sendSystemMessage("Your song lists (use /amqplus addsong <number>):");
+          cachedUserSongLists.forEach((list, i) => {
+            const marker = list.id === lastUsedSongListId ? " ←" : "";
+            sendSystemMessage(`  ${i + 1}. ${list.name} (${list.song_count || 0} songs)${marker}`);
+          });
+        }
+      }
+
+      if (then) then(cachedUserSongLists);
+    },
+    onError: (msg) => {
+      sendSystemMessage(`⚠️ Could not load your song lists: ${msg}`);
+    }
+  });
+}
+
+/**
+ * Pick a list from what the user typed: a 1-based number as shown by
+ * `/amqplus lists`, or any unambiguous part of the name.
+ *
+ * @param {string} target
+ * @param {any[]} lists
+ * @returns {{ list: any } | { error: string }}
+ */
+function resolveSongListTarget(target, lists) {
+  if (!lists || lists.length === 0) {
+    return { error: "You have no AMQ+ song lists yet. Create one on the website first." };
+  }
+
+  if (!target) {
+    const remembered = lists.find((l) => l.id === lastUsedSongListId);
+    if (remembered) return { list: remembered };
+    return {
+      error: "Which list? Run /amqplus lists to see them, then /amqplus addsong <number>."
+    };
+  }
+
+  if (/^\d+$/.test(target)) {
+    const index = parseInt(target, 10) - 1;
+    if (index < 0 || index >= lists.length) {
+      return { error: `There is no list ${target}. You have ${lists.length}.` };
+    }
+    return { list: lists[index] };
+  }
+
+  const needle = target.toLowerCase();
+  const matches = lists.filter((l) => (l.name || "").toLowerCase().includes(needle));
+  if (matches.length === 0) return { error: `No song list matches "${target}".` };
+  if (matches.length > 1) {
+    return {
+      error: `"${target}" matches ${matches.length} lists (${matches.map((m) => m.name).join(", ")}). Be more specific, or use the number.`
+    };
+  }
+  return { list: matches[0] };
+}
+
+/**
+ * `/amqplus addsong [number|name]`
+ * @param {string} target
+ */
+function handleAddSongToListCommand(target) {
+  if (!trainingState.authToken) {
+    sendSystemMessage("⚠️ Link your AMQ+ account first (Training tab) to use song lists.");
+    return;
+  }
+
+  const annSongId = trainingState.ratingAnnSongId || getCurrentTrainingAnnSongId();
+  if (!annSongId) {
+    sendSystemMessage("⚠️ No song to add — wait until a song has played, then try again.");
+    return;
+  }
+
+  // The list set changes rarely, so use the cache when we have one and only pay
+  // for a fetch on the first call of a session.
+  if (cachedUserSongLists.length > 0) {
+    addSongToResolvedList(target, annSongId, cachedUserSongLists);
+  } else {
+    fetchUserSongLists({ then: (lists) => addSongToResolvedList(target, annSongId, lists) });
+  }
+}
+
+/**
+ * @param {string} target
+ * @param {number} annSongId
+ * @param {any[]} lists
+ */
+function addSongToResolvedList(target, annSongId, lists) {
+  const resolved = resolveSongListTarget(target, lists);
+  if (resolved.error) {
+    sendSystemMessage(`⚠️ ${resolved.error}`);
+    return;
+  }
+
+  const list = resolved.list;
+  sendSystemMessage(`Adding to "${list.name}"…`);
+
+  makeApiRequest({
+    url: `${API_BASE_URL}/api/training/song-lists/append`,
+    method: 'POST',
+    data: { token: trainingState.authToken, listId: list.id, annSongId },
+    errorPrefix: 'Add Song To List',
+    onSuccess: (data) => {
+      lastUsedSongListId = list.id;
+      saveSettings();
+
+      // Keep the cached count honest so the next /amqplus lists is not stale.
+      const cached = cachedUserSongLists.find((l) => l.id === list.id);
+      if (cached && typeof data.songCount === "number") cached.song_count = data.songCount;
+
+      sendSystemMessage(data.message || `Added to ${list.name}.`);
+    },
+    onError: (msg) => {
+      sendSystemMessage(`⚠️ Could not add the song: ${msg}`);
+    }
+  });
+}
+
+/**
+ * Put the projected next interval on each rating button, and the card's current
+ * FSRS numbers above them.
+ *
+ * R13, TriusHalf Jul 25. Before this the four buttons were unlabelled bets: the
+ * Jul 2 thread is four people reverse-engineering FSRS from screenshots, and one
+ * of them deleted a quiz over it. The server sends `fsrsPreview` with every
+ * playlist entry, so this is display only — no scheduling logic lives here, and
+ * the numbers cannot disagree with what the rating actually does.
+ */
+function updateTrainingRatingPreview() {
+  const intervalSlots = $(".trainingRatingInterval");
+  const stateLines = $("#trainingCardStateInGame, #trainingCardStateModal");
+
+  const clear = () => {
+    // Older sessions have no preview. Leave the buttons as they were rather
+    // than showing a wrong number.
+    intervalSlots.each(function () {
+      const fallback = $(this).data("amqPlusFallback");
+      if (fallback !== undefined) $(this).text(fallback);
+    });
+    stateLines.hide().text("");
+  };
+
+  const session = trainingState.currentSession;
+  if (!session || !Array.isArray(session.playlist)) return clear();
+
+  // Prefer the song pinned by the answer-results event. Falling back to the
+  // live AMQ cursor / currentIndex is what painted the next song's intervals
+  // onto a card that was still on screen (N10).
+  const pinnedAnnSongId = trainingState.ratingAnnSongId;
+  const liveAnnSongId = getCurrentTrainingAnnSongId();
+  const annSongId = pinnedAnnSongId || liveAnnSongId;
+  const index = annSongId
+    ? findTrainingPlaylistIndexByAnnSongId(annSongId)
+    : session.currentIndex;
+  const song = index >= 0 ? session.playlist[index] : null;
+
+  const preview = song && song.fsrsPreview;
+  if (!preview || !preview.intervals) return clear();
+
+  intervalSlots.each(function () {
+    const el = $(this);
+    // Remember the original copy once, so a session without previews can put it
+    // back instead of leaving a stale interval on screen.
+    if (el.data("amqPlusFallback") === undefined) {
+      el.data("amqPlusFallback", el.text());
+    }
+    const rating = String(el.data("rating"));
+    const entry = preview.intervals[rating];
+    el.text(entry ? formatTrainingInterval(entry.days) : "");
+  });
+
+  const bits = [];
+  if (preview.state) bits.push(preview.state);
+  if (preview.difficulty != null) bits.push(`difficulty ${preview.difficulty.toFixed(1)}/10`);
+  if (preview.stability != null) bits.push(`stability ${formatTrainingInterval(preview.stability)}`);
+
+  if (bits.length > 0) {
+    stateLines.text(bits.join(" · ")).show();
+  } else {
+    stateLines.hide().text("");
+  }
+}
+
+/**
+ * Days as something you can read at a glance mid-quiz.
+ * @param {number} days
+ * @returns {string}
+ */
+function formatTrainingInterval(days) {
+  const d = Number(days);
+  if (!Number.isFinite(d) || d <= 0) return "";
+  if (d < 1) return "<1d";
+  if (d === 1) return "1d";
+  if (d < 30) return `${Math.round(d)}d`;
+  if (d < 365) return `${(d / 30).toFixed(d < 60 ? 1 : 0)}mo`;
+  return `${(d / 365).toFixed(1)}y`;
+}
 
 trainingAnswerListener.bindListener();
 
@@ -9754,9 +10182,18 @@ function setupTrainingSocketListener() {
       payload.command === "quiz skpping to next phase"
     )) {
       console.log("[AMQ+ Training] Quiz skipping to next phase detected, hiding rating buttons");
-      // Immediately hide rating buttons since we're moving to next round
-      $("#trainingRatingSection").fadeOut(100);
-      $("#trainingRatingContainer").fadeOut(100);
+      // Unrated advance: drop the pin and sync the playlist cursor so the next
+      // answer-results event does not resolve preview against a stale index.
+      if (trainingState.ratingAnnSongId && trainingState.currentSession?.playlist) {
+        const staleIndex = findTrainingPlaylistIndexByAnnSongId(trainingState.ratingAnnSongId);
+        if (staleIndex >= 0) {
+          trainingState.currentSession.currentIndex = Math.min(
+            staleIndex + 1,
+            trainingState.currentSession.playlist.length
+          );
+        }
+      }
+      hideTrainingRatingUI(false);
     }
   });
   console.log("[AMQ+ Training] Socket command listener registered");
