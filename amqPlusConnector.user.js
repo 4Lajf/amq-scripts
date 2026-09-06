@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.4.2
+// @version      1.4.2.1
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -8847,7 +8847,45 @@ function resetCatchUpButton() {
   $("#trainingCatchUpBtn").prop("disabled", false).html('<i class="fa fa-fast-forward"></i> Catch Up');
 }
 
+let pendingTrainingStartup = null;
+
+function createTrainingStartup() {
+  pendingTrainingStartup?.cancel();
+  let active = true;
+  const listeners = new Set();
+  const timers = new Set();
+  const startup = {
+    get active() { return active; },
+    cancel() {
+      active = false;
+      for (const listener of listeners) listener.unbindListener();
+      for (const timer of timers) clearTimeout(timer);
+      listeners.clear();
+      timers.clear();
+    },
+    listen(event, callback) {
+      const listener = new Listener(event, (payload) => {
+        if (active) callback(payload);
+      });
+      listeners.add(listener);
+      return listener;
+    },
+    later(callback, delay) {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        if (active) callback();
+      }, delay);
+      timers.add(timer);
+      return timer;
+    }
+  };
+  pendingTrainingStartup = startup;
+  return startup;
+}
+
 function startTrainingSession(quizId, sessionLength, settingsConfig) {
+  const startup = createTrainingStartup();
+  let readyHandled = false;
   showTrainingStatus("Starting training session...", "info");
   // Check the training mode checkbox and update flag
   $("#trainingModeToggle").prop("checked", true);
@@ -8893,6 +8931,8 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
   }
 
   function failSessionStart(errorMsg, title) {
+    if (!startup.active) return;
+    startup.cancel();
     $("#trainingModeToggle").prop("checked", false);
     isTrainingMode = false;
     resetStartButtons();
@@ -8901,6 +8941,8 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
   }
 
   function applyReadySession(data) {
+    if (!startup.active || readyHandled) return;
+    readyHandled = true;
     if (data.minConnectorVersion && !isConnectorVersionAtLeast(data.minConnectorVersion)) {
       const current = getConnectorVersion();
       failSessionStart(
@@ -8963,9 +9005,9 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
 
     $("#amqPlusTrainingModal").modal("hide");
     sendSystemMessage(`Creating training quiz: ${data.quizName} (${data.totalSongs} songs)...`);
-    createOrUpdateQuiz({ command: data.command });
-
-    const quizSavedListener = new Listener("save custom quiz", (payload) => {
+    let saveHandled = false;
+    const quizSavedListener = startup.listen("save custom quiz", (payload) => {
+      if (saveHandled) return;
       if (!payload.success) {
         quizSavedListener.unbindListener();
         console.error("[AMQ+ Training] Quiz save failed:", payload);
@@ -8981,38 +9023,44 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
 
       const savedQuizName = payload.quizSave?.name || quizName;
       if (savedQuizName !== quizName) return;
+      saveHandled = true;
 
       console.log("[AMQ+ Training] Training quiz saved, applying to lobby...");
       quizSavedListener.unbindListener();
       const newQuizId = payload.quizId;
-      applyQuizToLobby(newQuizId, quizName);
-
-      const quizSelectedListener = new Listener("custom quiz selected", (selectPayload) => {
+      let selectionHandled = false;
+      const quizSelectedListener = startup.listen("custom quiz selected", (selectPayload) => {
+        if (selectionHandled) return;
         const selectedQuizName =
           selectPayload.quizName || selectPayload.data?.quizName || selectPayload.quizDescription?.name;
         if (selectedQuizName !== quizName) return;
+        selectionHandled = true;
 
         console.log("[AMQ+ Training] Training quiz selected, loading back to verify songs...");
         quizSelectedListener.unbindListener();
 
         let loadQuizHandled = false;
+        let startHandled = false;
         const startGame = (finalSongCount) => {
+          if (!startup.active || startHandled) return;
+          startHandled = true;
           if (finalSongCount > 0) {
             sendSystemMessage(
               `✅ Training quiz ready! ${finalSongCount} song${finalSongCount !== 1 ? "s" : ""} loaded. Starting automatically...`
             );
           }
-          setTimeout(() => {
+          startup.later(() => {
             if (typeof lobby.fireMainButtonEvent === "function") {
               lobby.fireMainButtonEvent(false);
             } else if (typeof startQuiz === "function") {
               startQuiz();
             }
             sendSystemMessage(`Training quiz started: ${quizName}`);
+            startup.cancel();
           }, 500);
         };
 
-        const loadQuizListener = new Listener("load custom quiz", (loadPayload) => {
+        const loadQuizListener = startup.listen("load custom quiz", (loadPayload) => {
           if (loadQuizHandled) return;
           const loadedId = loadPayload.quizId || loadPayload.data?.quizId;
           if (loadedId !== newQuizId) return;
@@ -9057,7 +9105,7 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
         });
         loadQuizListener.bindListener();
 
-        setTimeout(() => {
+        startup.later(() => {
           if (loadQuizHandled) return;
           loadQuizHandled = true;
           loadQuizListener.unbindListener();
@@ -9072,8 +9120,10 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
         });
       });
       quizSelectedListener.bindListener();
+      applyQuizToLobby(newQuizId, quizName);
     });
     quizSavedListener.bindListener();
+    createOrUpdateQuiz({ command: data.command });
   }
 
   // Server returns 202 quickly and builds the playlist in the background so
@@ -9085,6 +9135,7 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
   const POLL_MAX_CONSECUTIVE_FAILURES = 5;
 
   function pollSessionJob(jobId, startedAt, consecutiveFailures = 0) {
+    if (!startup.active) return;
     if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
       failSessionStart(
         "Building this training session took too long. Try a shorter session or a smaller quiz.",
@@ -9222,6 +9273,7 @@ function startTrainingSession(quizId, sessionLength, settingsConfig) {
 }
 
 function endTrainingSession() {
+  pendingTrainingStartup?.cancel();
   if (!trainingState.currentSession.sessionId) return;
 
   // Uncheck training mode checkbox
