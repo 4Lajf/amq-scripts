@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.4.2.1
+// @version      1.4.2.2
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -10133,69 +10133,14 @@ function addSongToResolvedList(target, annSongId, lists) {
   });
 }
 
-/**
- * Put the projected next interval on each rating button, and the card's current
- * FSRS numbers above them.
- *
- * R13, TriusHalf Jul 25. Before this the four buttons were unlabelled bets: the
- * Jul 2 thread is four people reverse-engineering FSRS from screenshots, and one
- * of them deleted a quiz over it. The server sends `fsrsPreview` with every
- * playlist entry, so this is display only — no scheduling logic lives here, and
- * the numbers cannot disagree with what the rating actually does.
- */
+/** Keep the public rating controls free of scheduling previews. */
 function updateTrainingRatingPreview() {
-  const intervalSlots = $(".trainingRatingInterval");
-  const stateLines = $("#trainingCardStateInGame, #trainingCardStateModal");
-
-  const clear = () => {
-    // Older sessions have no preview. Leave the buttons as they were rather
-    // than showing a wrong number.
-    intervalSlots.each(function () {
-      const fallback = $(this).data("amqPlusFallback");
-      if (fallback !== undefined) $(this).text(fallback);
-    });
-    stateLines.hide().text("");
-  };
-
-  const session = trainingState.currentSession;
-  if (!session || !Array.isArray(session.playlist)) return clear();
-
-  // Prefer the song pinned by the answer-results event. Falling back to the
-  // live AMQ cursor / currentIndex is what painted the next song's intervals
-  // onto a card that was still on screen (N10).
-  const pinnedAnnSongId = trainingState.ratingAnnSongId;
-  const liveAnnSongId = getCurrentTrainingAnnSongId();
-  const annSongId = pinnedAnnSongId || liveAnnSongId;
-  const index = annSongId
-    ? findTrainingPlaylistIndexByAnnSongId(annSongId)
-    : session.currentIndex;
-  const song = index >= 0 ? session.playlist[index] : null;
-
-  const preview = song && song.fsrsPreview;
-  if (!preview || !preview.intervals) return clear();
-
-  intervalSlots.each(function () {
-    const el = $(this);
-    // Remember the original copy once, so a session without previews can put it
-    // back instead of leaving a stale interval on screen.
-    if (el.data("amqPlusFallback") === undefined) {
-      el.data("amqPlusFallback", el.text());
-    }
-    const rating = String(el.data("rating"));
-    const entry = preview.intervals[rating];
-    el.text(entry ? formatTrainingInterval(entry.days) : "");
+  $("#trainingCardStateInGame, #trainingCardStateModal").hide().text("");
+  $("#trainingRatingContainer .trainingRatingInterval").hide().text("");
+  const captions = { 1: "Forgot", 2: "Difficult", 3: "Recalled", 4: "Perfect" };
+  $("#amqPlusTrainingModal .trainingRatingInterval").each(function () {
+    $(this).text(captions[$(this).data("rating")] || "");
   });
-
-  const bits = [];
-  if (preview.state) bits.push(preview.state);
-  if (preview.difficulty != null) bits.push(`difficulty ${preview.difficulty.toFixed(1)}/10`);
-  if (preview.stability != null) bits.push(`stability ${formatTrainingInterval(preview.stability)}`);
-
-  if (bits.length > 0) {
-    stateLines.text(bits.join(" · ")).show();
-  } else {
-    stateLines.hide().text("");
-  }
 }
 
 /**
