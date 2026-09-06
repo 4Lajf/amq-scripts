@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      1.4.2.2
+// @version      1.4.2.3
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -9923,10 +9923,6 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
             <i class="fa fa-forward" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Skip
           </button>
-          <button class="trainingAddToListBtn btn" data-add-to-list="true" title="Add this song to your last-used AMQ+ song list (/amqplus addsong)" style="min-width: 50px; padding: 8px 12px; background: #0ea5e9; color: white; border: none; font-size: 12px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s; margin-left: 4px;">
-            <i class="fa fa-plus" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
-            List
-          </button>
         </div>
         </div>
       </div>
@@ -9958,15 +9954,8 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
       });
     }
 
-    // R14: the same action as /amqplus addsong, without leaving the video.
-    // Not double-click gated: appending is additive and the server dedupes, so a
-    // stray click is an idempotent no-op rather than a lost rating.
-    $(".trainingAddToListBtn").off("click").on("click", function () {
-      handleAddSongToListCommand("");
-    });
-
     // Add hover effects
-    $(".trainingRatingBtn, .trainingSkipBtn, .trainingAddToListBtn").hover(
+    $(".trainingRatingBtn, .trainingSkipBtn").hover(
       function () { $(this).css("opacity", "0.8"); },
       function () { $(this).css("opacity", "1"); }
     );
