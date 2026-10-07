@@ -7803,92 +7803,104 @@ function updateCustomLikeButtonState(quizInfo) {
 }
 
 function sendQuizLikeByIdentifiers(quizInfo, likeState) {
-  console.log("[AMQ+] Sending like state to API for quiz:", quizInfo.name, "likeState:", likeState);
+  const normalizedLikeState = likeState === 1 ? 1 : 0;
+  console.log("[AMQ+] Sending like state to API for quiz:", quizInfo.name, "likeState:", normalizedLikeState);
 
   const storageKey = getQuizStorageKey(quizInfo);
+  const previousState = getStoredLikeState(quizInfo);
 
   if (!amqQuizLikesStorage) {
     amqQuizLikesStorage = {};
   }
 
-  if (likeState === 1) {
-    amqQuizLikesStorage[storageKey] = { likeState: 1, timestamp: Date.now() };
-  } else if (likeState === -1) {
-    amqQuizLikesStorage[storageKey] = { likeState: -1, timestamp: Date.now() };
-  } else {
-    delete amqQuizLikesStorage[storageKey];
+  const persistLikeState = (state) => {
+    if (state === 1) {
+      amqQuizLikesStorage[storageKey] = { likeState: 1, timestamp: Date.now() };
+    } else {
+      delete amqQuizLikesStorage[storageKey];
+    }
+    try {
+      localStorage.setItem("amqPlusLikedQuizzes", JSON.stringify(amqQuizLikesStorage));
+    } catch (e) {
+      console.error("[AMQ+] Failed to save liked quizzes to localStorage:", e);
+    }
+    const customLikeButton = document.getElementById('amqPlusCustomLikeButton');
+    if (customLikeButton) updateCustomLikeButtonUI(customLikeButton, state);
+  };
+
+  persistLikeState(normalizedLikeState);
+
+  const restorePreviousLike = (message) => {
+    persistLikeState(previousState === 1 ? 1 : 0);
+    if (message) {
+      console.error("[AMQ+] Failed to update like state:", message);
+      sendSystemMessage(message);
+    }
+  };
+
+  if (!trainingState.authToken) {
+    restorePreviousLike("Link your AMQ+ account in the Training tab before liking a quiz.");
+    return;
   }
 
-  try {
-    localStorage.setItem("amqPlusLikedQuizzes", JSON.stringify(amqQuizLikesStorage));
-    console.log("[AMQ+] Updated liked quizzes in localStorage");
-  } catch (e) {
-    console.error("[AMQ+] Failed to save liked quizzes to localStorage:", e);
-  }
+  const metadataUrl = `${API_BASE_URL}/api/quiz-configurations/metadata?name=${encodeURIComponent(quizInfo.name)}&description=${encodeURIComponent(quizInfo.description || '')}&creatorUsername=${encodeURIComponent(quizInfo.creatorUsername || '')}`;
 
   GM_xmlhttpRequest({
-    method: "PATCH",
-    url: `${API_BASE_URL}/api/quiz-configurations/stats`,
-    headers: {
-      "Content-Type": "application/json"
-    },
-    data: JSON.stringify({
-      likeState: likeState,
-      name: quizInfo.name,
-      description: quizInfo.description,
-      creatorUsername: quizInfo.creatorUsername
-    }),
+    method: "GET",
+    url: metadataUrl,
     onload: function (response) {
+      let quizId = null;
       if (response.status === 200) {
         try {
-          const data = JSON.parse(response.responseText);
-          console.log("[AMQ+] Like state updated successfully, new likes:", data.likes);
-
-          const likeCountSpan = document.querySelector('.cqsQuizEntryLikes');
-          if (likeCountSpan) {
-            likeCountSpan.textContent = data.likes || 0;
-          }
-          const customLikeButton = document.getElementById('amqPlusCustomLikeButton');
-          if (customLikeButton) {
-            updateCustomLikeButtonUI(customLikeButton, likeState);
-          }
+          quizId = JSON.parse(response.responseText)?.quiz?.id || null;
         } catch (e) {
-          console.error("[AMQ+] Failed to parse response:", e);
-        }
-      } else {
-        let errorMessage = "Failed to update like state";
-        let errorDetails = null;
-        try {
-          const errorData = JSON.parse(response.responseText);
-          if (errorData.message) {
-            errorMessage = errorData.message;
-          }
-          if (errorData.details) {
-            errorDetails = errorData.details;
-          }
-        } catch (e) {
-          errorMessage = response.responseText || `HTTP ${response.status}: Failed to update like state`;
-        }
-        if (errorDetails) {
-          console.error("[AMQ+] Failed to update like state:", response.status, errorMessage, "-", errorDetails);
-        } else {
-          console.error("[AMQ+] Failed to update like state:", response.status, errorMessage);
-        }
-
-        const customLikeButton = document.getElementById('amqPlusCustomLikeButton');
-        if (customLikeButton) {
-          const storedState = getStoredLikeState(quizInfo);
-          updateCustomLikeButtonUI(customLikeButton, storedState);
+          quizId = null;
         }
       }
+      if (!quizId) {
+        restorePreviousLike("Could not find this quiz on AMQ+, so the like was not saved.");
+        return;
+      }
+
+      GM_xmlhttpRequest({
+        method: "PATCH",
+        url: `${API_BASE_URL}/api/quiz-configurations/${encodeURIComponent(quizId)}/stats`,
+        headers: { "Content-Type": "application/json" },
+        data: JSON.stringify({
+          likeState: normalizedLikeState,
+          token: trainingState.authToken
+        }),
+        onload: function (likeResponse) {
+          if (likeResponse.status === 200) {
+            try {
+              const data = JSON.parse(likeResponse.responseText);
+              console.log("[AMQ+] Like state updated successfully, new likes:", data.likes);
+              const likeCountSpan = document.querySelector('.cqsQuizEntryLikes');
+              if (likeCountSpan) likeCountSpan.textContent = data.likes || 0;
+              persistLikeState(normalizedLikeState);
+            } catch (e) {
+              console.error("[AMQ+] Failed to parse response:", e);
+            }
+            return;
+          }
+          let errorMessage = "Failed to update like state";
+          try {
+            const errorData = JSON.parse(likeResponse.responseText);
+            if (errorData.message) errorMessage = errorData.message;
+          } catch (e) {
+            errorMessage = likeResponse.responseText || `HTTP ${likeResponse.status}: Failed to update like state`;
+          }
+          restorePreviousLike(errorMessage);
+        },
+        onerror: function (error) {
+          console.error("[AMQ+] Error sending like state:", error);
+          restorePreviousLike("Could not save the like. Check that AMQ+ is reachable.");
+        }
+      });
     },
     onerror: function (error) {
-      console.error("[AMQ+] Error sending like state:", error);
-      const customLikeButton = document.getElementById('amqPlusCustomLikeButton');
-      if (customLikeButton) {
-        const storedState = getStoredLikeState(quizInfo);
-        updateCustomLikeButtonUI(customLikeButton, storedState);
-      }
+      console.error("[AMQ+] Error resolving quiz for like:", error);
+      restorePreviousLike("Could not save the like. Check that AMQ+ is reachable.");
     }
   });
 }
