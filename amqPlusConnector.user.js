@@ -10365,25 +10365,30 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
           How sure were you? <span id="trainingCardStateInGame" style="display: none; white-space: nowrap; color: rgba(255,255,255,0.85);"></span>
         </div>
         <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; align-items: stretch;">
-          <button class="trainingRatingBtn btn" data-rating="1" title="No idea" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 5px 2px; background: #dc3545; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="1" title="No idea (1)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #dc3545; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-times" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             No idea
+            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">1</span>
           </button>
-          <button class="trainingRatingBtn btn" data-rating="2" title="Lucky guess" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 5px 2px; background: #ffc107; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="2" title="Lucky guess (2)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #ffc107; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-exclamation-triangle" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Lucky guess
+            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">2</span>
           </button>
-          <button class="trainingRatingBtn btn" data-rating="3" title="Okay" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 5px 2px; background: #10b981; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="3" title="Okay (3)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #10b981; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-check" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Okay
+            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">3</span>
           </button>
-          <button class="trainingRatingBtn btn" data-rating="4" title="Trivial" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 5px 2px; background: #6366f1; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="4" title="Trivial (4)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6366f1; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-star" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Trivial
+            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">4</span>
           </button>
-          <button class="trainingSkipBtn btn" data-skip="true" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 5px 2px; background: #6c757d; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingSkipBtn btn" data-skip="true" title="Skip (S)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6c757d; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-forward" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Skip
+            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">S</span>
           </button>
 
         </div>
@@ -10671,26 +10676,34 @@ function mountSuspendButtonInSongInfo() {
     // Styled to sit beside AMQ's own "+" button rather than to compete with it.
     // Slightly larger hit target than AMQ's native icons (discoverability).
     actionRow.append(`
-      <button type="button" id="${SUSPEND_BTN_ID}" class="clickAble" title="Pause this song in training. Double-click. Resume it on the website." style="${actionStyle}">
+      <button type="button" id="${SUSPEND_BTN_ID}" class="clickAble" title="Pause this song in training. Click again to confirm. Resume it on the website." style="${actionStyle}">
         <i class="fa fa-ban" aria-hidden="true" style="font-size: 15px;"></i>
       </button>
     `);
     button = $(`#${SUSPEND_BTN_ID}`);
 
-    // Double-click gated regardless of the user's double-click setting. Unlike
-    // "add to list", which is additive and idempotent, suspending pulls the song
-    // out of training entirely and can only be undone on the website, so a stray
-    // click is not recoverable in-game.
-    button.off("click dblclick").on("dblclick", function () {
-      suspendCurrentTrainingSong();
+    // Two clicks, with the first one visible. Unlike "add to list", pausing
+    // pulls the song out of training and can only be undone on the website.
+    button.off("click dblclick").on("click", function () {
+      if ($(this).data("amqPlusPauseConfirm")) {
+        $(this).removeData("amqPlusPauseConfirm");
+        suspendCurrentTrainingSong();
+        return;
+      }
+      $(this).data("amqPlusPauseConfirm", true)
+        .attr("title", "Click again to pause this song.")
+        .css({ color: "#fbbf24", borderColor: "#fbbf24" })
+        .html('<i class="fa fa-ban" aria-hidden="true" style="font-size: 12px;"></i> Confirm');
+      sendSystemMessage("Click Pause again to stop training this song. Resume it later on the website.");
     });
   }
 
   // New song, new decision - undo the disabled state the last suspend left.
   button
     .prop("disabled", false)
-    .css({ opacity: "1", "pointer-events": "auto", color: "#d4d4d4", "font-size": "12px" })
-    .attr("title", "Pause this song in training. Double-click. Resume it on the website.")
+    .removeData("amqPlusPauseConfirm")
+    .css({ opacity: "1", "pointer-events": "auto", color: "#d4d4d4", "font-size": "12px", borderColor: "rgba(255,255,255,0.18)" })
+    .attr("title", "Pause this song in training. Click again to confirm. Resume it on the website.")
     .html('<i class="fa fa-ban" aria-hidden="true" style="font-size: 12px;"></i> Pause');
 }
 
@@ -10737,7 +10750,10 @@ function suspendCurrentTrainingSong() {
   }
 
   const button = $(`#${SUSPEND_BTN_ID}`);
-  button.css({ opacity: "0.6", "pointer-events": "none" });
+  button
+    .removeData("amqPlusPauseConfirm")
+    .css({ opacity: "0.6", "pointer-events": "none", color: "#d4d4d4" })
+    .html('<i class="fa fa-ban" aria-hidden="true" style="font-size: 12px;"></i> Pausing');
 
   makeApiRequest({
     url: `${API_BASE_URL}/api/training/${quizId}/suspend`,
@@ -10749,16 +10765,20 @@ function suspendCurrentTrainingSong() {
     },
     errorPrefix: 'Pause Song',
     onSuccess: () => {
-      sendSystemMessage("Paused — this song will not come up again until you resume it on the website.");
+      sendSystemMessage("Paused. This song will not come up again until you resume it on the website.");
       // Leave it inert: the song is gone from the pool, so a second click has
       // nothing to do. It re-enables itself on the next song's reveal.
       button
         .attr("title", "Paused. Resume it on the website.")
-        .css("color", "#6b7280")
-        .html('<i class="fa fa-check" aria-hidden="true" style="font-size: 15px;"></i>');
+        .css({ color: "#86efac", opacity: "1" })
+        .html('<i class="fa fa-check" aria-hidden="true" style="font-size: 12px;"></i> Paused');
     },
     onError: (msg) => {
-      button.css({ opacity: "1", "pointer-events": "auto" });
+      button
+        .removeData("amqPlusPauseConfirm")
+        .css({ opacity: "1", "pointer-events": "auto", color: "#d4d4d4", borderColor: "rgba(255,255,255,0.18)" })
+        .attr("title", "Pause this song in training. Click again to confirm. Resume it on the website.")
+        .html('<i class="fa fa-ban" aria-hidden="true" style="font-size: 12px;"></i> Pause');
       sendSystemMessage(`⚠️ Could not pause the song: ${msg}`);
     }
   });
