@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      2.0.1
+// @version      2.0.2
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -10164,6 +10164,23 @@ function submitTrainingRating(rating) {
   }
 }
 
+/**
+ * AMQ pose 6 means the guess timer ended with an empty box.
+ * A typed answer stays pose 4 or 5 and still asks for a rating.
+ * @param {string|null|undefined} userAnswer
+ * @param {{ pose?: number, answer?: string }|null|undefined} playerResult
+ */
+function isUnansweredTrainingTimeout(userAnswer, playerResult) {
+  const pose = Number(playerResult?.pose);
+  if (pose === 6) return true;
+  if (pose === 4 || pose === 5) return false;
+
+  const fromResult = typeof playerResult?.answer === "string" ? playerResult.answer : null;
+  const text = fromResult != null ? fromResult : (typeof userAnswer === "string" ? userAnswer : null);
+  if (text == null) return false;
+  return text.trim().length === 0;
+}
+
 function skipTrainingRating() {
   if (!trainingState.currentSession.sessionId) return;
 
@@ -10326,6 +10343,7 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
 
   // Merge previously captured answer from "player answers" with result data
   // before showing ratings for the revealed song.
+  let unansweredTimeout = false;
   try {
     // Find self player
     const players = typeof quiz !== 'undefined' && quiz.players ? Object.values(quiz.players) : [];
@@ -10335,6 +10353,7 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     let userAnswer = null;
     let success = false;
     let correctAnswer = null;
+    let myPlayerResult = null;
 
     // 1. Get user answer text (captured from "player answers" listener)
     if (trainingState.pendingAnswer && trainingState.pendingAnswer.gamePlayerId === myPlayerId) {
@@ -10345,11 +10364,13 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
 
     // 2. Get correctness from "answer results"
     if (myPlayerId !== null && result.players) {
-      const myPlayerResult = result.players.find(p => p.gamePlayerId === myPlayerId);
+      myPlayerResult = result.players.find(p => p.gamePlayerId === myPlayerId);
       if (myPlayerResult) {
         success = myPlayerResult.correct === true;
       }
     }
+
+    unansweredTimeout = isUnansweredTrainingTimeout(userAnswer, myPlayerResult);
 
     // 3. Get correct answer info
     if (result.songInfo) {
@@ -10370,7 +10391,14 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
     trainingState.lastAnswerDetails = {};
   }
 
-  // Blank answers and timeouts still offer ratings; only an explicit Skip skips.
+  // A timeout with no answer is the same as Skip: progress stays unchanged.
+  // A typed answer, including a wrong one sent as the timer ends, still asks for a rating.
+  if (unansweredTimeout) {
+    console.log("[AMQ+ Training] No answer on timeout, skipping rating");
+    sendSystemMessage("No answer, so this song was skipped. Progress is unchanged.");
+    skipTrainingRating();
+    return;
+  }
 
   // W10: the suspend control lives in AMQ's Song Info panel, which only carries
   // real metadata once the answer is revealed - so it mounts here, after the id
@@ -10460,9 +10488,8 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
   // R13: label the buttons with what each one actually schedules.
   updateTrainingRatingPreview();
 
-  // W18 / Approach 1 companion: after a miss, ring Again. Hard/Good/Easy need a
-  // confirm popup so overrides are deliberate (e.g. typo on a known song).
-  // Blank answers and timeouts use the same suggested No idea rating as other misses.
+  // W18 / Approach 1 companion: after a typed miss, ring No idea. Lucky guess,
+  // Okay, and Trivial need a confirm so overrides are deliberate.
   highlightSuggestedRating(trainingState.lastAnswerDetails?.success === false);
 
   // Show rating buttons - skip vote will be sent when user clicks a rating
@@ -10670,6 +10697,14 @@ function addSongToResolvedList(target, annSongId, lists) {
 
 /** Where the Song Info actions live: AMQ's own Song Info panel. */
 const SUSPEND_BTN_ID = "amqPlusSuspendBtn";
+const MARK_DUE_BTN_ID = "amqPlusMarkDueBtn";
+
+function trainingQuizIdForSongAction() {
+  return trainingState.currentSession?.quizId
+    || trainingState.selectedQuizId
+    || trainingState.urlLoadedQuizId
+    || null;
+}
 
 /**
  * W10: mount the suspend control in AMQ's Song Info panel.
@@ -10698,11 +10733,41 @@ function mountSuspendButtonInSongInfo() {
 
   // Capture the revealed song rather than a cursor that can advance later.
   const revealedSongId = trainingState.ratingAnnSongId || getCurrentTrainingAnnSongId();
+  // Pause is created once and kept. Detach it so List and Due can be rebuilt
+  // in front of it on every reveal without the row shuffling.
+  const existingPause = $(`#${SUSPEND_BTN_ID}`).detach();
   $("#trainingAddToListInfoBtn").remove();
   if (revealedSongId) {
     actionRow.append(`<button id="trainingAddToListInfoBtn" class="btn" title="Add this song to your last-used AMQ+ song list" style="${actionStyle}">+ List</button>`);
     $("#trainingAddToListInfoBtn").on("click", () => handleAddSongToListCommand("", revealedSongId));
   }
+
+  const quizIdForDue = trainingQuizIdForSongAction();
+  $(`#${MARK_DUE_BTN_ID}`).remove();
+  if (revealedSongId && quizIdForDue) {
+    actionRow.append(`
+      <button type="button" id="${MARK_DUE_BTN_ID}" class="clickAble" title="Mark this song due for your next training session. Click again to confirm." style="${actionStyle}">
+        <i class="fa fa-repeat" aria-hidden="true" style="font-size: 12px;"></i> Due
+      </button>
+    `);
+    $(`#${MARK_DUE_BTN_ID}`)
+      .data("annSongId", revealedSongId)
+      .data("quizId", quizIdForDue)
+      .on("click", function () {
+        if ($(this).data("amqPlusDueConfirm")) {
+          $(this).removeData("amqPlusDueConfirm");
+          markCurrentSongDue($(this).data("annSongId"), $(this).data("quizId"));
+          return;
+        }
+        $(this).data("amqPlusDueConfirm", true)
+          .attr("title", "Click again to mark this song due.")
+          .css({ color: "#93c5fd", borderColor: "#93c5fd" })
+          .html('<i class="fa fa-repeat" aria-hidden="true" style="font-size: 12px;"></i> Confirm');
+        sendSystemMessage("Click Due again to schedule this song for your next training session.");
+      });
+  }
+
+  if (existingPause.length) actionRow.append(existingPause);
 
   let button = $(`#${SUSPEND_BTN_ID}`);
   if (button.length === 0) {
@@ -10747,7 +10812,74 @@ function mountSuspendButtonInSongInfo() {
  */
 function removeSuspendButtonFromSongInfo() {
   $(`#${SUSPEND_BTN_ID}`).off("click dblclick").remove();
+  $(`#${MARK_DUE_BTN_ID}`).off("click").remove();
   if (!$("#amqPlusSongInfoActions").children().length) $("#amqPlusSongInfoActions").remove();
+}
+
+/**
+ * Schedule the revealed song for the next session of the selected training quiz.
+ * Moves the due date only. Stability and difficulty stay as they are.
+ * Works mid-session and in ranked or tour, as long as a quiz is selected.
+ */
+function markCurrentSongDue(annSongId, quizId) {
+  const button = $(`#${MARK_DUE_BTN_ID}`);
+
+  function restoreDueButton() {
+    button
+      .removeData("amqPlusDueConfirm")
+      .css({ opacity: "1", "pointer-events": "auto", color: "#d4d4d4", borderColor: "rgba(255,255,255,0.18)" })
+      .attr("title", "Mark this song due for your next training session. Click again to confirm.")
+      .html('<i class="fa fa-repeat" aria-hidden="true" style="font-size: 12px;"></i> Due');
+  }
+
+  if (!trainingState.authToken) {
+    restoreDueButton();
+    sendSystemMessage("Link your AMQ+ account in the Training tab before marking a song due.");
+    return;
+  }
+  if (!annSongId) {
+    restoreDueButton();
+    sendSystemMessage("No song to mark due. Wait until a song has played, then try again.");
+    return;
+  }
+  if (!quizId) {
+    restoreDueButton();
+    sendSystemMessage("Select a training quiz in the Training tab first.");
+    return;
+  }
+
+  button
+    .removeData("amqPlusDueConfirm")
+    .css({ opacity: "0.6", "pointer-events": "none", color: "#d4d4d4" })
+    .html('<i class="fa fa-repeat" aria-hidden="true" style="font-size: 12px;"></i> Saving');
+
+  makeApiRequest({
+    url: `${API_BASE_URL}/api/training/${quizId}/again`,
+    method: "POST",
+    data: {
+      token: trainingState.authToken,
+      annSongId: Number(annSongId)
+    },
+    errorPrefix: "Mark Due",
+    onSuccess: (data) => {
+      if (data.alreadyTracked === false) {
+        restoreDueButton();
+        sendSystemMessage("That song is not in this quiz yet. It will come up as a new song once the pool includes it.");
+        return;
+      }
+      sendSystemMessage(data.wasSuspended
+        ? "Marked due, and resumed it. It will come up in your next training session."
+        : "Marked due. It will come up in your next training session.");
+      button
+        .attr("title", "Marked due for the next training session.")
+        .css({ color: "#86efac", opacity: "1" })
+        .html('<i class="fa fa-check" aria-hidden="true" style="font-size: 12px;"></i> Due');
+    },
+    onError: (msg) => {
+      restoreDueButton();
+      sendSystemMessage(`⚠️ Could not mark the song due: ${msg}`);
+    }
+  });
 }
 
 /**
@@ -10820,8 +10952,8 @@ function suspendCurrentTrainingSong() {
 /**
  * After a miss, ring Again and require a confirm before Hard/Good/Easy.
  *
- * Auto-selecting Again fixes the default Hard-on-wrong path; an override popup
- * keeps agency for typos on songs the player actually knew, including timeouts.
+ * A typed miss rings No idea. An override popup keeps a known song that was
+ * mistyped from being recorded as No idea on the first click.
  *
  * @param {boolean} wasWrong
  */
