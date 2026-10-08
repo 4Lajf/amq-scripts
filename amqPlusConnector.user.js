@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      2.0.4
+// @version      2.0.5
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -10605,6 +10605,9 @@ function bindTrainingRatingHotkeys() {
     if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) {
       return;
     }
+    // Ctrl/Cmd/Alt combos belong to the browser and OS (Cmd+1 switches tabs,
+    // Ctrl+S saves). Only a bare key rates; Shift is fine, it's still "S".
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
 
     const key = e.key;
     if (key >= "1" && key <= "4") {
