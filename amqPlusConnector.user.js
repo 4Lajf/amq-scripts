@@ -150,6 +150,7 @@ let trainingState = {
   requireDoubleClick: false, // Require double-click for rating buttons (mouse only — hotkeys always fire on one press)
   confirmMissOverride: true, // After a miss, Lucky guess / Okay / Trivial ask for a second click
   unratedSongAction: "skip", // Song ends without a rating: "skip" (progress unchanged) or "noIdea"
+  showNextIntervals: false, // Next-review estimate under each rating button; opt-in behind a warning
   isSubmittingRating: false, // Prevent double-click/multiple rapid clicks on rating buttons
   // N10: which playlist song the rating overlay is currently about. Must be
   // pinned from the answer-results event — live currentSongNumber / currentIndex
@@ -314,6 +315,7 @@ function loadTrainingSettings() {
       if (state.unratedSongAction === "noIdea" || state.unratedSongAction === "skip") {
         trainingState.unratedSongAction = state.unratedSongAction;
       }
+      trainingState.showNextIntervals = state.showNextIntervals === true;
       console.log("[AMQ+ Training] Loaded new song percentage:", trainingState.newSongPercentage, "%");
     }
 
@@ -351,7 +353,8 @@ function saveTrainingSettings() {
       selectedQuizToken: trainingState.selectedQuizToken,
       requireDoubleClick: trainingState.requireDoubleClick,
       confirmMissOverride: trainingState.confirmMissOverride,
-      unratedSongAction: trainingState.unratedSongAction
+      unratedSongAction: trainingState.unratedSongAction,
+      showNextIntervals: trainingState.showNextIntervals
     };
 
     if (trainingState.currentSession && trainingState.currentSession.sessionId) {
@@ -1445,6 +1448,24 @@ function createTrainingModalHTML() {
                         <small id="trainingMissConfirmDescription" style="display: block; font-size: 12px; color: #a0aec0;">After a wrong answer, Lucky guess, Okay and Trivial need a second click.</small>
                       </span>
                     </label>
+                    <div>
+                      <label style="display: flex; align-items: flex-start; gap: 10px; margin: 0; cursor: pointer; font-weight: normal;">
+                        <input type="checkbox" id="trainingShowIntervalsToggle" aria-describedby="trainingShowIntervalsDescription" style="visibility: visible; position: static; opacity: 1; width: 16px; height: 16px; margin: 2px 0 0 0; flex-shrink: 0; accent-color: #6ca6cb;">
+                        <span>
+                          <span style="display: block; font-size: 14px; color: #e2e8f0;">Show when each rating brings the song back</span>
+                          <small id="trainingShowIntervalsDescription" style="display: block; font-size: 12px; color: #a0aec0;">A rough estimate under each button, such as 4d or 2mo.</small>
+                        </span>
+                      </label>
+                      <div id="trainingShowIntervalsWarning" role="alertdialog" aria-labelledby="trainingShowIntervalsWarningTitle" style="display: none; margin: 8px 0 0 26px; padding: 10px 12px; background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.45); border-radius: 6px;">
+                        <div id="trainingShowIntervalsWarningTitle" style="font-size: 13px; font-weight: bold; color: #fbbf24; margin-bottom: 4px;">Before you turn this on</div>
+                        <p style="margin: 0 0 6px; font-size: 12px; line-height: 1.45; color: #e2e8f0;">These times are the scheduler's own working numbers, worked out when the session started. Daily limits, Spread backlog and your later answers can all move a song, so read them as a rough feel, not a promise.</p>
+                        <p style="margin: 0 0 8px; font-size: 12px; line-height: 1.45; color: #e2e8f0;">Rate how sure you actually were, not the button with the nicer number. Picking for the interval makes the schedule worse, not better.</p>
+                        <div style="display: flex; gap: 8px;">
+                          <button type="button" id="trainingShowIntervalsConfirm" class="btn btn-sm" style="background: #fbbf24; color: #1a1a2e; border: none; font-weight: bold; padding: 3px 10px;">Show them</button>
+                          <button type="button" id="trainingShowIntervalsCancel" class="btn btn-sm" style="background: transparent; color: #e2e8f0; border: 1px solid #4a5568; padding: 3px 10px;">Keep hidden</button>
+                        </div>
+                      </div>
+                    </div>
                     <div>
                       <label for="trainingUnratedActionSelect" style="display: block; margin: 0; font-size: 14px; font-weight: normal; color: #e2e8f0;">If a song ends without a rating</label>
                       <select id="trainingUnratedActionSelect" aria-describedby="trainingUnratedActionDescription" style="margin-top: 4px; padding: 3px 6px; background: #1a1a2e; color: #e2e8f0; border: 1px solid #2d3748; border-radius: 4px; font-size: 13px;">
@@ -8370,6 +8391,27 @@ function attachTrainingModalHandlers() {
   });
   $("#trainingMissConfirmToggle").prop("checked", trainingState.confirmMissOverride !== false);
 
+  // Opt-in behind a warning: ticking the box only opens the note; the numbers
+  // appear after "Show them".
+  const setShowNextIntervals = (show) => {
+    trainingState.showNextIntervals = show;
+    $("#trainingShowIntervalsToggle").prop("checked", show);
+    $("#trainingShowIntervalsWarning").hide();
+    saveTrainingSettings();
+    updateTrainingRatingPreview();
+  };
+  $("#trainingShowIntervalsToggle").off("change").on("change", function () {
+    if (!$(this).is(":checked")) {
+      setShowNextIntervals(false);
+      return;
+    }
+    $(this).prop("checked", false);
+    $("#trainingShowIntervalsWarning").show();
+  });
+  $("#trainingShowIntervalsConfirm").off("click").on("click", () => setShowNextIntervals(true));
+  $("#trainingShowIntervalsCancel").off("click").on("click", () => $("#trainingShowIntervalsWarning").hide());
+  $("#trainingShowIntervalsToggle").prop("checked", trainingState.showNextIntervals === true);
+
   $("#trainingUnratedActionSelect").off("change").on("change", function () {
     trainingState.unratedSongAction = $(this).val() === "noIdea" ? "noIdea" : "skip";
     saveTrainingSettings();
@@ -10446,31 +10488,27 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
           How sure were you? <span id="trainingCardStateInGame" style="display: none; white-space: nowrap; color: rgba(255,255,255,0.85);"></span>
         </div>
         <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; align-items: stretch;">
-          <button class="trainingRatingBtn btn" data-rating="1" title="No idea (1)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #dc3545; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="1" title="No idea (1)" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #dc3545; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-times" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             No idea
-            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">1</span>
-            <span class="trainingRatingInterval" data-rating="1" style="display: block; margin-top: 2px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.95;"></span>
+            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">1<span class="trainingRatingInterval" data-rating="1" style="display: none;"></span></span>
           </button>
-          <button class="trainingRatingBtn btn" data-rating="2" title="Lucky guess (2)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #ffc107; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="2" title="Lucky guess (2)" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #ffc107; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-exclamation-triangle" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Lucky guess
-            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">2</span>
-            <span class="trainingRatingInterval" data-rating="2" style="display: block; margin-top: 2px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.95;"></span>
+            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">2<span class="trainingRatingInterval" data-rating="2" style="display: none;"></span></span>
           </button>
-          <button class="trainingRatingBtn btn" data-rating="3" title="Okay (3)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #10b981; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="3" title="Okay (3)" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #10b981; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-check" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Okay
-            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">3</span>
-            <span class="trainingRatingInterval" data-rating="3" style="display: block; margin-top: 2px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.95;"></span>
+            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">3<span class="trainingRatingInterval" data-rating="3" style="display: none;"></span></span>
           </button>
-          <button class="trainingRatingBtn btn" data-rating="4" title="Trivial (4)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6366f1; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="4" title="Trivial (4)" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6366f1; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-star" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Trivial
-            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">4</span>
-            <span class="trainingRatingInterval" data-rating="4" style="display: block; margin-top: 2px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.95;"></span>
+            <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">4<span class="trainingRatingInterval" data-rating="4" style="display: none;"></span></span>
           </button>
-          <button class="trainingSkipBtn btn" data-skip="true" title="Skip (S)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6c757d; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingSkipBtn btn" data-skip="true" title="Skip (S)" style="width: 100%; min-width: 0; height: 54px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6c757d; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-forward" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Skip
             <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">S</span>
@@ -11059,10 +11097,13 @@ function updateTrainingRatingPreview() {
   const stateLines = $("#trainingCardStateInGame, #trainingCardStateModal");
 
   const paintIntervals = (preview) => {
+    const show = trainingState.showNextIntervals === true;
     $(".trainingRatingInterval").each(function () {
       const rating = Number($(this).attr("data-rating"));
       const interval = preview?.intervals?.[rating];
-      $(this).text(interval?.days == null ? "" : formatTrainingInterval(interval.days, interval.due));
+      // Sits after the hotkey on the same line: "3 · 4d".
+      const label = show && interval?.days != null ? formatTrainingInterval(interval.days, interval.due) : "";
+      $(this).text(label ? ` · ${label}` : "").toggle(Boolean(label));
     });
   };
 
