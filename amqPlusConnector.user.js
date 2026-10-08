@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      2.0.3
+// @version      2.0.4
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -9866,17 +9866,35 @@ function showDifficultSongSuggestions(pending) {
     .css({ position: "fixed", bottom: "16px", right: "16px", width: "min(440px, calc(100vw - 32px))",
       maxHeight: "65vh", overflowY: "auto", padding: "20px", background: "#202335", color: "white",
       border: "1px solid #818cf8", borderRadius: "12px", zIndex: 1055 });
-  $("<h3>").attr("id", "amqDifficultTitle").text("Difficult song suggestions").appendTo(section);
+  $("<h3>").attr("id", "amqDifficultTitle").text("Songs you keep forgetting").appendTo(section);
   $("<p>").text(`Session complete: ${pending.summary}.`).appendTo(section);
-  $("<p>").text("These songs were forgotten again. Pause is reversible from Training Progress. Choose for each song to continue.").appendTo(section);
+  $("<p>").text("You had learned these songs, then forgot them again this session, and each one has slipped many times now. Drilling a song that won't stick can crowd out the rest, so you can set it aside.").appendTo(section);
+  const help = $("<ul>").css({ paddingLeft: "18px", margin: "0 0 10px", fontSize: "13px", lineHeight: 1.5 }).appendTo(section);
+  for (const [name, effect] of [
+    ["Pause for 7 days", "gives it a break. It comes back on its own after a week, with nothing deleted. You can resume it sooner from Training Progress on the website."],
+    ["Keep practicing", "nothing changes. You won't be asked about it again for at least 30 days and 4 more misses."],
+    ["Decide later", "closes this without changing anything. You'll be asked again the next time you forget it."]
+  ]) {
+    const item = $("<li>").appendTo(help);
+    $("<strong>").text(name).appendTo(item);
+    $("<span>").text(`: ${effect}`).appendTo(item);
+  }
   const status = $("<p>").attr({ role: "status", "aria-live": "polite" }).appendTo(section);
   status.text(canPause ? "Lobby paused while you choose." : "Only the host can pause the lobby. You can still choose for your songs.");
+  const closePanel = (message) => {
+    localStorage.removeItem("amqPlusDifficultSongs");
+    section.remove();
+    if (ownsPause && typeof lobby !== "undefined" && lobby.isHost && lobby.gameId === pending.roomId) {
+      socket.sendCommand({ type: "quiz", command: "quiz unpause" });
+    }
+    sendSystemMessage(message);
+  };
   for (const song of pending.songs) {
     const row = $("<div>").css({ borderTop: "1px solid #54586c", padding: "12px 0" }).appendTo(section);
-    $("<p>").text(`${song.name} — ${song.lapses} lapses`).appendTo(row);
+    $("<p>").text(`${song.name}: forgotten ${song.lapses} times`).appendTo(row);
     $("<a>").attr({ href: `${API_BASE_URL}/training/${encodeURIComponent(pending.quizId)}`, target: "_blank", rel: "noopener noreferrer" })
       .text("Details (opens Training Progress)").appendTo(row);
-    for (const [choice, label] of [["pause", "Pause song"], ["keep", "Keep practicing"]]) {
+    for (const [choice, label] of [["pause", "Pause for 7 days"], ["keep", "Keep practicing"]]) {
       $("<button>").attr({ type: "button", "aria-label": `${label}: ${song.name}` })
         .addClass("btn btn-default").css({ minHeight: "44px", margin: "8px 8px 0 0" }).text(label)
         .on("click", () => {
@@ -9893,23 +9911,23 @@ function showDifficultSongSuggestions(pending) {
               if (!result.success) { failed(); return; }
               pending.songs = pending.songs.filter(s => s.annSongId !== song.annSongId);
               row.remove();
-              status.text(result.noLongerEligible ? "This song no longer needs a suggestion." : result.choice === "pause" ? "Song paused. You can resume it from Training Progress." : "Kept active. We will wait at least 30 days and 4 more lapses before suggesting again.");
+              status.text(result.noLongerEligible ? "This song no longer needs a suggestion." : result.choice === "pause" ? "Paused for 7 days. It comes back on its own, or resume it sooner from Training Progress." : "Kept active. We will wait at least 30 days and 4 more lapses before suggesting again.");
               if (pending.songs.length) {
                 localStorage.setItem("amqPlusDifficultSongs", JSON.stringify(pending));
                 section.find("button").first().trigger("focus");
               } else {
-                localStorage.removeItem("amqPlusDifficultSongs");
-                section.remove();
-                if (ownsPause && typeof lobby !== "undefined" && lobby.isHost && lobby.gameId === pending.roomId) {
-                  socket.sendCommand({ type: "quiz", command: "quiz unpause" });
-                }
-                sendSystemMessage("Difficult-song choices saved. Ready to continue.");
+                closePanel("Difficult-song choices saved. Ready to continue.");
               }
             }, onerror: failed, ontimeout: failed
           });
         }).appendTo(row);
     }
   }
+  const footer = $("<div>").css({ borderTop: "1px solid #54586c", paddingTop: "12px", textAlign: "right" }).appendTo(section);
+  $("<button>").attr({ type: "button" }).addClass("btn btn-default").css({ minHeight: "44px" })
+    .text("Decide later")
+    .on("click", () => closePanel("Closed without changes. You'll be asked again the next time you forget one of these songs."))
+    .appendTo(footer);
   section.appendTo(document.body);
 }
 
