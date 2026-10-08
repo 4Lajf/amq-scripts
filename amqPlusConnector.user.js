@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      2.0.0
+// @version      2.0.1
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -148,6 +148,7 @@ let trainingState = {
   selectedQuizId: null,
   selectedQuizToken: null,
   requireDoubleClick: false, // Require double-click for rating buttons (mouse only — hotkeys always fire on one press)
+  confirmMissOverride: true, // After a miss, Lucky guess / Okay / Trivial ask for a second click
   isSubmittingRating: false, // Prevent double-click/multiple rapid clicks on rating buttons
   // N10: which playlist song the rating overlay is currently about. Must be
   // pinned from the answer-results event — live currentSongNumber / currentIndex
@@ -306,6 +307,9 @@ function loadTrainingSettings() {
         trainingState.requireDoubleClick = state.requireDoubleClick;
         console.log("[AMQ+ Training] Loaded double-click mode:", trainingState.requireDoubleClick);
       }
+      if (state.confirmMissOverride !== undefined) {
+        trainingState.confirmMissOverride = state.confirmMissOverride;
+      }
       console.log("[AMQ+ Training] Loaded new song percentage:", trainingState.newSongPercentage, "%");
     }
 
@@ -341,7 +345,8 @@ function saveTrainingSettings() {
       urlLoadedQuizSongCount: trainingState.urlLoadedQuizSongCount,
       selectedQuizId: trainingState.selectedQuizId,
       selectedQuizToken: trainingState.selectedQuizToken,
-      requireDoubleClick: trainingState.requireDoubleClick
+      requireDoubleClick: trainingState.requireDoubleClick,
+      confirmMissOverride: trainingState.confirmMissOverride
     };
 
     if (trainingState.currentSession && trainingState.currentSession.sessionId) {
@@ -1425,6 +1430,16 @@ function createTrainingModalHTML() {
                   </small>
                   <small class="form-text text-muted" style="display: block; margin-top: 6px;">
                     While ratings are shown: <strong>1–4</strong> to rate, <strong>S</strong> to skip. Hotkeys need one press.
+                  </small>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="trainingMissConfirmToggle" aria-describedby="trainingMissConfirmDescription" style="visibility: visible; position: static; opacity: 1; width: 18px; height: 18px; margin: 0 10px 0 0; flex-shrink: 0; accent-color: #6ca6cb;">
+                    <span style="font-size: 14px;">Confirm a higher rating after a miss</span>
+                  </label>
+                  <small id="trainingMissConfirmDescription" class="form-text text-muted">
+                    After a wrong answer, Lucky guess, Okay, and Trivial ask you to click again. Turn this off to apply them immediately.
                   </small>
                 </div>
 
@@ -8314,6 +8329,12 @@ function attachTrainingModalHandlers() {
   // Initialize double-click checkbox state from saved settings
   $("#trainingDoubleClickToggle").prop("checked", trainingState.requireDoubleClick || false);
 
+  $("#trainingMissConfirmToggle").off("change").on("change", function () {
+    trainingState.confirmMissOverride = $(this).is(":checked");
+    saveTrainingSettings();
+  });
+  $("#trainingMissConfirmToggle").prop("checked", trainingState.confirmMissOverride !== false);
+
   $("#trainingLinkBtn").off("click").on("click", () => {
     const token = $("#trainingTokenField").val().trim();
     if (!token || token.length !== 64) {
@@ -10815,12 +10836,13 @@ function highlightSuggestedRating(wasWrong) {
 
   if (!wasWrong) return;
 
-  trainingState.missNeedsOverrideConfirm = true;
-
   buttons
     .filter('[data-rating="1"]')
     .css({ "box-shadow": "0 0 0 2px #fff, 0 0 10px rgba(220,53,69,0.9)", "opacity": "1" });
 
+  if (trainingState.confirmMissOverride === false) return;
+
+  trainingState.missNeedsOverrideConfirm = true;
   buttons.not('[data-rating="1"]').data("amqPlusDimmed", true).css({ "opacity": "0.45" });
 }
 
