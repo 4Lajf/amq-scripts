@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      2.0.2
+// @version      2.0.3
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -149,6 +149,7 @@ let trainingState = {
   selectedQuizToken: null,
   requireDoubleClick: false, // Require double-click for rating buttons (mouse only — hotkeys always fire on one press)
   confirmMissOverride: true, // After a miss, Lucky guess / Okay / Trivial ask for a second click
+  unratedSongAction: "skip", // Song ends without a rating: "skip" (progress unchanged) or "noIdea"
   isSubmittingRating: false, // Prevent double-click/multiple rapid clicks on rating buttons
   // N10: which playlist song the rating overlay is currently about. Must be
   // pinned from the answer-results event — live currentSongNumber / currentIndex
@@ -310,6 +311,9 @@ function loadTrainingSettings() {
       if (state.confirmMissOverride !== undefined) {
         trainingState.confirmMissOverride = state.confirmMissOverride;
       }
+      if (state.unratedSongAction === "noIdea" || state.unratedSongAction === "skip") {
+        trainingState.unratedSongAction = state.unratedSongAction;
+      }
       console.log("[AMQ+ Training] Loaded new song percentage:", trainingState.newSongPercentage, "%");
     }
 
@@ -346,7 +350,8 @@ function saveTrainingSettings() {
       selectedQuizId: trainingState.selectedQuizId,
       selectedQuizToken: trainingState.selectedQuizToken,
       requireDoubleClick: trainingState.requireDoubleClick,
-      confirmMissOverride: trainingState.confirmMissOverride
+      confirmMissOverride: trainingState.confirmMissOverride,
+      unratedSongAction: trainingState.unratedSongAction
     };
 
     if (trainingState.currentSession && trainingState.currentSession.sessionId) {
@@ -1419,29 +1424,37 @@ function createTrainingModalHTML() {
                   </small>
                 </div>
 
-                <!-- Double-Click Mode Toggle -->
-                <div class="form-group" style="margin-bottom: 20px;">
-                  <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="trainingDoubleClickToggle" aria-describedby="trainingDoubleClickDescription" style="visibility: visible; position: static; opacity: 1; width: 18px; height: 18px; margin: 0 10px 0 0; flex-shrink: 0; accent-color: #6ca6cb;">
-                    <span style="font-size: 14px;">Require Double-Click for Rating Buttons</span>
-                  </label>
-                  <small id="trainingDoubleClickDescription" class="form-text text-muted">
-                    Double-click to rate or skip.
-                  </small>
-                  <small class="form-text text-muted" style="display: block; margin-top: 6px;">
-                    While ratings are shown: <strong>1–4</strong> to rate, <strong>S</strong> to skip. Hotkeys need one press.
-                  </small>
-                </div>
-
-                <div class="form-group" style="margin-bottom: 20px;">
-                  <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="trainingMissConfirmToggle" aria-describedby="trainingMissConfirmDescription" style="visibility: visible; position: static; opacity: 1; width: 18px; height: 18px; margin: 0 10px 0 0; flex-shrink: 0; accent-color: #6ca6cb;">
-                    <span style="font-size: 14px;">Confirm a higher rating after a miss</span>
-                  </label>
-                  <small id="trainingMissConfirmDescription" class="form-text text-muted">
-                    After a wrong answer, Lucky guess, Okay, and Trivial ask you to click again. Turn this off to apply them immediately.
-                  </small>
-                </div>
+                <!-- Rating options: set once, so folded away under the main toggle -->
+                <details id="trainingRatingOptions" style="margin-bottom: 20px; padding: 10px 12px; background: rgba(255,255,255,0.03); border: 1px solid #2d3748; border-radius: 6px;">
+                  <summary style="cursor: pointer; font-size: 14px; font-weight: bold; color: #e2e8f0;">
+                    Rating options
+                    <span style="font-weight: normal; font-size: 12px; color: #a0aec0;">&middot; 1&ndash;4 to rate, S to skip</span>
+                  </summary>
+                  <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 12px;">
+                    <label style="display: flex; align-items: flex-start; gap: 10px; margin: 0; cursor: pointer; font-weight: normal;">
+                      <input type="checkbox" id="trainingDoubleClickToggle" aria-describedby="trainingDoubleClickDescription" style="visibility: visible; position: static; opacity: 1; width: 16px; height: 16px; margin: 2px 0 0 0; flex-shrink: 0; accent-color: #6ca6cb;">
+                      <span>
+                        <span style="display: block; font-size: 14px; color: #e2e8f0;">Require a double-click to rate</span>
+                        <small id="trainingDoubleClickDescription" style="display: block; font-size: 12px; color: #a0aec0;">Mouse only. Hotkeys always need one press.</small>
+                      </span>
+                    </label>
+                    <label style="display: flex; align-items: flex-start; gap: 10px; margin: 0; cursor: pointer; font-weight: normal;">
+                      <input type="checkbox" id="trainingMissConfirmToggle" aria-describedby="trainingMissConfirmDescription" style="visibility: visible; position: static; opacity: 1; width: 16px; height: 16px; margin: 2px 0 0 0; flex-shrink: 0; accent-color: #6ca6cb;">
+                      <span>
+                        <span style="display: block; font-size: 14px; color: #e2e8f0;">Confirm a higher rating after a miss</span>
+                        <small id="trainingMissConfirmDescription" style="display: block; font-size: 12px; color: #a0aec0;">After a wrong answer, Lucky guess, Okay and Trivial need a second click.</small>
+                      </span>
+                    </label>
+                    <div>
+                      <label for="trainingUnratedActionSelect" style="display: block; margin: 0; font-size: 14px; font-weight: normal; color: #e2e8f0;">If a song ends without a rating</label>
+                      <select id="trainingUnratedActionSelect" aria-describedby="trainingUnratedActionDescription" style="margin-top: 4px; padding: 3px 6px; background: #1a1a2e; color: #e2e8f0; border: 1px solid #2d3748; border-radius: 4px; font-size: 13px;">
+                        <option value="skip">Skip it</option>
+                        <option value="noIdea">Rate it No idea</option>
+                      </select>
+                      <small id="trainingUnratedActionDescription" style="display: block; font-size: 12px; color: #a0aec0;">Applies when the next song starts or the quiz ends. Skip leaves its progress unchanged.</small>
+                    </div>
+                  </div>
+                </details>
 
                 <h4 style="margin-bottom: 15px; font-weight: bold;">Select a Quiz to Practice</h4>
 
@@ -6595,8 +6608,8 @@ function setupListeners() {
     quizFetchedBeforeGameStart = false;
     console.log("[AMQ+] Quiz over, reset quiz fetched flag");
 
-    // Defensive cleanup for training overlay
-    hideTrainingRatingUI(false);
+    // The last song never gets a "play next song": settle it here, then clean up.
+    advanceTrainingRatingCard();
 
     // Reset duel UI when returning to lobby
     if (duelModeEnabled) {
@@ -8250,6 +8263,20 @@ let lastTrainingAutoDisableReason = null;
 
 function advanceTrainingRatingCard() {
   const pinnedId = trainingState.ratingAnnSongId;
+  // The song is moving on with no rating clicked: apply the player's choice.
+  // Both paths clear the pin, report or drop the song, and end the session
+  // after the last song.
+  if (pinnedId && trainingState.currentSession?.sessionId && !trainingState.isSubmittingRating) {
+    if (trainingState.unratedSongAction === "noIdea") {
+      sendSystemMessage("Not rated, so this song was rated No idea.");
+      submitTrainingRating(1, { advance: false });
+    } else {
+      sendSystemMessage("Not rated, so this song was skipped. Progress is unchanged.");
+      skipTrainingRating({ advance: false });
+    }
+    hideTrainingRatingUI(false);
+    return;
+  }
   if (pinnedId && trainingState.currentSession?.playlist) {
     const index = findTrainingPlaylistIndexByAnnSongId(pinnedId);
     if (index >= 0) trainingState.currentSession.currentIndex = index + 1;
@@ -8342,6 +8369,12 @@ function attachTrainingModalHandlers() {
     saveTrainingSettings();
   });
   $("#trainingMissConfirmToggle").prop("checked", trainingState.confirmMissOverride !== false);
+
+  $("#trainingUnratedActionSelect").off("change").on("change", function () {
+    trainingState.unratedSongAction = $(this).val() === "noIdea" ? "noIdea" : "skip";
+    saveTrainingSettings();
+  });
+  $("#trainingUnratedActionSelect").val(trainingState.unratedSongAction === "noIdea" ? "noIdea" : "skip");
 
   $("#trainingLinkBtn").off("click").on("click", () => {
     const token = $("#trainingTokenField").val().trim();
@@ -10065,7 +10098,12 @@ function reconcilePlaylistWithAmq(amqBlocks, serverPlaylist) {
   return { reconciledPlaylist, droppedSongs };
 }
 
-function submitTrainingRating(rating) {
+/**
+ * @param {number} rating
+ * @param {{ advance?: boolean }} [options] - advance: false lets AMQ finish the
+ *   answer reveal instead of skip-voting past it (automatic ratings).
+ */
+function submitTrainingRating(rating, { advance = true } = {}) {
   if (!trainingState.currentSession.sessionId) return;
 
   // Prevent double-clicking / multiple rapid clicks
@@ -10155,12 +10193,14 @@ function submitTrainingRating(rating) {
   $("#trainingRatingContainer").fadeOut(300);
 
   // Send skip vote to advance to next phase now that user has rated
-  socket.sendCommand({
-    type: "quiz",
-    command: "skip vote",
-    data: { skipVote: true }
-  });
-  console.log("[AMQ+ Training] Rating submitted, skip vote sent to advance");
+  if (advance) {
+    socket.sendCommand({
+      type: "quiz",
+      command: "skip vote",
+      data: { skipVote: true }
+    });
+    console.log("[AMQ+ Training] Rating submitted, skip vote sent to advance");
+  }
 
   // Reset the submission flag after a short delay to allow UI updates
   setTimeout(() => {
@@ -10176,23 +10216,9 @@ function submitTrainingRating(rating) {
 }
 
 /**
- * AMQ pose 6 means the guess timer ended with an empty box.
- * A typed answer stays pose 4 or 5 and still asks for a rating.
- * @param {string|null|undefined} userAnswer
- * @param {{ pose?: number, answer?: string }|null|undefined} playerResult
+ * @param {{ advance?: boolean }} [options] - same as submitTrainingRating.
  */
-function isUnansweredTrainingTimeout(userAnswer, playerResult) {
-  const pose = Number(playerResult?.pose);
-  if (pose === 6) return true;
-  if (pose === 4 || pose === 5) return false;
-
-  const fromResult = typeof playerResult?.answer === "string" ? playerResult.answer : null;
-  const text = fromResult != null ? fromResult : (typeof userAnswer === "string" ? userAnswer : null);
-  if (text == null) return false;
-  return text.trim().length === 0;
-}
-
-function skipTrainingRating() {
+function skipTrainingRating({ advance = true } = {}) {
   if (!trainingState.currentSession.sessionId) return;
 
   // Prevent double-clicking / multiple rapid clicks
@@ -10263,12 +10289,14 @@ function skipTrainingRating() {
   $("#trainingRatingContainer").fadeOut(300);
 
   // Send skip vote to advance to next phase now that user has skipped rating
-  socket.sendCommand({
-    type: "quiz",
-    command: "skip vote",
-    data: { skipVote: true }
-  });
-  console.log("[AMQ+ Training] Rating skipped, skip vote sent to advance");
+  if (advance) {
+    socket.sendCommand({
+      type: "quiz",
+      command: "skip vote",
+      data: { skipVote: true }
+    });
+    console.log("[AMQ+ Training] Rating skipped, skip vote sent to advance");
+  }
 
   // Reset the submission flag after a short delay to allow UI updates
   setTimeout(() => {
@@ -10347,7 +10375,6 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
 
   // Merge previously captured answer from "player answers" with result data
   // before showing ratings for the revealed song.
-  let unansweredTimeout = false;
   try {
     // Find self player
     const players = typeof quiz !== 'undefined' && quiz.players ? Object.values(quiz.players) : [];
@@ -10374,8 +10401,6 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
       }
     }
 
-    unansweredTimeout = isUnansweredTrainingTimeout(userAnswer, myPlayerResult);
-
     // 3. Get correct answer info
     if (result.songInfo) {
       correctAnswer = result.songInfo.animeNames ? (result.songInfo.animeNames.english || result.songInfo.animeNames.romaji) : null;
@@ -10393,15 +10418,6 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
   } catch (e) {
     console.warn("[AMQ+ Training] Error extracting answer details:", e);
     trainingState.lastAnswerDetails = {};
-  }
-
-  // A timeout with no answer is the same as Skip: progress stays unchanged.
-  // A typed answer, including a wrong one sent as the timer ends, still asks for a rating.
-  if (unansweredTimeout) {
-    console.log("[AMQ+ Training] No answer on timeout, skipping rating");
-    sendSystemMessage("No answer, so this song was skipped. Progress is unchanged.");
-    skipTrainingRating();
-    return;
   }
 
   // W10: the suspend control lives in AMQ's Song Info panel, which only carries
