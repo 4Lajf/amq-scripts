@@ -6551,6 +6551,10 @@ function setupListeners() {
       displayDuelFinalStandings();
     }
 
+    // Ranked, Jam and Themed are never AMQ+ quizzes; a stale currentQuizInfo
+    // from an earlier lobby must not record a play or mount the like button.
+    if (shouldDisableScript()) return;
+
     let quizInfoToUse = currentQuizInfo;
 
     if (!quizInfoToUse && selectedCustomQuizName && selectedCustomQuizName.startsWith("AMQ+")) {
@@ -6836,6 +6840,8 @@ function setupListeners() {
       processDuelAnswerResults(data);
     }
 
+    if (shouldDisableScript()) return;
+
     if (!amqPlusEnabled || !selectedCustomQuizName || !selectedCustomQuizName.startsWith("AMQ+")) {
       return;
     }
@@ -6921,6 +6927,7 @@ function setupListeners() {
   }).bindListener();
 
   new Listener("game chat update", (payload) => {
+    if (shouldDisableScript()) return;
     for (let message of payload.messages) {
       // Check for duel mode messages first (hidden from players)
       // Process even if duelModeEnabled is false to receive enable commands
@@ -6971,6 +6978,7 @@ function setupListeners() {
   }).bindListener();
 
   new Listener("Game Chat Message", (payload) => {
+    if (shouldDisableScript()) return;
     // Check for duel mode messages first (hidden from players)
     // Process even if duelModeEnabled is false to receive enable commands
     if (payload.message.startsWith('❦')) {
@@ -9762,6 +9770,9 @@ function restoreDifficultSongSuggestions() {
     const pending = JSON.parse(localStorage.getItem("amqPlusDifficultSongs") || "null");
     if (pending?.songs?.length && typeof lobby !== "undefined" && pending.roomId === lobby.gameId) {
       showDifficultSongSuggestions(pending);
+    } else {
+      // Kept in storage for that room; just not shown in this one.
+      $("#amqPlusDifficultSongs").remove();
     }
   } catch (error) { console.warn("[AMQ+ Training] Could not restore suggestions", error); }
 }
@@ -10305,15 +10316,8 @@ trainingPlayerAnswerListener.bindListener();
 let trainingAnswerListener = new Listener("answer results", (result) => {
   if (!trainingState.currentSession || !trainingState.currentSession.sessionId) {
     console.log("[AMQ+ Training] No active training session, skipping rating UI");
-    // Keep the song-list action available when a training quiz is selected.
-    if (
-      trainingState.authToken &&
-      (trainingState.selectedQuizId || trainingState.urlLoadedQuizId)
-    ) {
-      const rid = getAnswerResultAnnSongId(result);
-      trainingState.ratingAnnSongId = rid ? String(rid) : null;
-      mountSuspendButtonInSongInfo();
-    }
+    // Training controls exist only inside a training session: never in ranked,
+    // tour or ordinary lobbies, even with a training quiz selected.
     return;
   }
 
@@ -10426,27 +10430,31 @@ let trainingAnswerListener = new Listener("answer results", (result) => {
           How sure were you? <span id="trainingCardStateInGame" style="display: none; white-space: nowrap; color: rgba(255,255,255,0.85);"></span>
         </div>
         <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; align-items: stretch;">
-          <button class="trainingRatingBtn btn" data-rating="1" title="No idea (1)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #dc3545; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="1" title="No idea (1)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #dc3545; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-times" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             No idea
             <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">1</span>
+            <span class="trainingRatingInterval" data-rating="1" style="display: block; margin-top: 2px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.95;"></span>
           </button>
-          <button class="trainingRatingBtn btn" data-rating="2" title="Lucky guess (2)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #ffc107; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="2" title="Lucky guess (2)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #ffc107; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-exclamation-triangle" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Lucky guess
             <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">2</span>
+            <span class="trainingRatingInterval" data-rating="2" style="display: block; margin-top: 2px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.95;"></span>
           </button>
-          <button class="trainingRatingBtn btn" data-rating="3" title="Okay (3)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #10b981; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="3" title="Okay (3)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #10b981; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-check" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Okay
             <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">3</span>
+            <span class="trainingRatingInterval" data-rating="3" style="display: block; margin-top: 2px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.95;"></span>
           </button>
-          <button class="trainingRatingBtn btn" data-rating="4" title="Trivial (4)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6366f1; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingRatingBtn btn" data-rating="4" title="Trivial (4)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6366f1; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-star" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Trivial
             <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">4</span>
+            <span class="trainingRatingInterval" data-rating="4" style="display: block; margin-top: 2px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.95;"></span>
           </button>
-          <button class="trainingSkipBtn btn" data-skip="true" title="Skip (S)" style="width: 100%; min-width: 0; height: 64px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6c757d; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
+          <button class="trainingSkipBtn btn" data-skip="true" title="Skip (S)" style="width: 100%; min-width: 0; height: 76px; box-sizing: border-box; white-space: normal; overflow-wrap: normal; line-height: 1.15; padding: 4px 2px; background: #6c757d; color: white; border: none; font-size: 10px; font-weight: 500; border-radius: 4px; cursor: pointer; transition: opacity 0.2s;">
             <i class="fa fa-forward" style="font-size: 14px; display: block; margin-bottom: 2px;"></i>
             Skip
             <span style="display: block; margin-top: 1px; font-size: 9px; line-height: 1; font-weight: 700; opacity: 0.8;">S</span>
@@ -10819,7 +10827,8 @@ function removeSuspendButtonFromSongInfo() {
 /**
  * Schedule the revealed song for the next session of the selected training quiz.
  * Moves the due date only. Stability and difficulty stay as they are.
- * Works mid-session and in ranked or tour, as long as a quiz is selected.
+ * Training sessions only. It also skips the pending rating: a rating
+ * reschedules the song and would overwrite the mark.
  */
 function markCurrentSongDue(annSongId, quizId) {
   const button = $(`#${MARK_DUE_BTN_ID}`);
@@ -10853,6 +10862,15 @@ function markCurrentSongDue(annSongId, quizId) {
     .css({ opacity: "0.6", "pointer-events": "none", color: "#d4d4d4" })
     .html('<i class="fa fa-repeat" aria-hidden="true" style="font-size: 12px;"></i> Saving');
 
+  // Skip before the request goes out, so a rating clicked while it is in flight
+  // cannot land after the mark.
+  const skipsRating = Boolean(
+    trainingState.currentSession?.sessionId &&
+    trainingState.ratingAnnSongId &&
+    String(trainingState.ratingAnnSongId) === String(annSongId)
+  );
+  if (skipsRating) skipTrainingRating();
+
   makeApiRequest({
     url: `${API_BASE_URL}/api/training/${quizId}/again`,
     method: "POST",
@@ -10867,9 +10885,10 @@ function markCurrentSongDue(annSongId, quizId) {
         sendSystemMessage("That song is not in this quiz yet. It will come up as a new song once the pool includes it.");
         return;
       }
-      sendSystemMessage(data.wasSuspended
+      const skippedNote = skipsRating ? " Rating skipped so the mark stays." : "";
+      sendSystemMessage((data.wasSuspended
         ? "Marked due, and resumed it. It will come up in your next training session."
-        : "Marked due. It will come up in your next training session.");
+        : "Marked due. It will come up in your next training session.") + skippedNote);
       button
         .attr("title", "Marked due for the next training session.")
         .css({ color: "#86efac", opacity: "1" })
@@ -10877,7 +10896,9 @@ function markCurrentSongDue(annSongId, quizId) {
     },
     onError: (msg) => {
       restoreDueButton();
-      sendSystemMessage(`⚠️ Could not mark the song due: ${msg}`);
+      sendSystemMessage(skipsRating
+        ? `⚠️ Could not mark the song due: ${msg}. The rating was skipped, so its progress is unchanged.`
+        : `⚠️ Could not mark the song due: ${msg}`);
     }
   });
 }
@@ -11013,19 +11034,27 @@ function handleMissOverrideClick(rating) {
 }
 
 /**
- * Show a plain learning-stage label above the rating buttons.
+ * Show the learning stage above the rating buttons, and the scheduled interval
+ * under each one.
  *
- * This used to also print a projected interval under each button (R13). Those
- * were removed on 4Lajf's call - four day-counts on top of the video during the
- * answer reveal is noise at the exact moment the player is reading the answer.
- * The server still sends `fsrsPreview` with every playlist entry, so restoring
- * them is display-only work if that is ever wanted.
+ * @returns {JQuery|undefined}
  */
 function updateTrainingRatingPreview() {
   const stateLines = $("#trainingCardStateInGame, #trainingCardStateModal");
 
+  const paintIntervals = (preview) => {
+    $(".trainingRatingInterval").each(function () {
+      const rating = Number($(this).attr("data-rating"));
+      const interval = preview?.intervals?.[rating];
+      $(this).text(interval?.days == null ? "" : formatTrainingInterval(interval.days, interval.due));
+    });
+  };
+
   const session = trainingState.currentSession;
-  if (!session || !Array.isArray(session.playlist)) return stateLines.hide().text("");
+  if (!session || !Array.isArray(session.playlist)) {
+    paintIntervals(null);
+    return stateLines.hide().text("");
+  }
 
   // Prefer the song pinned by the answer-results event. Falling back to the
   // live AMQ cursor / currentIndex is what painted the next song's numbers onto
@@ -11037,6 +11066,7 @@ function updateTrainingRatingPreview() {
   const song = index >= 0 ? session.playlist[index] : null;
 
   const preview = song && song.fsrsPreview;
+  paintIntervals(preview);
   if (!preview) return stateLines.hide().text("");
 
   const labels = { New: "New song", Learning: "Learning", Relearning: "Practicing again", Review: "Review" };
@@ -11048,12 +11078,20 @@ function updateTrainingRatingPreview() {
 
 /**
  * Days as something you can read at a glance mid-quiz.
+ * The server floors `days` at 1 for labels, so a step that returns later today
+ * (No idea, early Lucky guess) is recognised from its due timestamp instead.
  * @param {number} days
+ * @param {string} [due] - ISO due time of that rating
  * @returns {string}
  */
-function formatTrainingInterval(days) {
+function formatTrainingInterval(days, due) {
   const d = Number(days);
   if (!Number.isFinite(d) || d <= 0) return "";
+  const dueAt = due ? new Date(due) : null;
+  if (dueAt && !Number.isNaN(dueAt.getTime()) &&
+      dueAt.toISOString().slice(0, 10) <= new Date().toISOString().slice(0, 10)) {
+    return "<1d";
+  }
   if (d < 1) return "<1d";
   if (d === 1) return "1d";
   if (d < 30) return `${Math.round(d)}d`;
