@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AMQ Plus Connector
 // @namespace    http://tampermonkey.net/
-// @version      2.0.6
+// @version      2.0.7
 // @description  Connect AMQ to AMQ+ quiz configurations for seamless quiz playing
 // @author       AMQ+
 // @match        https://animemusicquiz.com/*
@@ -9823,7 +9823,9 @@ function endTrainingSession() {
           totalRated: 0
         };
 
-        localStorage.removeItem("amqPlusTrainingState");
+        // Re-save rather than remove: the same key holds the rating options and
+        // quiz selection, and removing it reset them to defaults on next load.
+        saveTrainingSettings();
 
         // Reset UI
         $("#trainingSessionTab").hide();
